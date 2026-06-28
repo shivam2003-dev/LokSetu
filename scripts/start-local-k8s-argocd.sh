@@ -23,8 +23,8 @@ docker build -f apps/web/Dockerfile -t people-priority-web:local .
 kind load docker-image people-priority-api:local --name "$CLUSTER_NAME"
 kind load docker-image people-priority-web:local --name "$CLUSTER_NAME"
 
-kubectl get namespace argocd >/dev/null 2>&1 || kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl -n argocd rollout status deployment/argocd-server --timeout=180s
 
 kubectl apply -f argocd/application-local.yaml
