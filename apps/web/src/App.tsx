@@ -42,6 +42,7 @@ type Page =
   | "moderation"
   | "admin"
   | "integrations"
+  | "simulation"
   | "public";
 
 type Scope = "local" | "mp" | "global";
@@ -101,6 +102,47 @@ type IntegrationsResponse = { enabled: string[]; planned: string[]; local: Recor
 type AuditResponse = { events: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> };
 type Hotspot = DashboardResponse["hotspots"][number];
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
+type PublicProject = {
+  id: string;
+  title: string;
+  category: string;
+  state: string;
+  district: string;
+  ward: string;
+  mpName: string;
+  score: number;
+  confidence: number;
+  demandCount: number;
+  averageRating: number;
+  status: RankedProject["status"];
+  rationale: string;
+  sourceSnapshotIds: string[];
+  sourceFreshness: "fresh" | "stale" | "missing";
+  evidence: string[];
+  safeguards?: string[];
+  scoreBreakdown?: { demand: number; need: number; urgency: number; equity: number };
+  contributorsHidden: boolean;
+};
+type PublicProjectsResponse = {
+  generatedAt: string;
+  latestProcessedBatchAt?: string;
+  total: number;
+  limit: number;
+  offset: number;
+  items: PublicProject[];
+};
+type SimulationScenario = {
+  id: string;
+  title: string;
+  channel: "text" | "voice" | "photo" | "video" | "whatsapp";
+  state: string;
+  district: string;
+  ward: string;
+  language: string;
+  urgency: number;
+  rating: number;
+  text: string;
+};
 
 declare global {
   interface Window {
@@ -127,6 +169,7 @@ const navSections: Array<{ title: string; items: Array<{ page: Page; label: stri
       { page: "mp", label: "MP Center", icon: Building2 },
       { page: "projects", label: "Project Rooms", icon: FileText },
       { page: "analytics", label: "Analytics", icon: BarChart3 },
+      { page: "simulation", label: "Simulation", icon: DatabaseZap },
       { page: "public", label: "Public Board", icon: Megaphone }
     ]
   },
@@ -394,11 +437,12 @@ export default function App() {
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} /> : null}
+        {page === "simulation" ? <SimulationPage refreshAll={refreshAll} /> : null}
         {page === "ai" ? <AiPage aiOps={aiOps} /> : null}
         {page === "moderation" ? <ModerationPage moderation={moderation} audit={audit} /> : null}
         {page === "admin" ? <AdminPage regions={regions} /> : null}
         {page === "integrations" ? <IntegrationsPage integrations={integrations} /> : null}
-        {page === "public" ? <PublicPage dashboard={dashboard} /> : null}
+        {page === "public" ? <PublicPage filters={filters} /> : null}
       </section>
     </main>
   );
@@ -930,6 +974,136 @@ function AiPage({ aiOps }: { aiOps: AiOpsResponse | null }) {
   );
 }
 
+function SimulationPage({ refreshAll }: { refreshAll: () => Promise<void> }) {
+  const [scenarios, setScenarios] = useState<SimulationScenario[]>([]);
+  const [channel, setChannel] = useState<SimulationScenario["channel"]>("text");
+  const [stateName, setStateName] = useState("Delhi");
+  const [districtName, setDistrictName] = useState("Central Delhi");
+  const [wardName, setWardName] = useState("Kalindi Nagar");
+  const [language, setLanguage] = useState("Hindi");
+  const [urgency, setUrgency] = useState(5);
+  const [rating, setRating] = useState(5);
+  const [text, setText] = useState("School classrooms flood after rain and toilets are unusable for girls.");
+  const [media, setMedia] = useState("");
+  const [receipt, setReceipt] = useState<{ rawIntakeId: string; status: string; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getJson<{ scenarios: SimulationScenario[] }>("/api/simulation/scenarios", { scenarios: [] }).then((payload) => {
+      setScenarios(payload.scenarios);
+    });
+  }, []);
+
+  function applyScenario(scenario: SimulationScenario) {
+    setChannel(scenario.channel);
+    setStateName(scenario.state);
+    setDistrictName(scenario.district);
+    setWardName(scenario.ward);
+    setLanguage(scenario.language);
+    setUrgency(scenario.urgency);
+    setRating(scenario.rating);
+    setText(scenario.text);
+    setMedia(sampleMediaFor(scenario.channel));
+    setReceipt(null);
+  }
+
+  async function submitSimulation() {
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBase}/api/simulation/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel,
+          state: stateName,
+          district: districtName,
+          ward: wardName,
+          language,
+          urgency,
+          rating,
+          text,
+          media: media || undefined
+        })
+      });
+      if (!response.ok) throw new Error("Simulation submit failed");
+      setReceipt(await response.json());
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function readFile(file: File | undefined) {
+    if (!file) return;
+    const value = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    setMedia(value);
+  }
+
+  return (
+    <section className="two-grid wide-right">
+      <section className="panel">
+        <PanelTitle title="Simulation workbench" icon={DatabaseZap} detail="Generate realistic multimodal civic intake" />
+        <div className="scenario-grid">
+          {scenarios.map((scenario) => (
+            <button className="scenario-card" key={scenario.id} onClick={() => applyScenario(scenario)}>
+              <strong>{scenario.title}</strong>
+              <span>{scenario.channel} · {scenario.ward}</span>
+            </button>
+          ))}
+        </div>
+        <div className="form-grid">
+          <label>Channel
+            <select value={channel} onChange={(event) => { const next = event.target.value as SimulationScenario["channel"]; setChannel(next); setMedia(sampleMediaFor(next)); }}>
+              <option value="text">Text</option>
+              <option value="photo">Image/photo</option>
+              <option value="voice">Voice/audio</option>
+              <option value="video">Video</option>
+              <option value="whatsapp">WhatsApp</option>
+            </select>
+          </label>
+          <label>Language<input value={language} onChange={(event) => setLanguage(event.target.value)} /></label>
+          <label>State<input value={stateName} onChange={(event) => setStateName(event.target.value)} /></label>
+          <label>District<input value={districtName} onChange={(event) => setDistrictName(event.target.value)} /></label>
+          <label>Ward<input value={wardName} onChange={(event) => setWardName(event.target.value)} /></label>
+          <label>Urgency<input type="number" min="1" max="5" value={urgency} onChange={(event) => setUrgency(Number(event.target.value))} /></label>
+          <label>Rating<input type="number" min="1" max="5" value={rating} onChange={(event) => setRating(Number(event.target.value))} /></label>
+        </div>
+        <label>Problem text<textarea value={text} onChange={(event) => setText(event.target.value)} /></label>
+        <label>Upload simulated media<input type="file" accept="image/*,audio/*,video/*" onChange={(event) => readFile(event.target.files?.[0])} /></label>
+        <div className="simulator-actions">
+          <button className="primary" disabled={busy} onClick={submitSimulation}>{busy ? "Submitting..." : "Submit simulation"}</button>
+          <button onClick={() => setMedia(sampleMediaFor(channel))}>Use sample media</button>
+        </div>
+      </section>
+      <section className="panel">
+        <PanelTitle title="Simulation receipt" icon={Inbox} />
+        {receipt ? (
+          <div className="receipt small">
+            <strong>{receipt.status}</strong>
+            <span>{receipt.rawIntakeId}</span>
+            <p>{receipt.message}</p>
+          </div>
+        ) : (
+          <div className="empty-state">Choose a scenario or compose a problem, then submit it into the batch queue.</div>
+        )}
+        <Feature title="What this validates" icon={ShieldCheck} points={["Same intake path as citizen app", "Privacy mode defaults on", "Text, image, voice, and video payload support", "Batch queue receipt", "Dashboard refresh after submit"]} />
+      </section>
+    </section>
+  );
+}
+
+function sampleMediaFor(channel: SimulationScenario["channel"]) {
+  if (channel === "photo") return "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iI2ZmZjFlNiIvPjx0ZXh0IHg9IjIwIiB5PSI2MCIgZmlsbD0iI2M0NDEwYyI+Q2l2aWMgaXNzdWUgcGhvdG88L3RleHQ+PC9zdmc+";
+  if (channel === "voice") return "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+  if (channel === "video") return "data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aWRlbw==";
+  return "";
+}
+
 function ModerationPage({ moderation, audit }: { moderation: ModerationResponse | null; audit: AuditResponse | null }) {
   return (
     <section className="two-grid">
@@ -969,21 +1143,113 @@ function IntegrationsPage({ integrations }: { integrations: IntegrationsResponse
   );
 }
 
-function PublicPage({ dashboard }: { dashboard: DashboardResponse }) {
+function PublicPage({ filters }: { filters: { scope: Scope; state: string; district: string; ward: string; mpId: string; q: string } }) {
+  const [category, setCategory] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [data, setData] = useState<PublicProjectsResponse | null>(null);
+  const [selectedProject, setSelectedProject] = useState<PublicProject | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const limit = 8;
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({ scope: filters.scope, limit: String(limit), offset: String(offset) });
+    if (filters.scope === "local") {
+      params.set("state", filters.state);
+      params.set("district", filters.district);
+      params.set("ward", filters.ward);
+    }
+    if (filters.scope === "mp") params.set("mpId", filters.mpId);
+    if (filters.q.trim()) params.set("q", filters.q.trim());
+    if (category) params.set("category", category);
+
+    setLoading(true);
+    setError("");
+    fetch(`${apiBase}/api/public/projects?${params.toString()}`)
+      .then((response) => {
+        if (!response.ok) throw new Error("Public board API failed");
+        return response.json() as Promise<PublicProjectsResponse>;
+      })
+      .then((next) => {
+        if (cancelled) return;
+        setData(next);
+        setSelectedProject(next.items[0] ?? null);
+      })
+      .catch((apiError) => {
+        if (!cancelled) setError(apiError instanceof Error ? apiError.message : "Public board API failed");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filters, category, offset]);
+
+  const categories = ["", "Education", "Roads", "Health", "Water", "Sanitation", "Power", "Digital Access"];
+
   return (
     <section className="panel">
       <PanelTitle title="Public transparency board" icon={Megaphone} />
-      <div className="project-grid">
-        {dashboard.projects.map((project) => (
-          <article className="public-card" key={project.id}>
-            <span>{project.category}</span>
-            <h3>{project.title}</h3>
-            <p>{project.rationale}</p>
-            <small>{project.demandCount} reports · {project.averageRating}/5 rating · {project.status}</small>
-          </article>
-        ))}
+      <div className="public-controls">
+        <label>
+          Category
+          <select value={category} onChange={(event) => { setOffset(0); setCategory(event.target.value); }}>
+            {categories.map((item) => <option key={item || "all"} value={item}>{item || "All categories"}</option>)}
+          </select>
+        </label>
+        <div className="public-freshness">
+          <strong>{data?.total ?? 0}</strong>
+          <span>public-safe projects · latest batch {data?.latestProcessedBatchAt ? new Date(data.latestProcessedBatchAt).toLocaleString() : "pending"}</span>
+        </div>
       </div>
+      {loading ? <div className="empty-state">Loading public priorities...</div> : null}
+      {error ? <div className="error-state">{error}</div> : null}
+      {!loading && !error && data?.items.length === 0 ? <div className="empty-state">No public projects match the current filters.</div> : null}
+      {!loading && !error && data?.items.length ? (
+        <section className="two-grid wide-left">
+          <div>
+            <div className="project-grid">
+              {data.items.map((project) => (
+                <button className={`public-card ${selectedProject?.id === project.id ? "selected" : ""}`} key={project.id} onClick={() => setSelectedProject(project)}>
+                  <span>{project.category}</span>
+                  <h3>{project.title}</h3>
+                  <p>{project.rationale}</p>
+                  <small>{project.demandCount} reports · {project.averageRating}/5 rating · {project.status} · source {project.sourceFreshness}</small>
+                </button>
+              ))}
+            </div>
+            <div className="pagination-row">
+              <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
+              <span>{offset + 1}-{Math.min(offset + limit, data.total)} of {data.total}</span>
+              <button disabled={offset + limit >= data.total} onClick={() => setOffset(offset + limit)}>Next</button>
+            </div>
+          </div>
+          {selectedProject ? <PublicProjectDetail project={selectedProject} /> : null}
+        </section>
+      ) : null}
     </section>
+  );
+}
+
+function PublicProjectDetail({ project }: { project: PublicProject }) {
+  return (
+    <aside className="public-detail">
+      <PanelTitle title="Public project detail" icon={FileText} detail={`${project.score} score · ${Math.round(project.confidence * 100)}% confidence`} />
+      <h3>{project.title}</h3>
+      <p>{project.rationale}</p>
+      <div className="score-grid">
+        <ScoreBar label="Demand" value={project.scoreBreakdown?.demand ?? 0} max={40} />
+        <ScoreBar label="Need" value={project.scoreBreakdown?.need ?? 0} max={35} />
+        <ScoreBar label="Urgency" value={project.scoreBreakdown?.urgency ?? 0} max={15} />
+        <ScoreBar label="Equity" value={project.scoreBreakdown?.equity ?? 0} max={15} />
+      </div>
+      <Evidence title="Evidence" items={project.evidence} />
+      <Evidence title="Safeguards" items={project.safeguards ?? ["Public view hides private contributor identity"]} />
+      <Evidence title="Source snapshots" items={project.sourceSnapshotIds.length ? project.sourceSnapshotIds : ["Official source snapshot pending"]} />
+    </aside>
   );
 }
 
@@ -1062,9 +1328,9 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
+  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", simulation: "Simulation workbench", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
 }
 
 function pageTitle(page: Page): string {
-  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
+  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", simulation: "Generate realistic civic intake", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
 }

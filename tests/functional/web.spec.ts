@@ -17,8 +17,19 @@ test.describe("MP/admin web functional flow", () => {
 
     await expect(page.getByRole("link", { name: "Open Apni Awaaz" })).toHaveAttribute("href", "http://localhost:5174");
 
+    await page.getByRole("button", { name: "All India" }).click();
     await page.getByRole("button", { name: "Public" }).click();
     await expect(page.getByRole("heading", { name: "Public transparency board" })).toBeVisible();
     await expect(page.locator(".public-card").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Public project detail" })).toBeVisible();
+    await expect(page.getByText("Source snapshots")).toBeVisible();
+    await page.getByLabel("Category").selectOption("Sanitation");
+    await expect(page.locator(".public-card").first()).toContainText("Sanitation");
+
+    await page.getByRole("button", { name: "Simulation" }).click();
+    await expect(page.getByRole("heading", { name: "Simulation workbench" })).toBeVisible();
+    await page.getByRole("button", { name: /School flooding/ }).click();
+    await page.getByRole("button", { name: "Submit simulation" }).click();
+    await expect(page.getByText("pending_batch")).toBeVisible();
   });
 });

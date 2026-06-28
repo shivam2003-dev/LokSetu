@@ -1,0 +1,14 @@
+{
+  "source": "education",
+  "version": "fixture-bad-2026-06",
+  "capturedAt": "2026-06-22T00:00:00.000Z",
+  "rows": [
+    {
+      "state": "Delhi",
+      "district": "Central Delhi",
+      "metrics": {
+        "enrollment": 100
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
-export type Channel = "text" | "voice" | "photo" | "whatsapp";
+export type Channel = "text" | "voice" | "photo" | "video" | "whatsapp";
 export type ProjectStatus = "review" | "shortlist" | "approved";
-export type UserRole = "citizen" | "mp";
+export type UserRole = "citizen" | "mp" | "ward_staff" | "district_admin" | "state_admin";
 
 export type Location = {
   state: string;
@@ -17,6 +17,29 @@ export type UserProfile = {
   mpId?: string;
   location: Location;
   contributionScore: number;
+};
+
+export type AreaMapping = {
+  id: string;
+  state: string;
+  district: string;
+  ward: string;
+  mpId: string;
+  wardStaffUserIds: string[];
+  updatedAt: string;
+};
+
+export type SourceSnapshot = {
+  id: string;
+  source: "census" | "education" | "roads" | "water" | "health" | "sanitation" | "power" | "digital";
+  version: string;
+  state: string;
+  district: string;
+  ward: string;
+  capturedAt: string;
+  rowCount: number;
+  freshness: "fresh" | "stale" | "missing";
+  metrics: Record<string, number | string>;
 };
 
 export type Submission = {
@@ -40,7 +63,7 @@ export type Submission = {
   text: string;
   createdAt: string;
   // Multimodal + location enrichment
-  mediaType?: "image" | "audio" | "none";
+  mediaType?: "image" | "audio" | "video" | "none";
   lat?: number;
   lng?: number;
   locationLabel?: string;
@@ -128,6 +151,8 @@ export type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: ProjectStatus;
+  sourceSnapshotIds?: string[];
+  sourceFreshness?: "fresh" | "stale" | "missing";
 };
 
 export type DashboardFilters = {

@@ -1,4 +1,4 @@
-import { CivicDataset, Submission, UserProfile } from "./types.js";
+import { AreaMapping, CivicDataset, SourceSnapshot, Submission, UserProfile } from "./types.js";
 
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
@@ -97,8 +97,58 @@ export const seedUsers: UserProfile[] = [
     privacyMode: false,
     location: { state: "Tamil Nadu", district: "Chennai", ward: "Perambur School Zone" },
     contributionScore: 84
+  },
+  {
+    id: "mp-user-delhi-central",
+    role: "mp",
+    username: "mp.central.delhi",
+    displayName: "MP Central Delhi",
+    privacyMode: false,
+    mpId: "mp-delhi-central",
+    location: { state: "Delhi", district: "Central Delhi", ward: "Kalindi Nagar" },
+    contributionScore: 100
+  },
+  {
+    id: "ward-staff-kalindi",
+    role: "ward_staff",
+    username: "staff.kalindi",
+    displayName: "Ward Staff Kalindi",
+    privacyMode: false,
+    mpId: "mp-delhi-central",
+    location: { state: "Delhi", district: "Central Delhi", ward: "Kalindi Nagar" },
+    contributionScore: 92
+  },
+  {
+    id: "district-admin-delhi",
+    role: "district_admin",
+    username: "admin.central.delhi",
+    displayName: "District Admin Central Delhi",
+    privacyMode: false,
+    location: { state: "Delhi", district: "Central Delhi", ward: "Kalindi Nagar" },
+    contributionScore: 100
+  },
+  {
+    id: "state-admin-india",
+    role: "state_admin",
+    username: "admin.india",
+    displayName: "State Admin",
+    privacyMode: false,
+    location: { state: "Delhi", district: "Central Delhi", ward: "Kalindi Nagar" },
+    contributionScore: 100
   }
 ];
+
+export const areaMappings: AreaMapping[] = mpProfiles.flatMap((mp) =>
+  mp.wards.map((ward) => ({
+    id: `${mp.id}-${ward.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    state: mp.state,
+    district: mp.district,
+    ward,
+    mpId: mp.id,
+    wardStaffUserIds: ward === "Kalindi Nagar" ? ["ward-staff-kalindi"] : [],
+    updatedAt: hoursAgo(2)
+  }))
+);
 
 export const civicDatasets: CivicDataset[] = [
   {
@@ -258,6 +308,36 @@ export const civicDatasets: CivicDataset[] = [
     indicators: ["Pipeline pressure loss", "High industrial-area complaints", "Low morning supply reliability"]
   }
 ];
+
+export const sourceSnapshots: SourceSnapshot[] = civicDatasets.map((dataset, index) => ({
+  id: `src-${dataset.state.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${dataset.ward.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${dataset.category.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+  source:
+    dataset.category === "Education"
+      ? "education"
+      : dataset.category === "Roads"
+        ? "roads"
+        : dataset.category === "Health"
+          ? "health"
+          : dataset.category === "Water"
+            ? "water"
+            : dataset.category === "Power"
+              ? "power"
+              : dataset.category === "Digital Access"
+                ? "digital"
+                : "sanitation",
+  version: `fixture-2026-06-${String(10 + index).padStart(2, "0")}`,
+  state: dataset.state,
+  district: dataset.district,
+  ward: dataset.ward,
+  capturedAt: hoursAgo(72 - index),
+  rowCount: 1,
+  freshness: index < 10 ? "fresh" : "stale",
+  metrics: {
+    gapScore: dataset.gapScore,
+    equityScore: dataset.equityScore,
+    indicatorCount: dataset.indicators.length
+  }
+}));
 
 export const seedSubmissions: Submission[] = [
   {

@@ -12,7 +12,7 @@ import {
 
 export const intakeSchema = z
   .object({
-    channel: z.enum(["text", "voice", "photo", "whatsapp"]),
+    channel: z.enum(["text", "voice", "photo", "video", "whatsapp"]),
     language: z.string().min(2).max(64).optional(),
     userId: z.string().min(2).max(96).default("guest"),
     username: z.string().min(1).max(64).default("citizen"),
@@ -77,6 +77,11 @@ export async function processIntake(
     mediaType = "audio";
     transcript = result.mediaSummary;
     isCivicIssue = result.isCivicIssue;
+  } else if (media?.kind === "video") {
+    analysis = await analyzeWithVertexAi(input.text || "Citizen uploaded a video showing a local civic development issue.", input.language);
+    mediaType = "video";
+    imageSummary = "Citizen uploaded video evidence for this civic issue.";
+    isCivicIssue = true;
   } else {
     analysis = await analyzeWithVertexAi(input.text ?? "", input.language);
   }
@@ -153,10 +158,10 @@ export function extractWhatsAppMessages(body: unknown): RawIntakePayload[] {
   return intakes;
 }
 
-function parseDataUrl(media: string): { mimeType: string; base64: string; kind: "image" | "audio" | "other" } | null {
+function parseDataUrl(media: string): { mimeType: string; base64: string; kind: "image" | "audio" | "video" | "other" } | null {
   const match = /^data:([^;]+);base64,(.+)$/s.exec(media.trim());
   if (!match) return null;
   const mimeType = match[1];
-  const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : "other";
+  const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : mimeType.startsWith("video/") ? "video" : "other";
   return { mimeType, base64: match[2], kind };
 }

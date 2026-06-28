@@ -1,0 +1,27 @@
+{
+  "source": "roads",
+  "version": "fixture-roads-2026-06",
+  "capturedAt": "2026-06-21T00:00:00.000Z",
+  "rows": [
+    {
+      "state": "Delhi",
+      "district": "Central Delhi",
+      "ward": "River Market",
+      "metrics": {
+        "damagedKm": 2.8,
+        "ambulanceRoute": "yes",
+        "monsoonComplaints": 37
+      }
+    },
+    {
+      "state": "Uttar Pradesh",
+      "district": "Lucknow",
+      "ward": "Gomti Nagar Extension",
+      "metrics": {
+        "damagedKm": 2.1,
+        "schoolBusRoute": "yes",
+        "monsoonComplaints": 24
+      }
+    }
+  ]
+}

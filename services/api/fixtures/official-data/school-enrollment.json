@@ -1,0 +1,27 @@
+{
+  "source": "education",
+  "version": "fixture-school-2026-06",
+  "capturedAt": "2026-06-20T00:00:00.000Z",
+  "rows": [
+    {
+      "state": "Delhi",
+      "district": "Central Delhi",
+      "ward": "Kalindi Nagar",
+      "metrics": {
+        "enrollment": 1840,
+        "classrooms": 21,
+        "toiletCoverage": 0.42
+      }
+    },
+    {
+      "state": "Tamil Nadu",
+      "district": "Chennai",
+      "ward": "Perambur School Zone",
+      "metrics": {
+        "enrollment": 2210,
+        "classrooms": 24,
+        "toiletCoverage": 0.57
+      }
+    }
+  ]
+}

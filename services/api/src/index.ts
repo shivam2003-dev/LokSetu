@@ -3,11 +3,13 @@ import express from "express";
 import helmet from "helmet";
 import pino from "pino";
 import { z } from "zod";
-import { mpProfiles, seedSubmissions, seedUsers } from "./data.js";
+import { areaMappings, mpProfiles, seedSubmissions, seedUsers, sourceSnapshots } from "./data.js";
 import { countRawIntakesByStatus, initDatabase, insertRawIntake, isDatabaseEnabled, listRecentBatchRuns, listSubmissions } from "./db.js";
 import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
+import { RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
+import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -15,6 +17,8 @@ const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
 let memorySubmissions = [...seedSubmissions];
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
+const memoryAreaMappings = [...areaMappings];
+const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
 
 const dashboardQuerySchema = z.object({
   scope: z.enum(["local", "global", "mp"]).optional(),
@@ -24,6 +28,75 @@ const dashboardQuerySchema = z.object({
   ward: z.string().optional(),
   q: z.string().optional()
 });
+
+const publicProjectsQuerySchema = dashboardQuerySchema.extend({
+  category: z.string().optional(),
+  limit: z.coerce.number().min(1).max(50).default(20),
+  offset: z.coerce.number().min(0).default(0)
+});
+
+const actorQuerySchema = z.object({
+  actorId: z.string(),
+  mpId: z.string().optional()
+});
+
+const mappingUpdateSchema = z.object({
+  actorId: z.string(),
+  ward: z.string(),
+  mpId: z.string(),
+  wardStaffUserIds: z.array(z.string()).default([])
+});
+
+const simulationScenarios = [
+  {
+    id: "school-flooding",
+    title: "School flooding and toilet repair",
+    channel: "text",
+    state: "Delhi",
+    district: "Central Delhi",
+    ward: "Kalindi Nagar",
+    language: "Hindi",
+    urgency: 5,
+    rating: 5,
+    text: "School classrooms flood after rain and toilets are unusable for girls."
+  },
+  {
+    id: "drain-video",
+    title: "Drain overflow video evidence",
+    channel: "video",
+    state: "Uttar Pradesh",
+    district: "Lucknow",
+    ward: "Aminabad Basti",
+    language: "Hindi",
+    urgency: 5,
+    rating: 4,
+    text: "Video shows drain water entering homes and garbage blocking the lane."
+  },
+  {
+    id: "streetlight-voice",
+    title: "Streetlight safety voice note",
+    channel: "voice",
+    state: "West Bengal",
+    district: "Kolkata",
+    ward: "Howrah Riverside",
+    language: "Bangla",
+    urgency: 5,
+    rating: 5,
+    text: "Streetlights fail near the riverside road and women feel unsafe after sunset."
+  },
+  {
+    id: "water-photo",
+    title: "Water pipeline photo",
+    channel: "photo",
+    state: "Gujarat",
+    district: "Ahmedabad",
+    ward: "Odhav Water Line",
+    language: "Gujarati",
+    urgency: 4,
+    rating: 4,
+    text: "Photo shows leaking water pipeline and low morning pressure near industrial lane."
+  }
+];
 
 app.use(helmet());
 app.use(cors());
@@ -45,6 +118,28 @@ app.get("/api/context", (_request, response) => {
     states: [...new Set(mpProfiles.map((mp) => mp.state))],
     districts: [...new Set(mpProfiles.map((mp) => mp.district))],
     wards: [...new Set(mpProfiles.flatMap((mp) => mp.wards))]
+  });
+});
+
+app.get("/api/users", (_request, response) => {
+  response.json({
+    users: seedUsers.map(publicUser),
+    roles: ["citizen", "mp", "ward_staff", "district_admin", "state_admin"],
+    areaMappings: memoryAreaMappings
+  });
+});
+
+app.get("/api/session", (request, response) => {
+  const user = getActor(String(request.query.userId ?? "u-kalindi-01"));
+  if (!user) {
+    response.status(404).json({ error: "Unknown user" });
+    return;
+  }
+  response.json({
+    user: publicUser(user),
+    defaultScope: user.role === "mp" ? "mp" : user.role === "state_admin" ? "global" : "local",
+    allowedScopes: user.role === "citizen" ? ["local", "global"] : ["local", "mp", "global"],
+    area: user.location
   });
 });
 
@@ -109,6 +204,133 @@ app.get("/api/ai-ops", (_request, response) => {
   });
 });
 
+app.get("/api/data-sources", (_request, response) => {
+  const freshness = sourceSnapshots.reduce<Record<string, number>>((acc, source) => {
+    acc[source.freshness] = (acc[source.freshness] ?? 0) + 1;
+    return acc;
+  }, {});
+  response.json({
+    snapshots: sourceSnapshots,
+    freshness,
+    servingTables: ["submissions", "raw_intake", "batch_runs", "source_snapshots"],
+    bigQueryTables: ["loksetu.analytics.project_scores", "loksetu.raw.official_source_snapshots"],
+    missingWarnings: sourceSnapshots.filter((source) => source.freshness !== "fresh").map((source) => `${source.source}:${source.ward}`)
+  });
+});
+
+app.get("/api/external-signals", async (request, response) => {
+  const query = String(request.query.q ?? "school OR road OR water OR clinic India civic issue");
+  const provider = String(request.query.provider ?? "all");
+  const runs = [];
+  try {
+    if (provider === "all" || provider === "x") runs.push(await fetchXSignals(query));
+  } catch {
+    runs.push(fallbackRun("x", query));
+  }
+  try {
+    if (provider === "all" || provider === "gdelt") runs.push(await fetchGdeltSignals(query));
+  } catch {
+    runs.push(fallbackRun("gdelt", query));
+  }
+  response.json({
+    query,
+    runs,
+    totalAccepted: runs.reduce((sum, run) => sum + run.accepted, 0),
+    note: "External signals enrich demand discovery and do not replace citizen submissions or official data."
+  });
+});
+
+app.get("/api/public/projects", async (request, response) => {
+  const parsed = publicProjectsQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid public project query", details: parsed.error.flatten() });
+    return;
+  }
+  const { limit, offset, category, ...filters } = parsed.data;
+  const dashboard = buildDashboard(await getSubmissions(), filters);
+  const sorted = dashboard.projects
+    .filter((project) => !category || project.category.toLowerCase() === category.toLowerCase())
+    .sort((a, b) => b.score - a.score || b.demandCount - a.demandCount || a.title.localeCompare(b.title));
+  response.json({
+    generatedAt: dashboard.generatedAt,
+    latestProcessedBatchAt: latestProcessedAt(await getSubmissions()),
+    total: sorted.length,
+    limit,
+    offset,
+    items: sorted.slice(offset, offset + limit).map((project) => publicProjectDto(project))
+  });
+});
+
+app.get("/api/public/projects/:projectId", async (request, response) => {
+  const dashboard = buildDashboard(await getSubmissions(), { scope: "global" });
+  const project = dashboard.projects.find((item) => item.id === request.params.projectId);
+  if (!project) {
+    response.status(404).json({ error: "Project not found" });
+    return;
+  }
+  response.json({
+    generatedAt: dashboard.generatedAt,
+    latestProcessedBatchAt: latestProcessedAt(await getSubmissions()),
+    project: publicProjectDto(project, true)
+  });
+});
+
+app.get("/api/mp/queue", async (request, response) => {
+  const parsed = actorQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid MP queue query", details: parsed.error.flatten() });
+    return;
+  }
+  const actor = getActor(parsed.data.actorId);
+  if (!actor) {
+    response.status(404).json({ error: "Unknown actor" });
+    return;
+  }
+  const targetMpId = parsed.data.mpId ?? actor.mpId;
+  if (!targetMpId || !canAccessMp(actor, targetMpId)) {
+    response.status(403).json({ error: "Role is not allowed to access this MP queue" });
+    return;
+  }
+  const dashboard = buildDashboard(await getSubmissions(), { scope: "mp", mpId: targetMpId });
+  response.json({
+    actor: publicUser(actor),
+    mpId: targetMpId,
+    projects: dashboard.projects.map((project) => ({
+      ...project,
+      recentCitizenAliases: project.recentCitizenAliases
+    }))
+  });
+});
+
+app.post("/api/admin/area-mappings", (request, response) => {
+  const parsed = mappingUpdateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid area mapping update", details: parsed.error.flatten() });
+    return;
+  }
+  const actor = getActor(parsed.data.actorId);
+  if (!actor || !["district_admin", "state_admin"].includes(actor.role)) {
+    response.status(403).json({ error: "Only district/state admins can update area mappings" });
+    return;
+  }
+  const mapping = memoryAreaMappings.find((item) => item.ward === parsed.data.ward);
+  if (!mapping) {
+    response.status(404).json({ error: "Unknown ward mapping" });
+    return;
+  }
+  mapping.mpId = parsed.data.mpId;
+  mapping.wardStaffUserIds = parsed.data.wardStaffUserIds;
+  mapping.updatedAt = new Date().toISOString();
+  memoryAuditEvents.unshift({
+    at: mapping.updatedAt,
+    actor: actor.displayName,
+    action: "updated_area_mapping",
+    object: `${mapping.ward} -> ${mapping.mpId}`,
+    privacyMode: false
+  });
+  response.json({ mapping });
+});
+
 app.get("/api/moderation", async (_request, response) => {
   const submissions = await getSubmissions();
   response.json({
@@ -150,13 +372,16 @@ app.get("/api/batch/status", async (_request, response) => {
 app.get("/api/audit", async (_request, response) => {
   const submissions = await getSubmissions();
   response.json({
-    events: submissions.slice(-10).reverse().map((submission) => ({
-      at: submission.createdAt,
-      actor: submission.displayName,
-      action: "submitted_problem",
-      object: `${submission.category} / ${submission.ward}`,
-      privacyMode: submission.privacyMode
-    }))
+    events: [
+      ...memoryAuditEvents,
+      ...submissions.slice(-10).reverse().map((submission) => ({
+        at: submission.createdAt,
+        actor: submission.displayName,
+        action: "submitted_problem",
+        object: `${submission.category} / ${submission.ward}`,
+        privacyMode: submission.privacyMode
+      }))
+    ].slice(0, 20)
   });
 });
 
@@ -174,6 +399,23 @@ app.post("/api/submissions", async (request, response) => {
 // Simple citizen app submission. Same engine, friendlier receipt.
 app.post("/api/citizen/submit", async (request, response) => {
   await handleIntake(request.body, response, { friendly: true });
+});
+
+app.get("/api/simulation/scenarios", (_request, response) => {
+  response.json({ scenarios: simulationScenarios });
+});
+
+app.post("/api/simulation/submit", async (request, response) => {
+  await handleIntake(
+    {
+      userId: "simulator-user",
+      username: "loksetu-simulator",
+      privacyMode: true,
+      ...request.body
+    },
+    response,
+    { friendly: true }
+  );
 });
 
 app.post("/api/projects/:projectId/ratings", async (request, response) => {
@@ -295,4 +537,68 @@ async function enqueueRaw(payload: ReturnType<typeof toRawIntakePayload>) {
   };
   memoryRawQueue.push(raw);
   return raw;
+}
+
+function getActor(userId: string): UserProfile | undefined {
+  return seedUsers.find((user) => user.id === userId);
+}
+
+function publicUser(user: UserProfile) {
+  return {
+    id: user.id,
+    role: user.role,
+    displayName: user.displayName,
+    privacyMode: user.privacyMode,
+    mpId: user.mpId,
+    location: user.location,
+    contributionScore: user.contributionScore
+  };
+}
+
+function canAccessMp(actor: UserProfile, targetMpId: string): boolean {
+  if (actor.role === "state_admin" || actor.role === "district_admin") return true;
+  if (actor.role === "mp") return actor.mpId === targetMpId;
+  if (actor.role === "ward_staff") {
+    return memoryAreaMappings.some((mapping) => mapping.mpId === targetMpId && mapping.wardStaffUserIds.includes(actor.id));
+  }
+  return false;
+}
+
+function publicProjectDto(project: RankedProject, includeDetail = false) {
+  const sourceIds = project.sourceSnapshotIds ?? [];
+  return {
+    id: project.id,
+    title: project.title,
+    category: project.category,
+    state: project.state,
+    district: project.district,
+    ward: project.ward,
+    mpName: project.mpName,
+    score: project.score,
+    confidence: project.confidence,
+    demandCount: project.demandCount,
+    averageRating: project.averageRating,
+    status: project.status,
+    rationale: project.rationale,
+    sourceSnapshotIds: sourceIds,
+    sourceFreshness: project.sourceFreshness ?? "missing",
+    evidence: includeDetail ? project.evidence : project.evidence.slice(0, 3),
+    safeguards: includeDetail ? project.safeguards : undefined,
+    scoreBreakdown: includeDetail
+      ? {
+          demand: project.demandScore,
+          need: project.needScore,
+          urgency: project.urgencyScore,
+          equity: project.equityScore
+        }
+      : undefined,
+    contributorsHidden: true
+  };
+}
+
+function latestProcessedAt(submissions: Awaited<ReturnType<typeof getSubmissions>>) {
+  return submissions
+    .map((submission) => submission.processedAt ?? submission.createdAt)
+    .sort()
+    .at(-1);
 }

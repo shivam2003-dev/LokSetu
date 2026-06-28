@@ -47,6 +47,54 @@ test.describe("API functional flow", () => {
       mode: "fallback"
     });
 
+    const publicProjects = await api.get("/api/public/projects?scope=global&limit=5");
+    await expect(publicProjects).toBeOK();
+    const publicPayload = await publicProjects.json();
+    expect(publicPayload.items.length).toBe(5);
+    expect(publicPayload.items[0].contributorsHidden).toBe(true);
+    expect(JSON.stringify(publicPayload)).not.toContain("username");
+
+    const detail = await api.get(`/api/public/projects/${publicPayload.items[0].id}`);
+    await expect(detail).toBeOK();
+    const detailPayload = await detail.json();
+    expect(detailPayload.project.scoreBreakdown).toBeTruthy();
+    expect(detailPayload.project.safeguards.length).toBeGreaterThan(0);
+    expect(detailPayload.project.sourceSnapshotIds.length).toBeGreaterThan(0);
+
+    const deniedQueue = await api.get("/api/mp/queue?actorId=mp-user-delhi-central&mpId=mp-up-lucknow");
+    expect(deniedQueue.status()).toBe(403);
+    const allowedQueue = await api.get("/api/mp/queue?actorId=mp-user-delhi-central&mpId=mp-delhi-central");
+    await expect(allowedQueue).toBeOK();
+    expect((await allowedQueue.json()).projects.length).toBeGreaterThan(0);
+
+    const dataSources = await api.get("/api/data-sources");
+    await expect(dataSources).toBeOK();
+    expect((await dataSources.json()).snapshots.length).toBeGreaterThan(0);
+
+    const externalSignals = await api.get("/api/external-signals?provider=x&q=school%20road%20India");
+    await expect(externalSignals).toBeOK();
+    expect((await externalSignals.json()).totalAccepted).toBeGreaterThan(0);
+
+    const scenarios = await api.get("/api/simulation/scenarios");
+    await expect(scenarios).toBeOK();
+    expect((await scenarios.json()).scenarios.length).toBeGreaterThanOrEqual(4);
+
+    const simulation = await api.post("/api/simulation/submit", {
+      data: {
+        channel: "video",
+        state: "Uttar Pradesh",
+        district: "Lucknow",
+        ward: "Aminabad Basti",
+        language: "Hindi",
+        urgency: 5,
+        rating: 4,
+        text: "Video simulation shows drain overflow entering homes.",
+        media: "data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aWRlbw=="
+      }
+    });
+    expect(simulation.status()).toBe(202);
+    expect((await simulation.json()).status).toBe("pending_batch");
+
     await api.dispose();
   });
 

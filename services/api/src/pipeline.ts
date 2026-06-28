@@ -1,4 +1,4 @@
-import { civicDatasets } from "./data.js";
+import { civicDatasets, sourceSnapshots } from "./data.js";
 import { DashboardFilters, RankedProject, Submission } from "./types.js";
 import { VertexTextAnalysis } from "./vertexAi.js";
 
@@ -122,6 +122,9 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
   const civic = civicDatasets.find(
     (dataset) => dataset.state === state && dataset.district === district && dataset.ward === ward && dataset.category === category
   );
+  const sources = sourceSnapshots.filter(
+    (source) => source.state === state && source.district === district && source.ward === ward
+  );
   const demandScore = Math.min(40, Math.round((items.length / Math.max(1, totalSubmissions)) * 130));
   const needScore = Math.round((civic?.gapScore ?? 0.45) * 35);
   const urgencyScore = Math.round((average(items.map((item) => item.urgency)) / 5) * 15);
@@ -159,7 +162,9 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
       "Vertex AI output stored with normalized text and detected language",
       "Human approval required before allocation"
     ],
-    status: score >= 85 ? "shortlist" : "review"
+    status: score >= 85 ? "shortlist" : "review",
+    sourceSnapshotIds: sources.map((source) => source.id),
+    sourceFreshness: sources.some((source) => source.freshness === "fresh") ? "fresh" : sources.length ? "stale" : "missing"
   };
 }
 
