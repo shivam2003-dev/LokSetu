@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 CLUSTER_NAME="${CLUSTER_NAME:-loksetu}"
 NAMESPACE="${NAMESPACE:-people-priority}"
+LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260628}"
 
 for bin in docker kind kubectl helm; do
   if ! command -v "$bin" >/dev/null 2>&1; then
@@ -19,12 +20,12 @@ if ! kind get clusters | grep -qx "$CLUSTER_NAME"; then
 fi
 kubectl config use-context "kind-${CLUSTER_NAME}"
 
-docker build -f services/api/Dockerfile -t people-priority-api:local .
-docker build -f apps/web/Dockerfile -t people-priority-web:local .
-docker build -f apps/citizen/Dockerfile -t people-priority-citizen:local .
-kind load docker-image people-priority-api:local --name "$CLUSTER_NAME"
-kind load docker-image people-priority-web:local --name "$CLUSTER_NAME"
-kind load docker-image people-priority-citizen:local --name "$CLUSTER_NAME"
+docker build -f services/api/Dockerfile -t "people-priority-api:${LOCAL_IMAGE_TAG}" .
+docker build -f apps/web/Dockerfile -t "people-priority-web:${LOCAL_IMAGE_TAG}" .
+docker build -f apps/citizen/Dockerfile -t "people-priority-citizen:${LOCAL_IMAGE_TAG}" .
+kind load docker-image "people-priority-api:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
+kind load docker-image "people-priority-web:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
+kind load docker-image "people-priority-citizen:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
 
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml

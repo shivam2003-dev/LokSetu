@@ -4,7 +4,7 @@ global:
 api:
   image:
     repository: people-priority-api
-    tag: local
+    tag: local-20260628
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -20,12 +20,12 @@ batch:
 web:
   image:
     repository: people-priority-web
-    tag: local
+    tag: local-20260628
 
 citizen:
   image:
     repository: people-priority-citizen
-    tag: local
+    tag: local-20260628
 
 postgres:
   enabled: true
