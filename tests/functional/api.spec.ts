@@ -116,6 +116,22 @@ test.describe("API functional flow", () => {
     await expect(dataSources).toBeOK();
     expect((await dataSources.json()).snapshots.length).toBeGreaterThan(0);
 
+    const intelligenceSources = await api.get("/api/intelligence/sources");
+    await expect(intelligenceSources).toBeOK();
+    const sourcePayload = await intelligenceSources.json();
+    expect(sourcePayload.coverage.totalSources).toBeGreaterThanOrEqual(20);
+    expect(sourcePayload.groups.map((group: { category: string }) => group.category)).toContain("Citizen Sources");
+    expect(sourcePayload.groups.map((group: { category: string }) => group.category)).toContain("Government Data");
+    expect(sourcePayload.groups.map((group: { category: string }) => group.category)).toContain("Maps and Geospatial");
+
+    const dailyIntelligence = await api.get("/api/intelligence/daily");
+    await expect(dailyIntelligence).toBeOK();
+    const dailyPayload = await dailyIntelligence.json();
+    expect(dailyPayload.digest.length).toBeGreaterThan(0);
+    expect(dailyPayload.topEmergingIssues.length).toBeGreaterThan(0);
+    expect(dailyPayload.indices).toHaveProperty("developmentOpportunityIndex");
+    expect(dailyPayload.recommendations.length).toBeGreaterThan(0);
+
     const externalSignals = await api.get("/api/external-signals?provider=x&q=school%20road%20India");
     await expect(externalSignals).toBeOK();
     expect((await externalSignals.json()).totalAccepted).toBeGreaterThan(0);

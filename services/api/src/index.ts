@@ -10,6 +10,7 @@ import { buildDashboard } from "./pipeline.js";
 import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
 import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
+import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -267,6 +268,26 @@ app.get("/api/data-sources", (_request, response) => {
     bigQueryTables: ["loksetu.analytics.project_scores", "loksetu.raw.official_source_snapshots"],
     missingWarnings: sourceSnapshots.filter((source) => source.freshness !== "fresh").map((source) => `${source.source}:${source.ward}`)
   });
+});
+
+app.get("/api/intelligence/sources", (_request, response) => {
+  response.json({
+    generatedAt: new Date().toISOString(),
+    groups: intelligenceSourceGroups,
+    coverage: sourceCoverage(),
+    governance: [
+      "Use official APIs, partner APIs, public datasets, or authorized uploads only.",
+      "Social and trend sources are weak signals and must be cross-checked before ranking impact.",
+      "Personal identifiers are removed before analytics, public display, or MP summaries.",
+      "Every recommendation must expose source category, freshness, and supporting evidence."
+    ]
+  });
+});
+
+app.get("/api/intelligence/daily", async (_request, response) => {
+  const submissions = await getSubmissions();
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  response.json(buildDailyIntelligence(dashboard.projects, submissions));
 });
 
 app.get("/api/external-signals", async (request, response) => {

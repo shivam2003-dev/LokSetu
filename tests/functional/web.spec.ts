@@ -60,6 +60,13 @@ test.describe("MP/admin web functional flow", () => {
       await expect(page.getByText("Status updated to shortlist.")).toBeVisible();
     }
 
+    await page.getByRole("button", { name: "Analytics" }).click();
+    await expect(page.getByRole("heading", { name: "Constituency intelligence layer" })).toBeVisible();
+    await expect(page.getByText("Daily constituency digest")).toBeVisible();
+    await expect(page.getByText("Source coverage registry")).toBeVisible();
+    await expect(page.getByText("Citizen Sources")).toBeVisible();
+    await expect(page.getByText("Top emerging issues")).toBeVisible();
+
     await page.getByRole("button", { name: "Simulation" }).click();
     await expect(page.getByRole("heading", { name: "Simulation workbench" })).toBeVisible();
     await page.getByRole("button", { name: /School flooding/ }).click();

@@ -2460,6 +2460,128 @@ meter::-moz-meter-bar {
 }
 
 /* ---------------------------------------------------------
+   Constituency intelligence
+   --------------------------------------------------------- */
+
+.intelligence-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.intelligence-hero p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+
+.intelligence-kpis,
+.index-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.index-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.digest-list {
+  display: grid;
+  gap: 9px;
+}
+
+.digest-list p {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--base);
+  padding: 11px 12px;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.issue-intel-list,
+.source-registry,
+.alert-list,
+.recommendation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.issue-intel-list article,
+.source-registry article,
+.alert-card,
+.recommendation-list article {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+  padding: 12px;
+}
+
+.issue-intel-list span,
+.source-registry span,
+.alert-card span,
+.recommendation-list small {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.issue-intel-list strong,
+.source-registry strong,
+.alert-card strong,
+.recommendation-list strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.issue-intel-list small,
+.source-registry small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.source-registry article div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.source-registry article p,
+.alert-card p,
+.recommendation-list p {
+  margin: 6px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.alert-card {
+  border-left: 4px solid var(--india-green);
+}
+
+.alert-card.medium {
+  border-left-color: var(--saffron);
+}
+
+.alert-card.high {
+  border-left-color: #dc2626;
+}
+
+/* ---------------------------------------------------------
    Responsive — citizens use phones daily
    --------------------------------------------------------- */
 
@@ -2534,6 +2656,7 @@ meter::-moz-meter-bar {
   }
   .control-strip,
   .hero-band,
+  .intelligence-hero,
   .metrics,
   .three-grid,
   .project-grid,
@@ -2586,6 +2709,8 @@ meter::-moz-meter-bar {
   .project-grid,
   .admin-stat-grid,
   .drilldown-metrics,
+  .intelligence-kpis,
+  .index-grid,
   .area-drilldown,
   .form-grid.two {
     grid-template-columns: 1fr 1fr;

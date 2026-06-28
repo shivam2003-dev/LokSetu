@@ -117,6 +117,33 @@ type AnalyticsResponse = {
   categoryMix: Array<{ category: string; score: number; demand: number; rating: number }>;
 };
 
+type IntelligenceSourcesResponse = {
+  groups: Array<{
+    category: string;
+    purpose: string;
+    sources: Array<{ name: string; examples: string[]; connectorMode: string; cadence: string; readiness: string; governance: string }>;
+  }>;
+  coverage: {
+    totalSources: number;
+    liveOrReady: number;
+    restricted: number;
+    byReadiness: Record<string, number>;
+    byConnectorMode: Record<string, number>;
+  };
+  governance: string[];
+};
+
+type DailyIntelligenceResponse = {
+  digest: string[];
+  topEmergingIssues: Array<{ rank: number; title: string; category: string; area: string; score: number; demand: number; confidence: number; evidence: string[] }>;
+  viralLocalTopics: Array<{ topic: string; mentions: number; trend: string }>;
+  alerts: Array<{ name: string; severity: "low" | "medium" | "high"; detail: string }>;
+  indices: Record<string, number>;
+  recommendations: Array<{ owner: string; action: string; reason: string; nextStep: string }>;
+  forecast: Array<{ category: string; area: string; risk: string; driver: string }>;
+  sourceCoverage: IntelligenceSourcesResponse["coverage"];
+};
+
 type AiOpsResponse = { provider: string; mode: string; tasks: string[]; guardrails: string[] };
 type ModerationResponse = { queue: Array<{ id: string; alias: string; ward: string; category: string; language: string; risk: string; status: string }>; policies: string[] };
 type IntegrationsResponse = { enabled: string[]; planned: string[]; local: Record<string, string> };
@@ -365,6 +392,8 @@ export default function App() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [regions, setRegions] = useState<RegionResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [intelligenceSources, setIntelligenceSources] = useState<IntelligenceSourcesResponse | null>(null);
+  const [dailyIntelligence, setDailyIntelligence] = useState<DailyIntelligenceResponse | null>(null);
   const [aiOps, setAiOps] = useState<AiOpsResponse | null>(null);
   const [moderation, setModeration] = useState<ModerationResponse | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
@@ -401,7 +430,7 @@ export default function App() {
 
   async function refreshAll() {
     try {
-      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
+      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
       requestJson<ClientConfig>("/api/client-config"),
       requestJson<ContextResponse>("/api/context"),
       fetchDashboard(filters),
@@ -410,6 +439,8 @@ export default function App() {
         onboardingStates: []
       }),
       getJson<AnalyticsResponse>("/api/analytics", { signals: [], categoryMix: [] }),
+      getJson<IntelligenceSourcesResponse>("/api/intelligence/sources", { groups: [], coverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} }, governance: [] }),
+      getJson<DailyIntelligenceResponse>("/api/intelligence/daily", { digest: [], topEmergingIssues: [], viralLocalTopics: [], alerts: [], indices: {}, recommendations: [], forecast: [], sourceCoverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} } }),
       getJson<AiOpsResponse>("/api/ai-ops", { provider: "Vertex AI", mode: "fallback", tasks: [], guardrails: [] }),
       getJson<ModerationResponse>("/api/moderation", { queue: [], policies: [] }),
       getJson<IntegrationsResponse>("/api/integrations", { enabled: [], planned: [], local: {} }),
@@ -420,6 +451,8 @@ export default function App() {
     setDashboard(nextDashboard);
     setRegions(nextRegions);
     setAnalytics(nextAnalytics);
+    setIntelligenceSources(nextSources);
+    setDailyIntelligence(nextDaily);
     setAiOps(nextAiOps);
     setModeration(nextModeration);
     setIntegrations(nextIntegrations);
@@ -560,7 +593,7 @@ export default function App() {
         {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
-        {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} /> : null}
+        {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} sources={intelligenceSources} daily={dailyIntelligence} /> : null}
         {page === "simulation" ? <SimulationPage refreshAll={refreshAll} /> : null}
         {page === "ai" ? <AiPage aiOps={aiOps} /> : null}
         {page === "moderation" ? <ModerationPage moderation={moderation} audit={audit} /> : null}
@@ -924,6 +957,14 @@ function IssueMap({
 
     let cancelled = false;
     let mapErrorTimer = 0;
+    const originalConsoleError = window.console.error;
+    window.console.error = (...args: unknown[]) => {
+      const message = args.map(String).join(" ");
+      if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError/.test(message)) {
+        setMapState("fallback");
+      }
+      originalConsoleError.apply(window.console, args);
+    };
     setMapState("loading");
 
     loadGoogleMaps(maps.apiKey, maps.mapId)
@@ -965,6 +1006,7 @@ function IssueMap({
     return () => {
       cancelled = true;
       if (mapErrorTimer) window.clearTimeout(mapErrorTimer);
+      window.console.error = originalConsoleError;
     };
   }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
 
@@ -1294,10 +1336,35 @@ function ProjectPage({
   );
 }
 
-function AnalyticsPage({ dashboard, analytics }: { dashboard: DashboardResponse; analytics: AnalyticsResponse | null }) {
+function AnalyticsPage({
+  dashboard,
+  analytics,
+  sources,
+  daily
+}: {
+  dashboard: DashboardResponse;
+  analytics: AnalyticsResponse | null;
+  sources: IntelligenceSourcesResponse | null;
+  daily: DailyIntelligenceResponse | null;
+}) {
+  const coverage = sources?.coverage ?? daily?.sourceCoverage;
+  const indices = Object.entries(daily?.indices ?? {}).slice(0, 7);
   return (
     <>
       <MetricGrid dashboard={dashboard} />
+      <section className="intelligence-hero panel">
+        <div>
+          <PanelTitle title="Constituency intelligence layer" icon={DatabaseZap} detail="continuous source registry and daily AI brief" />
+          <p>
+            LokSetu tracks direct citizen input, official datasets, maps, social/news/trend signals, complaints, IoT, sector data, documents, and AI-enriched indicators as one evidence graph.
+          </p>
+        </div>
+        <div className="intelligence-kpis">
+          <Metric label="Sources tracked" value={String(coverage?.totalSources ?? 0)} detail="catalogued connectors" />
+          <Metric label="Live or ready" value={String(coverage?.liveOrReady ?? 0)} detail="usable source paths" />
+          <Metric label="Priority score" value={String(daily?.indices.priorityScore ?? 0)} detail="today's ranked need" />
+        </div>
+      </section>
       <section className="two-grid">
         <section className="panel">
           <PanelTitle title="Signal board" icon={Activity} />
@@ -1308,6 +1375,67 @@ function AnalyticsPage({ dashboard, analytics }: { dashboard: DashboardResponse;
         <section className="panel">
           <PanelTitle title="Category mix" icon={BarChart3} />
           {(analytics?.categoryMix ?? []).map((item) => <ScoreBar key={`${item.category}-${item.score}`} label={`${item.category} · demand ${item.demand}`} value={item.score} max={100} />)}
+        </section>
+      </section>
+      <section className="two-grid wide-right">
+        <section className="panel">
+          <PanelTitle title="Daily constituency digest" icon={FileText} detail="AI-enriched signals" />
+          <div className="digest-list">
+            {(daily?.digest ?? []).map((item) => <p key={item}>{item}</p>)}
+          </div>
+          <div className="index-grid">
+            {indices.map(([key, value]) => <Metric key={key} label={key.replace(/[A-Z]/g, " $&")} value={String(value)} detail="0-100 normalized index" />)}
+          </div>
+        </section>
+        <section className="panel">
+          <PanelTitle title="Top emerging issues" icon={MapPinned} detail="ranked from fused evidence" />
+          <div className="issue-intel-list">
+            {(daily?.topEmergingIssues ?? []).map((issue) => (
+              <article key={issue.rank}>
+                <span>#{issue.rank} · {issue.category}</span>
+                <strong>{issue.title}</strong>
+                <small>{issue.area} · score {issue.score} · {issue.demand} signals · {issue.confidence}% confidence</small>
+              </article>
+            ))}
+          </div>
+        </section>
+      </section>
+      <section className="two-grid">
+        <section className="panel">
+          <PanelTitle title="Source coverage registry" icon={Network} detail={`${sources?.groups.length ?? 0} source families`} />
+          <div className="source-registry">
+            {(sources?.groups ?? []).map((group) => (
+              <article key={group.category}>
+                <div>
+                  <strong>{group.category}</strong>
+                  <span>{group.sources.length} connectors</span>
+                </div>
+                <p>{group.purpose}</p>
+                <small>{group.sources.slice(0, 3).map((source) => `${source.name}: ${source.readiness}`).join(" · ")}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="panel">
+          <PanelTitle title="Alerts and action recommendations" icon={ShieldCheck} detail="evidence before action" />
+          <div className="alert-list">
+            {(daily?.alerts ?? []).map((alert) => (
+              <article className={`alert-card ${alert.severity}`} key={alert.name}>
+                <strong>{alert.name}</strong>
+                <span>{alert.severity}</span>
+                <p>{alert.detail}</p>
+              </article>
+            ))}
+          </div>
+          <div className="recommendation-list">
+            {(daily?.recommendations ?? []).slice(0, 4).map((item) => (
+              <article key={`${item.owner}-${item.action}`}>
+                <strong>{item.action}</strong>
+                <p>{item.reason}</p>
+                <small>{item.owner} · {item.nextStep}</small>
+              </article>
+            ))}
+          </div>
         </section>
       </section>
     </>
