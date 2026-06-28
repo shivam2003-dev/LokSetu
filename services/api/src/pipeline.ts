@@ -28,6 +28,14 @@ type SubmissionInput = {
   urgency: number;
   rating: number;
   text: string;
+  // Multimodal + location enrichment (optional)
+  mediaType?: Submission["mediaType"];
+  lat?: number;
+  lng?: number;
+  locationLabel?: string;
+  transcript?: string;
+  imageSummary?: string;
+  isCivicIssue?: boolean;
 };
 
 export function normalizeSubmission(input: SubmissionInput, analysis: VertexTextAnalysis): Submission {
@@ -35,6 +43,7 @@ export function normalizeSubmission(input: SubmissionInput, analysis: VertexText
   const displayName = input.privacyMode ? randomAlias(input.userId) : input.username;
   const rating = Math.max(1, Math.min(5, input.rating));
   const urgency = Math.max(1, Math.min(5, input.urgency));
+  const text = (input.text || analysis.normalizedText).trim();
 
   return {
     ...input,
@@ -45,10 +54,11 @@ export function normalizeSubmission(input: SubmissionInput, analysis: VertexText
     detectedLanguage: analysis.detectedLanguage,
     normalizedText: analysis.normalizedText,
     category: analysis.category,
-    text: input.text.trim(),
+    text,
     rating,
     urgency,
-    citizenScore: calculateCitizenScore(input.text, urgency, rating, analysis.confidence),
+    mediaType: input.mediaType ?? "none",
+    citizenScore: calculateCitizenScore(text, urgency, rating, analysis.confidence),
     createdAt: new Date().toISOString()
   };
 }

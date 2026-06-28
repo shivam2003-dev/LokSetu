@@ -5,15 +5,16 @@
   "description": "AI-assisted constituency development priority platform",
   "workspaces": [
     "apps/web",
+    "apps/citizen",
     "services/api"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w services/api\" \"npm run dev -w apps/web\"",
+    "dev": "concurrently \"npm run dev -w services/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/citizen\"",
     "local": "bash scripts/start-local.sh",
     "local:k8s": "bash scripts/start-local-k8s-argocd.sh",
-    "build": "npm run build -w services/api && npm run build -w apps/web",
-    "lint": "npm run lint -w services/api && npm run lint -w apps/web",
-    "typecheck": "npm run typecheck -w services/api && npm run typecheck -w apps/web"
+    "build": "npm run build -w services/api && npm run build -w apps/web && npm run build -w apps/citizen",
+    "lint": "npm run lint -w services/api && npm run lint -w apps/web && npm run lint -w apps/citizen",
+    "typecheck": "npm run typecheck -w services/api && npm run typecheck -w apps/web && npm run typecheck -w apps/citizen"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

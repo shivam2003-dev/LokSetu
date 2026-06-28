@@ -1,5 +1,7 @@
 # Technical Architecture
 
+See [diagrams.md](./diagrams.md) for system, AI pipeline, GitOps, data, and security diagrams. See [gcp-cloud-architecture.md](./gcp-cloud-architecture.md) for the Google Cloud production architecture.
+
 ## System Flow
 
 ```text

@@ -39,6 +39,14 @@ export type Submission = {
   citizenScore: number;
   text: string;
   createdAt: string;
+  // Multimodal + location enrichment
+  mediaType?: "image" | "audio" | "none";
+  lat?: number;
+  lng?: number;
+  locationLabel?: string;
+  transcript?: string;
+  imageSummary?: string;
+  isCivicIssue?: boolean;
 };
 
 export type CivicDataset = {

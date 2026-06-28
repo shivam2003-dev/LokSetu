@@ -1,3 +1,19 @@
+/**
+ * Vertex AI (Gemini) intelligence layer.
+ *
+ * One model family — Gemini 2.x on Vertex AI — handles every modality:
+ *   - text   : language detect + translate-to-English + civic category
+ *   - image  : civic-issue validation + caption + category (vision)
+ *   - audio  : speech transcription + language + category (multimodal)
+ *
+ * Production upgrade path (documented in docs/ai-pipeline.md):
+ *   - voice  -> Vertex AI Speech-to-Text "Chirp 2" for long/streamed audio
+ *   - image  -> Cloud Vision API (OCR / SafeSearch / label detection)
+ *
+ * Every call degrades gracefully to a deterministic offline fallback so the
+ * platform stays demoable without cloud credentials.
+ */
+
 export type VertexTextAnalysis = {
   detectedLanguage: string;
   normalizedText: string;
@@ -5,31 +21,45 @@ export type VertexTextAnalysis = {
   confidence: number;
 };
 
-const categories = ["Education", "Roads", "Health", "Water", "Civic Services"] as const;
+export type VertexMediaAnalysis = VertexTextAnalysis & {
+  /** false => not a genuine civic/development issue (spam, selfie, blurry). */
+  isCivicIssue: boolean;
+  /** Human-readable one-line description of what the AI saw or heard. */
+  mediaSummary: string;
+};
 
-export async function analyzeWithVertexAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
+const categories = ["Education", "Roads", "Health", "Water", "Civic Services"] as const;
+type Category = (typeof categories)[number];
+
+function vertexConfig() {
   const project = process.env.VERTEX_AI_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT;
   const location = process.env.VERTEX_AI_LOCATION ?? "us-central1";
-  const model = process.env.VERTEX_AI_MODEL ?? "gemini-1.5-flash";
+  const model = process.env.VERTEX_AI_MODEL ?? "gemini-2.0-flash";
+  const enabled = Boolean(project) && process.env.VERTEX_AI_DISABLED !== "true";
+  return { project, location, model, enabled };
+}
 
-  if (!project || process.env.VERTEX_AI_DISABLED === "true") {
-    return fallbackAnalysis(text, declaredLanguage);
-  }
+async function geminiClient() {
+  const { project, location } = vertexConfig();
+  const { GoogleGenAI } = await import("@google/genai");
+  return new GoogleGenAI({ vertexai: true, project, location, apiVersion: "v1" });
+}
+
+// ---------------------------------------------------------------------------
+// Text
+// ---------------------------------------------------------------------------
+
+export async function analyzeWithVertexAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
+  const { model, enabled } = vertexConfig();
+  if (!enabled) return fallbackAnalysis(text, declaredLanguage);
 
   try {
-    const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({
-      enterprise: true,
-      project,
-      location,
-      apiVersion: "v1"
-    });
-
+    const ai = await geminiClient();
     const prompt = [
-      "Analyze a citizen civic-development submission for an Indian constituency platform.",
-      "Return only JSON with detectedLanguage, normalizedText, category, confidence.",
+      "You analyze a citizen civic-development submission for an Indian constituency platform.",
+      "Return only JSON: { detectedLanguage, normalizedText, category, confidence }.",
       `Allowed category values: ${categories.join(", ")}.`,
-      "normalizedText must be concise English preserving the citizen problem.",
+      "normalizedText must be concise English that preserves the citizen's problem.",
       `Declared language: ${declaredLanguage ?? "unknown"}.`,
       `Submission: ${text}`
     ].join("\n");
@@ -37,25 +67,116 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
     const result = await ai.models.generateContent({
       model,
       contents: prompt,
-      config: {
-        temperature: 0.1,
-        maxOutputTokens: 512,
-        responseMimeType: "application/json"
-      }
+      config: { temperature: 0.1, maxOutputTokens: 512, responseMimeType: "application/json" }
     });
-    const raw = result.text ?? "{}";
-    const parsed = JSON.parse(raw) as Partial<VertexTextAnalysis>;
-
+    const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexTextAnalysis>;
     return {
       detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
       normalizedText: cleanText(parsed.normalizedText) || text.trim(),
-      category: categories.includes(parsed.category as (typeof categories)[number]) ? parsed.category! : fallbackCategory(text),
+      category: asCategory(parsed.category) ?? fallbackCategory(text),
       confidence: clampConfidence(parsed.confidence)
     };
   } catch {
     return fallbackAnalysis(text, declaredLanguage);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Image (Gemini vision) — validate + caption + categorize
+// ---------------------------------------------------------------------------
+
+export async function analyzeImageWithVertexAi(
+  base64: string,
+  mimeType: string,
+  declaredLanguage?: string
+): Promise<VertexMediaAnalysis> {
+  const { model, enabled } = vertexConfig();
+  if (!enabled) return fallbackImageAnalysis();
+
+  try {
+    const ai = await geminiClient();
+    const prompt = [
+      "You are a civic-issue validator for an Indian constituency platform.",
+      "Look at the photo a citizen uploaded about a local development problem.",
+      "Return only JSON: { isCivicIssue, category, normalizedText, mediaSummary, detectedLanguage, confidence }.",
+      "isCivicIssue = true only if the image shows a genuine public/development problem",
+      "(broken road, pothole, garbage, broken school/toilet, water leak, drainage, streetlight, etc).",
+      "isCivicIssue = false for selfies, memes, unrelated, or unreadable/blurry images.",
+      `category must be one of: ${categories.join(", ")}.`,
+      "normalizedText = concise English problem statement a citizen would write for this photo.",
+      "mediaSummary = short factual description of what is visible.",
+      `Citizen's declared language: ${declaredLanguage ?? "unknown"}.`
+    ].join("\n");
+
+    const result = await ai.models.generateContent({
+      model,
+      contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64 } }] }],
+      config: { temperature: 0.1, maxOutputTokens: 512, responseMimeType: "application/json" }
+    });
+    const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexMediaAnalysis>;
+    const normalized = cleanText(parsed.normalizedText) || "Citizen-reported civic issue from photo.";
+    return {
+      isCivicIssue: parsed.isCivicIssue !== false,
+      category: asCategory(parsed.category) ?? fallbackCategory(normalized),
+      normalizedText: normalized,
+      mediaSummary: cleanText(parsed.mediaSummary) || "Photo of a local civic issue.",
+      detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
+      confidence: clampConfidence(parsed.confidence)
+    };
+  } catch {
+    return fallbackImageAnalysis();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audio (Gemini multimodal) — transcribe + language + categorize
+// ---------------------------------------------------------------------------
+
+export async function transcribeWithVertexAi(
+  base64: string,
+  mimeType: string,
+  declaredLanguage?: string
+): Promise<VertexMediaAnalysis> {
+  const { model, enabled } = vertexConfig();
+  if (!enabled) return fallbackAudioAnalysis();
+
+  try {
+    const ai = await geminiClient();
+    const prompt = [
+      "You transcribe and analyze a voice note a citizen recorded about a local civic problem in India.",
+      "The audio may be in Hindi, Tamil, Bangla, Marathi, English or another Indian language.",
+      "Return only JSON: { transcript, normalizedText, category, mediaSummary, detectedLanguage, confidence }.",
+      "transcript = faithful transcription in the original language.",
+      "normalizedText = concise English version of the problem.",
+      `category must be one of: ${categories.join(", ")}.`,
+      "mediaSummary = one short English line summarizing the request.",
+      `Citizen's declared language: ${declaredLanguage ?? "unknown"}.`
+    ].join("\n");
+
+    const result = await ai.models.generateContent({
+      model,
+      contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64 } }] }],
+      config: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: "application/json" }
+    });
+    const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexMediaAnalysis> & { transcript?: string };
+    const transcript = cleanText(parsed.transcript);
+    const normalized = cleanText(parsed.normalizedText) || transcript || "Citizen voice report.";
+    return {
+      isCivicIssue: true,
+      category: asCategory(parsed.category) ?? fallbackCategory(normalized),
+      normalizedText: normalized,
+      mediaSummary: cleanText(parsed.mediaSummary) || transcript || "Voice note from a citizen.",
+      detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
+      confidence: clampConfidence(parsed.confidence)
+    };
+  } catch {
+    return fallbackAudioAnalysis();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fallbacks (offline / no-credentials mode)
+// ---------------------------------------------------------------------------
 
 export function fallbackAnalysis(text: string, declaredLanguage?: string): VertexTextAnalysis {
   return {
@@ -66,21 +187,46 @@ export function fallbackAnalysis(text: string, declaredLanguage?: string): Verte
   };
 }
 
+function fallbackImageAnalysis(): VertexMediaAnalysis {
+  return {
+    isCivicIssue: true,
+    category: "Civic Services",
+    normalizedText: "Citizen-reported civic issue from photo (offline analysis).",
+    mediaSummary: "Photo received. Enable Vertex AI for automatic validation.",
+    detectedLanguage: "English",
+    confidence: 0.5
+  };
+}
+
+function fallbackAudioAnalysis(): VertexMediaAnalysis {
+  return {
+    isCivicIssue: true,
+    category: "Civic Services",
+    normalizedText: "Citizen voice report (offline mode, transcription pending).",
+    mediaSummary: "Voice note received. Enable Vertex AI for automatic transcription.",
+    detectedLanguage: "English",
+    confidence: 0.5
+  };
+}
+
 function fallbackLanguage(text: string, declaredLanguage?: string): string {
-  if (/[\u0900-\u097F]/.test(text)) return "Hindi";
-  if (/[\u0980-\u09FF]/.test(text)) return "Bangla";
-  if (/[\u0B80-\u0BFF]/.test(text)) return "Tamil";
-  if (/[\u0900-\u097F]/.test(text) && declaredLanguage === "Marathi") return "Marathi";
+  if (/[஀-௿]/.test(text)) return "Tamil";
+  if (/[ঀ-৿]/.test(text)) return "Bangla";
+  if (/[ऀ-ॿ]/.test(text)) return declaredLanguage === "Marathi" ? "Marathi" : "Hindi";
   return declaredLanguage || "English";
 }
 
-function fallbackCategory(text: string): string {
+function fallbackCategory(text: string): Category {
   const normalized = text.toLowerCase();
   if (/(school|classroom|teacher|toilet|student|bench|enrollment|स्कूल|कक्षा|शौचालय|छात्र)/.test(normalized)) return "Education";
   if (/(road|pothole|street|bridge|traffic|ambulance|flood|सड़क|गड्ढ|पुल|ट्रैफिक|बारिश)/.test(normalized)) return "Roads";
   if (/(clinic|hospital|doctor|medicine|elderly|opd|health|क्लिनिक|अस्पताल|डॉक्टर|दवा|बुजुर्ग)/.test(normalized)) return "Health";
   if (/(water|tap|tanker|drinking|pipeline|supply|पानी|नल|टैंकर|पेयजल|पाइपलाइन)/.test(normalized)) return "Water";
   return "Civic Services";
+}
+
+function asCategory(value: unknown): Category | null {
+  return categories.includes(value as Category) ? (value as Category) : null;
 }
 
 function cleanText(value: unknown): string {
