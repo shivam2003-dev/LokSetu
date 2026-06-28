@@ -12,6 +12,7 @@ import { aiRuntimeMode } from "./vertexAi.js";
 import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, copilotKnowledgeSummary } from "./copilot.js";
+import { buildEnterpriseSituation } from "./enterprise.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -311,6 +312,12 @@ app.post("/api/copilot/query", async (request, response) => {
   const submissions = await getSubmissions();
   const dashboard = await buildDashboardWithOverrides({ scope: "global" });
   response.json(answerCopilot(parsed.data, dashboard.projects, submissions));
+});
+
+app.get("/api/enterprise/situation-room", async (_request, response) => {
+  const submissions = await getSubmissions();
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  response.json(buildEnterpriseSituation(dashboard.projects, submissions));
 });
 
 app.get("/api/external-signals", async (request, response) => {

@@ -67,6 +67,12 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Citizen Sources")).toBeVisible();
     await expect(page.getByText("Top emerging issues")).toBeVisible();
 
+    await page.getByRole("button", { name: "Situation Room" }).click();
+    await expect(page.getByRole("heading", { name: "AI Situation Room" })).toBeVisible();
+    await expect(page.getByText("AI incident management")).toBeVisible();
+    await expect(page.getByText("AI anomaly detection")).toBeVisible();
+    await expect(page.getByText("Enterprise observability")).toBeVisible();
+
     await page.getByRole("button", { name: "AI Copilot" }).click();
     await expect(page.getByRole("heading", { name: "LokSetu AI Copilot" })).toBeVisible();
     await page.getByRole("button", { name: "Ask Copilot" }).click();

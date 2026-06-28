@@ -152,6 +152,15 @@ test.describe("API functional flow", () => {
     expect(copilotPayload.citations.length).toBeGreaterThan(0);
     expect(copilotPayload.guardrails.length).toBeGreaterThan(0);
 
+    const enterprise = await api.get("/api/enterprise/situation-room");
+    await expect(enterprise).toBeOK();
+    const enterprisePayload = await enterprise.json();
+    expect(enterprisePayload.liveMonitoring.length).toBeGreaterThanOrEqual(8);
+    expect(enterprisePayload.incidents.length).toBeGreaterThan(0);
+    expect(enterprisePayload.anomalies.length).toBeGreaterThan(0);
+    expect(enterprisePayload.healthScore.score).toBeGreaterThan(0);
+    expect(enterprisePayload.observability.system.length).toBeGreaterThan(0);
+
     const externalSignals = await api.get("/api/external-signals?provider=x&q=school%20road%20India");
     await expect(externalSignals).toBeOK();
     expect((await externalSignals.json()).totalAccepted).toBeGreaterThan(0);

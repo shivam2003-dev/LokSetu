@@ -39,6 +39,7 @@ type Page =
   | "mp"
   | "projects"
   | "analytics"
+  | "enterprise"
   | "copilot"
   | "ai"
   | "moderation"
@@ -169,6 +170,21 @@ type CopilotAnswer = {
   guardrails: string[];
 };
 
+type EnterpriseSituationResponse = {
+  liveMonitoring: Array<{ name: string; value: number; detail: string }>;
+  incidents: Array<{ id: string; type: string; title: string; area: string; severity: string; status: string; assignee: string; demand: number; confidence: number; workflow: string[] }>;
+  anomalies: Array<{ name: string; severity: string; change: string; explanation: string }>;
+  healthScore: { score: number; drivers: Array<{ name: string; value: number }> };
+  rootCause: Array<{ step: string; detail: string }>;
+  eventTimeline: Array<{ at: string; event: string; detail: string }>;
+  correlations: Array<{ source: string; middle: string; target: string; strength: number }>;
+  digitalTwin: { populationModel: string; assets: Array<{ name: string; activeSignals: number; status: string }>; sourceCoverage: { totalSources: number; liveOrReady: number } };
+  gisIntelligence: Array<{ name: string; status: string; features: number }>;
+  smartAlerts: Array<{ name: string; severity: string; detail: string }>;
+  predictiveIntelligence: Array<{ name: string; probability: number; driver: string }>;
+  observability: Record<string, Array<{ name: string; value: number; detail: string }>>;
+};
+
 type AiOpsResponse = { provider: string; mode: string; tasks: string[]; guardrails: string[] };
 type ModerationResponse = { queue: Array<{ id: string; alias: string; ward: string; category: string; language: string; risk: string; status: string }>; policies: string[] };
 type IntegrationsResponse = { enabled: string[]; planned: string[]; local: Record<string, string> };
@@ -245,6 +261,7 @@ const navSections: Array<{ title: string; items: Array<{ page: Page; label: stri
       { page: "mp", label: "MP Center", icon: Building2 },
       { page: "projects", label: "Project Rooms", icon: FileText },
       { page: "analytics", label: "Analytics", icon: BarChart3 },
+      { page: "enterprise", label: "Situation Room", icon: Activity },
       { page: "copilot", label: "AI Copilot", icon: MessageSquareText },
       { page: "simulation", label: "Simulation", icon: DatabaseZap },
       { page: "public", label: "Public Board", icon: Megaphone }
@@ -421,6 +438,7 @@ export default function App() {
   const [intelligenceSources, setIntelligenceSources] = useState<IntelligenceSourcesResponse | null>(null);
   const [dailyIntelligence, setDailyIntelligence] = useState<DailyIntelligenceResponse | null>(null);
   const [copilotCapabilities, setCopilotCapabilities] = useState<CopilotCapabilitiesResponse | null>(null);
+  const [enterprise, setEnterprise] = useState<EnterpriseSituationResponse | null>(null);
   const [aiOps, setAiOps] = useState<AiOpsResponse | null>(null);
   const [moderation, setModeration] = useState<ModerationResponse | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
@@ -457,7 +475,7 @@ export default function App() {
 
   async function refreshAll() {
     try {
-      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
+      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextEnterprise, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
       requestJson<ClientConfig>("/api/client-config"),
       requestJson<ContextResponse>("/api/context"),
       fetchDashboard(filters),
@@ -469,6 +487,7 @@ export default function App() {
       getJson<IntelligenceSourcesResponse>("/api/intelligence/sources", { groups: [], coverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} }, governance: [] }),
       getJson<DailyIntelligenceResponse>("/api/intelligence/daily", { digest: [], topEmergingIssues: [], viralLocalTopics: [], alerts: [], indices: {}, recommendations: [], forecast: [], sourceCoverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} } }),
       getJson<CopilotCapabilitiesResponse>("/api/copilot/capabilities", { agents: [], sourceFamilies: [], supportedRoles: ["mp"], supportedInputs: [], currentLimitations: [] }),
+      getJson<EnterpriseSituationResponse>("/api/enterprise/situation-room", { liveMonitoring: [], incidents: [], anomalies: [], healthScore: { score: 0, drivers: [] }, rootCause: [], eventTimeline: [], correlations: [], digitalTwin: { populationModel: "", assets: [], sourceCoverage: { totalSources: 0, liveOrReady: 0 } }, gisIntelligence: [], smartAlerts: [], predictiveIntelligence: [], observability: {} }),
       getJson<AiOpsResponse>("/api/ai-ops", { provider: "Vertex AI", mode: "fallback", tasks: [], guardrails: [] }),
       getJson<ModerationResponse>("/api/moderation", { queue: [], policies: [] }),
       getJson<IntegrationsResponse>("/api/integrations", { enabled: [], planned: [], local: {} }),
@@ -482,6 +501,7 @@ export default function App() {
     setIntelligenceSources(nextSources);
     setDailyIntelligence(nextDaily);
     setCopilotCapabilities(nextCopilot);
+    setEnterprise(nextEnterprise);
     setAiOps(nextAiOps);
     setModeration(nextModeration);
     setIntegrations(nextIntegrations);
@@ -623,6 +643,7 @@ export default function App() {
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} sources={intelligenceSources} daily={dailyIntelligence} /> : null}
+        {page === "enterprise" ? <EnterprisePage situation={enterprise} /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} projects={dashboard.projects} /> : null}
         {page === "simulation" ? <SimulationPage refreshAll={refreshAll} /> : null}
         {page === "ai" ? <AiPage aiOps={aiOps} /> : null}
@@ -1607,6 +1628,123 @@ function CopilotPage({ capabilities, projects }: { capabilities: CopilotCapabili
   );
 }
 
+function EnterprisePage({ situation }: { situation: EnterpriseSituationResponse | null }) {
+  const monitoring = situation?.liveMonitoring ?? [];
+  const observabilityEntries = Object.entries(situation?.observability ?? {});
+
+  return (
+    <section className="enterprise-page">
+      <section className="panel enterprise-hero">
+        <div>
+          <PanelTitle title="AI Situation Room" icon={Activity} detail="enterprise governance observability" />
+          <p>Live command center for incidents, anomalies, root cause, digital twin state, predictive risk, GIS layers, and platform observability.</p>
+        </div>
+        <div className="health-ring">
+          <span>Health</span>
+          <strong>{situation?.healthScore.score ?? 0}</strong>
+          <small>constituency score</small>
+        </div>
+      </section>
+
+      <section className="metrics enterprise-metrics">
+        {monitoring.slice(0, 8).map((item) => <Metric key={item.name} label={item.name} value={String(item.value)} detail={item.detail} />)}
+      </section>
+
+      <section className="two-grid wide-left">
+        <section className="panel">
+          <PanelTitle title="AI incident management" icon={ShieldCheck} detail={`${situation?.incidents.length ?? 0} active incidents`} />
+          <div className="incident-list">
+            {(situation?.incidents ?? []).map((incident) => (
+              <article key={incident.id}>
+                <span className={`severity ${incident.severity}`}>{incident.severity}</span>
+                <strong>{incident.title}</strong>
+                <p>{incident.type} · {incident.area} · {incident.assignee}</p>
+                <small>{incident.status} · {incident.demand} signals · {incident.confidence}% confidence</small>
+                <div className="workflow-track">
+                  {incident.workflow.map((step) => <span className={step === incident.status ? "active" : ""} key={step}>{step}</span>)}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="panel">
+          <PanelTitle title="AI anomaly detection" icon={Bot} detail="baseline deltas" />
+          <div className="alert-list">
+            {(situation?.anomalies ?? []).map((item) => (
+              <article className={`alert-card ${item.severity}`} key={item.name}>
+                <strong>{item.name}</strong>
+                <span>{item.change}</span>
+                <p>{item.explanation}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      <section className="two-grid">
+        <section className="panel">
+          <PanelTitle title="Root cause and event replay" icon={GitBranch} />
+          <div className="root-cause-chain">
+            {(situation?.rootCause ?? []).map((item) => <article key={item.step}><strong>{item.step}</strong><p>{item.detail}</p></article>)}
+          </div>
+          <div className="event-timeline-list">
+            {(situation?.eventTimeline ?? []).map((item) => <article key={item.at}><span>{item.at}</span><strong>{item.event}</strong><p>{item.detail}</p></article>)}
+          </div>
+        </section>
+        <section className="panel">
+          <PanelTitle title="Correlation engine" icon={Network} />
+          <div className="correlation-list">
+            {(situation?.correlations ?? []).map((item) => (
+              <article key={`${item.source}-${item.target}`}>
+                <strong>{item.source}</strong>
+                <span>{item.middle}</span>
+                <strong>{item.target}</strong>
+                <small>{Math.round(item.strength * 100)}% relationship strength</small>
+              </article>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      <section className="two-grid wide-right">
+        <section className="panel">
+          <PanelTitle title="Constituency digital twin" icon={Database} detail={situation?.digitalTwin.populationModel} />
+          <div className="twin-grid">
+            {(situation?.digitalTwin.assets ?? []).map((asset) => <Metric key={asset.name} label={asset.name} value={String(asset.activeSignals)} detail={asset.status} />)}
+          </div>
+        </section>
+        <section className="panel">
+          <PanelTitle title="Live GIS intelligence" icon={MapPinned} />
+          {(situation?.gisIntelligence ?? []).map((layer) => <ScoreBar key={layer.name} label={`${layer.name} · ${layer.status}`} value={Math.min(100, layer.features)} max={100} />)}
+        </section>
+      </section>
+
+      <section className="two-grid">
+        <section className="panel">
+          <PanelTitle title="Smart alerts and predictive intelligence" icon={Flag} />
+          <div className="alert-list">
+            {(situation?.smartAlerts ?? []).map((alert) => <article className={`alert-card ${alert.severity}`} key={alert.name}><strong>{alert.name}</strong><span>{alert.severity}</span><p>{alert.detail}</p></article>)}
+          </div>
+          <div className="prediction-list">
+            {(situation?.predictiveIntelligence ?? []).map((prediction) => <ScoreBar key={prediction.name} label={`${prediction.name} · ${prediction.driver}`} value={prediction.probability} max={100} />)}
+          </div>
+        </section>
+        <section className="panel">
+          <PanelTitle title="Enterprise observability" icon={BarChart3} />
+          <div className="observability-grid">
+            {observabilityEntries.map(([group, items]) => (
+              <article key={group}>
+                <strong>{group}</strong>
+                {items.slice(0, 4).map((item) => <span key={item.name}>{item.name}: {item.value}</span>)}
+              </article>
+            ))}
+          </div>
+        </section>
+      </section>
+    </section>
+  );
+}
+
 function AiPage({ aiOps }: { aiOps: AiOpsResponse | null }) {
   return (
     <section className="two-grid">
@@ -2164,9 +2302,9 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", copilot: "AI constituency copilot", simulation: "Simulation workbench", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
+  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", enterprise: "Enterprise situation room", copilot: "AI constituency copilot", simulation: "Simulation workbench", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
 }
 
 function pageTitle(page: Page): string {
-  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", copilot: "Policy and constituency intelligence assistant", simulation: "Generate realistic civic intake", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
+  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", enterprise: "AI-powered governance command center", copilot: "Policy and constituency intelligence assistant", simulation: "Generate realistic civic intake", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
 }
