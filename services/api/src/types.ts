@@ -70,6 +70,9 @@ export type Submission = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  aiProviderMode?: "vertex" | "openai-compatible" | "fallback";
+  aiModel?: string;
+  aiFallbackUsed?: boolean;
   processingStatus?: "processed";
   rawIntakeId?: string;
   batchId?: string;

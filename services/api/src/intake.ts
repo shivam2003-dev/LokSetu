@@ -106,7 +106,10 @@ export async function processIntake(
       locationLabel: location.label,
       transcript,
       imageSummary,
-      isCivicIssue
+      isCivicIssue,
+      aiProviderMode: analysis.providerMode,
+      aiModel: analysis.model,
+      aiFallbackUsed: analysis.fallbackUsed
     },
     analysis
   );

@@ -19,6 +19,9 @@ export type VertexTextAnalysis = {
   normalizedText: string;
   category: string;
   confidence: number;
+  providerMode: "vertex" | "openai-compatible" | "fallback";
+  model: string;
+  fallbackUsed: boolean;
 };
 
 export type VertexMediaAnalysis = VertexTextAnalysis & {
@@ -51,6 +54,10 @@ function compatibleConfig() {
   const model = process.env.OPENAI_COMPATIBLE_MODEL ?? "google/gemini-2.0-flash-001";
   const enabled = Boolean(apiKey) && process.env.AI_DISABLED !== "true";
   return { apiKey, baseUrl, model, enabled };
+}
+
+function fallbackMeta() {
+  return { providerMode: "fallback" as const, model: "deterministic-offline-rules", fallbackUsed: true };
 }
 
 export function aiRuntimeMode(): "vertex" | "openai-compatible" | "fallback" {
@@ -88,7 +95,10 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
       normalizedText: cleanText(parsed.normalizedText) || text.trim(),
       category: asCategory(parsed.category) ?? fallbackCategory(text),
-      confidence: clampConfidence(parsed.confidence)
+      confidence: clampConfidence(parsed.confidence),
+      providerMode: "vertex",
+      model,
+      fallbackUsed: false
     };
   } catch {
     return fallbackAnalysis(text, declaredLanguage);
@@ -133,7 +143,10 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
       detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
       normalizedText: cleanText(parsed.normalizedText) || text.trim(),
       category: asCategory(parsed.category) ?? fallbackCategory(text),
-      confidence: clampConfidence(parsed.confidence)
+      confidence: clampConfidence(parsed.confidence),
+      providerMode: "openai-compatible",
+      model,
+      fallbackUsed: false
     };
   } catch {
     return fallbackAnalysis(text, declaredLanguage);
@@ -180,7 +193,10 @@ export async function analyzeImageWithVertexAi(
       normalizedText: normalized,
       mediaSummary: cleanText(parsed.mediaSummary) || "Photo of a local civic issue.",
       detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
-      confidence: clampConfidence(parsed.confidence)
+      confidence: clampConfidence(parsed.confidence),
+      providerMode: "vertex",
+      model,
+      fallbackUsed: false
     };
   } catch {
     return fallbackImageAnalysis();
@@ -226,7 +242,10 @@ export async function transcribeWithVertexAi(
       normalizedText: normalized,
       mediaSummary: cleanText(parsed.mediaSummary) || transcript || "Voice note from a citizen.",
       detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
-      confidence: clampConfidence(parsed.confidence)
+      confidence: clampConfidence(parsed.confidence),
+      providerMode: "vertex",
+      model,
+      fallbackUsed: false
     };
   } catch {
     return fallbackAudioAnalysis();
@@ -242,7 +261,8 @@ export function fallbackAnalysis(text: string, declaredLanguage?: string): Verte
     detectedLanguage: fallbackLanguage(text, declaredLanguage),
     normalizedText: text.trim(),
     category: fallbackCategory(text),
-    confidence: 0.62
+    confidence: 0.62,
+    ...fallbackMeta()
   };
 }
 
@@ -253,7 +273,8 @@ function fallbackImageAnalysis(): VertexMediaAnalysis {
     normalizedText: "Citizen-reported civic issue from photo (offline analysis).",
     mediaSummary: "Photo received. Enable Vertex AI for automatic validation.",
     detectedLanguage: "English",
-    confidence: 0.5
+    confidence: 0.5,
+    ...fallbackMeta()
   };
 }
 
@@ -264,7 +285,8 @@ function fallbackAudioAnalysis(): VertexMediaAnalysis {
     normalizedText: "Citizen voice report (offline mode, transcription pending).",
     mediaSummary: "Voice note received. Enable Vertex AI for automatic transcription.",
     detectedLanguage: "English",
-    confidence: 0.5
+    confidence: 0.5,
+    ...fallbackMeta()
   };
 }
 

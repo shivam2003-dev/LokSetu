@@ -42,6 +42,9 @@ type SubmissionInput = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  aiProviderMode?: Submission["aiProviderMode"];
+  aiModel?: string;
+  aiFallbackUsed?: boolean;
 };
 
 export function normalizeSubmission(input: SubmissionInput, analysis: VertexTextAnalysis): Submission {
