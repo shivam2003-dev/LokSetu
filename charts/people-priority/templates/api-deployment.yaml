@@ -51,6 +51,13 @@ spec:
                   name: {{ .Values.api.openAiCompatible.existingSecret | quote }}
                   key: {{ .Values.api.openAiCompatible.secretKey | quote }}
             {{- end }}
+            {{- if .Values.api.googleMaps.existingSecret }}
+            - name: GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.googleMaps.existingSecret | quote }}
+                  key: {{ .Values.api.googleMaps.secretKey | quote }}
+            {{- end }}
             - name: BATCH_SCHEDULE
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
           readinessProbe:

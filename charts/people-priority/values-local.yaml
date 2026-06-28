@@ -4,7 +4,7 @@ global:
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-dashboard
+    tag: local-20260629-maps
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -14,6 +14,12 @@ api:
     OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
     OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
     BATCH_SCHEDULE: "*/5 * * * *"
+  openAiCompatible:
+    existingSecret: people-priority-openai-compatible
+    secretKey: api-key
+  googleMaps:
+    existingSecret: people-priority-google-maps
+    secretKey: api-key
 
 batch:
   enabled: true
@@ -22,12 +28,12 @@ batch:
 web:
   image:
     repository: people-priority-web
-    tag: local-20260629-dashboard
+    tag: local-20260629-maps
 
 citizen:
   image:
     repository: people-priority-citizen
-    tag: local-20260629-dashboard
+    tag: local-20260629-maps
 
 postgres:
   enabled: true

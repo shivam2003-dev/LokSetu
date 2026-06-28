@@ -73,6 +73,9 @@ api:
   openAiCompatible:
     existingSecret: ""
     secretKey: api-key
+  googleMaps:
+    existingSecret: ""
+    secretKey: api-key
 
 batch:
   enabled: true

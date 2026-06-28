@@ -30,7 +30,7 @@ import {
   Star,
   Users
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Page =
   | "home"
@@ -99,11 +99,21 @@ type AiOpsResponse = { provider: string; mode: string; tasks: string[]; guardrai
 type ModerationResponse = { queue: Array<{ id: string; alias: string; ward: string; category: string; language: string; risk: string; status: string }>; policies: string[] };
 type IntegrationsResponse = { enabled: string[]; planned: string[]; local: Record<string, string> };
 type AuditResponse = { events: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> };
+type Hotspot = DashboardResponse["hotspots"][number];
+type MapLoadState = "idle" | "loading" | "ready" | "fallback";
+
+declare global {
+  interface Window {
+    google?: any;
+    __loksetuGoogleMapsPromise?: Promise<void>;
+  }
+}
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
-const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
+const googleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
+const configuredCitizenAppUrl = (import.meta.env.VITE_CITIZEN_APP_URL ?? "").trim();
 const citizenAppUrl =
-  import.meta.env.VITE_CITIZEN_APP_URL ??
+  configuredCitizenAppUrl ||
   (["localhost", "127.0.0.1"].includes(window.location.hostname)
     ? "http://localhost:5174"
     : `https://citizen.${window.location.host}`);
@@ -673,40 +683,188 @@ function ExplorePage({ dashboard, regions, setActiveProjectId, setPage }: { dash
 }
 
 function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: DashboardResponse; setActiveProjectId: (id: string) => void; setPage: (page: Page) => void }) {
-  const staticMapUrl = googleMapsApiKey && dashboard.hotspots.length > 0 ? buildStaticMapUrl(dashboard.hotspots) : "";
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const [mapState, setMapState] = useState<MapLoadState>(googleMapsApiKey ? "idle" : "fallback");
+  const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
+
+  useEffect(() => {
+    if (!googleMapsApiKey || hotspots.length === 0 || !mapRef.current) {
+      setMapState("fallback");
+      return;
+    }
+
+    let cancelled = false;
+    setMapState("loading");
+
+    loadGoogleMaps(googleMapsApiKey)
+      .then(() => {
+        if (cancelled || !mapRef.current || !window.google?.maps) return;
+
+        const bounds = new window.google.maps.LatLngBounds();
+        hotspots.forEach((hotspot) => bounds.extend({ lat: hotspot.lat, lng: hotspot.lng }));
+
+        const map = new window.google.maps.Map(mapRef.current, {
+          center: hotspots[0],
+          zoom: hotspots.length > 1 ? 5 : 12,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+          clickableIcons: false,
+          gestureHandling: "cooperative",
+          styles: [
+            { featureType: "poi", stylers: [{ visibility: "off" }] },
+            { featureType: "transit", stylers: [{ visibility: "off" }] }
+          ]
+        });
+
+        hotspots.forEach((hotspot, index) => {
+          const marker = new window.google.maps.Marker({
+            map,
+            position: { lat: hotspot.lat, lng: hotspot.lng },
+            title: `${hotspot.category} in ${hotspot.ward}`,
+            label: String(index + 1),
+            optimized: true
+          });
+          marker.addListener("click", () => openProject(hotspot.projectId));
+        });
+
+        if (hotspots.length > 1) map.fitBounds(bounds, 60);
+        setMapState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setMapState("fallback");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hotspots, setActiveProjectId, setPage]);
+
+  function openProject(projectId: string) {
+    setActiveProjectId(projectId);
+    setPage("projects");
+  }
+
   return (
-    <div className="map-canvas india-map">
-      {staticMapUrl ? <img className="google-map" src={staticMapUrl} alt="Google map of citizen issue hotspots" /> : null}
-      {dashboard.projects.map((project, index) => (
-        <button
-          className="hotspot"
-          key={project.id}
-          style={{ left: `${18 + (index * 17) % 68}%`, top: `${24 + (index * 23) % 55}%`, width: `${48 + project.score / 3}px`, height: `${48 + project.score / 3}px` }}
-          onClick={() => {
-            setActiveProjectId(project.id);
-            setPage("projects");
-          }}
-        >
-          {project.score}
-        </button>
-      ))}
+    <div className="map-stack">
+      <div className="map-toolbar">
+        <div>
+          <strong>Geospatial demand hotspots</strong>
+          <span>{hotspots.length} ward-level signals from ranking pipeline</span>
+        </div>
+        <small className={`map-state ${mapState}`}>{mapStatusText(mapState)}</small>
+      </div>
+      <div className="map-layout">
+        <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""}`}>
+          <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
+          {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} openProject={openProject} /> : null}
+        </div>
+        <div className="hotspot-list" aria-label="Map hotspot details">
+          {hotspots.map((hotspot, index) => (
+            <button className="hotspot-row" key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => openProject(hotspot.projectId)}>
+              <span>{index + 1}</span>
+              <strong>{hotspot.category}</strong>
+              <small>{hotspot.ward} · score {hotspot.intensity}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      {mapState === "fallback" ? (
+        <p className="map-note">
+          Google Maps key not configured or unavailable. Showing the local geospatial fallback with the same backend hotspot coordinates.
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function buildStaticMapUrl(hotspots: DashboardResponse["hotspots"]) {
-  const params = new URLSearchParams({
-    key: googleMapsApiKey,
-    size: "960x520",
-    scale: "2",
-    maptype: "roadmap",
-    center: "22.9734,78.6569",
-    zoom: "5"
+function FallbackSignalMap({ hotspots, openProject }: { hotspots: Array<Hotspot & { projectId: string }>; openProject: (projectId: string) => void }) {
+  return (
+    <div className="fallback-map" aria-label="Local fallback map">
+      {hotspots.map((hotspot, index) => {
+        const position = indiaProjection(hotspot.lat, hotspot.lng);
+        return (
+          <button
+            className="hotspot"
+            key={`${hotspot.projectId}-${index}`}
+            style={{
+              left: `${position.x}%`,
+              top: `${position.y}%`,
+              width: `${48 + hotspot.intensity / 3}px`,
+              height: `${48 + hotspot.intensity / 3}px`
+            }}
+            onClick={() => openProject(hotspot.projectId)}
+            title={`${hotspot.category} in ${hotspot.ward}`}
+          >
+            {index + 1}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildMapHotspots(dashboard: DashboardResponse): Array<Hotspot & { projectId: string }> {
+  const projects = dashboard.projects.length ? dashboard.projects : [fallbackProject];
+  return projects.slice(0, 8).map((project, index) => {
+    const matchingHotspot = dashboard.hotspots.find((hotspot) => hotspot.ward === project.ward && hotspot.category === project.category) ?? dashboard.hotspots[index];
+    return {
+      ward: project.ward,
+      category: project.category,
+      intensity: project.score,
+      lat: matchingHotspot?.lat ?? seededLatLng(index).lat,
+      lng: matchingHotspot?.lng ?? seededLatLng(index).lng,
+      projectId: project.id
+    };
   });
-  hotspots.slice(0, 12).forEach((hotspot) => {
-    params.append("markers", `color:orange|label:${hotspot.category.slice(0, 1).toUpperCase()}|${hotspot.lat},${hotspot.lng}`);
+}
+
+function seededLatLng(index: number) {
+  const seed = [
+    { lat: 28.62, lng: 77.3 },
+    { lat: 20.01, lng: 73.79 },
+    { lat: 13.08, lng: 80.27 },
+    { lat: 22.57, lng: 88.36 }
+  ];
+  return seed[index % seed.length];
+}
+
+function indiaProjection(lat: number, lng: number) {
+  const minLat = 6.5;
+  const maxLat = 35.6;
+  const minLng = 68.0;
+  const maxLng = 97.5;
+  return {
+    x: Math.min(92, Math.max(8, ((lng - minLng) / (maxLng - minLng)) * 100)),
+    y: Math.min(88, Math.max(12, (1 - (lat - minLat) / (maxLat - minLat)) * 100))
+  };
+}
+
+function mapStatusText(state: MapLoadState) {
+  if (state === "ready") return "Google Maps live";
+  if (state === "loading") return "Loading map";
+  return "Local map fallback";
+}
+
+function loadGoogleMaps(key: string): Promise<void> {
+  if (window.google?.maps) return Promise.resolve();
+  if (window.__loksetuGoogleMapsPromise) return window.__loksetuGoogleMapsPromise;
+
+  window.__loksetuGoogleMapsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    const params = new URLSearchParams({
+      key,
+      v: "weekly"
+    });
+    script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Google Maps failed to load"));
+    document.head.appendChild(script);
   });
-  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+
+  return window.__loksetuGoogleMapsPromise;
 }
 
 function MpPage({ dashboard, activeProject, setActiveProjectId }: { dashboard: DashboardResponse; activeProject: RankedProject; setActiveProjectId: (id: string) => void }) {

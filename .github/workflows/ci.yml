@@ -45,7 +45,13 @@ jobs:
         run: docker build -f services/api/Dockerfile -t loksetu-api:ci .
 
       - name: Build web image
-        run: docker build -f apps/web/Dockerfile -t loksetu-web:ci .
+        run: |
+          docker build \
+            --build-arg VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY}" \
+            -f apps/web/Dockerfile \
+            -t loksetu-web:ci .
+        env:
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
 
       - name: Build citizen image
         run: docker build -f apps/citizen/Dockerfile -t loksetu-citizen:ci .
