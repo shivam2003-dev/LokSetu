@@ -17,6 +17,7 @@ done
 if ! kind get clusters | grep -qx "$CLUSTER_NAME"; then
   kind create cluster --name "$CLUSTER_NAME"
 fi
+kubectl config use-context "kind-${CLUSTER_NAME}"
 
 docker build -f services/api/Dockerfile -t people-priority-api:local .
 docker build -f apps/web/Dockerfile -t people-priority-web:local .
