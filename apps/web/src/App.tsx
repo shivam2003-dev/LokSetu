@@ -1,25 +1,32 @@
 import {
   Activity,
+  ArrowRight,
   BarChart3,
   Bot,
   Building2,
   CheckCircle2,
+  Clock,
   Database,
+  DatabaseZap,
   FileText,
   Flag,
+  GitBranch,
   Globe2,
   Home,
+  Inbox,
   Languages,
   Lock,
+  LockKeyhole,
   Map,
+  MapPinned,
   MapPin,
   Megaphone,
   Network,
   RefreshCw,
+  Scale,
   Search,
   Send,
   ShieldCheck,
-  Smartphone,
   Star,
   Users
 } from "lucide-react";
@@ -156,6 +163,58 @@ const fallbackDashboard: DashboardResponse = {
   projects: [fallbackProject],
   hotspots: []
 };
+
+const problemCards: Array<{ icon: typeof Home; title: string; body: string }> = [
+  {
+    icon: GitBranch,
+    title: "Feedback arrives in fragments",
+    body: "Public meetings, letters, WhatsApp, social media, grievance portals - each a separate silo. No MP has a single consolidated view."
+  },
+  {
+    icon: Scale,
+    title: "No way to rank what to build",
+    body: "Dozens of competing projects in every development plan. No data-backed method to compare school upgrades vs. roads vs. health centres against actual need."
+  },
+  {
+    icon: Languages,
+    title: "22 languages. All unprocessed.",
+    body: "Citizens submit in Hindi, Tamil, Bengali, Kannada, Telugu - via voice notes, photos, and informal texts. None of it gets analyzed."
+  },
+  {
+    icon: DatabaseZap,
+    title: "Decisions disconnected from data",
+    body: "No system connects citizen demand with census figures, infrastructure audits, development plans, and local datasets to produce evidence-based priorities."
+  }
+];
+
+const pipelineSteps = [
+  {
+    number: "01",
+    label: "Citizen Input",
+    detail: ["Voice · Text · Photo", "WhatsApp · SMS", "Any Indian language"]
+  },
+  {
+    number: "02",
+    label: "AI Analysis",
+    detail: ["Language detection", "Theme extraction", "Demand clustering"]
+  },
+  {
+    number: "03",
+    label: "Data Fusion",
+    detail: ["Census records", "Infrastructure audits", "Development plans"]
+  },
+  {
+    number: "04",
+    label: "Priority Ranking",
+    detail: ["Evidence-backed list", "Confidence scores", "Equity flags"],
+    active: true
+  },
+  {
+    number: "05",
+    label: "MP Action",
+    detail: ["Approve priorities", "Push to district", "Track delivery"]
+  }
+];
 
 function pageFromHash(): Page {
   const raw = window.location.hash.replace("#", "") || "home";
@@ -320,7 +379,7 @@ export default function App() {
           apply={applyFilters}
         />
 
-        {page === "home" ? <HomePage dashboard={dashboard} regions={regions} setPage={setPage} /> : null}
+        {page === "home" ? <HomePage dashboard={dashboard} aiOps={aiOps} integrations={integrations} setPage={setPage} /> : null}
         {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} /> : null}
@@ -391,32 +450,202 @@ function ControlStrip(props: {
   );
 }
 
-function HomePage({ dashboard, regions, setPage }: { dashboard: DashboardResponse; regions: RegionResponse | null; setPage: (page: Page) => void }) {
+function formatCount(value: number) {
+  return value.toLocaleString("en-IN");
+}
+
+function HomePage({
+  dashboard,
+  aiOps,
+  integrations,
+  setPage
+}: {
+  dashboard: DashboardResponse;
+  aiOps: AiOpsResponse | null;
+  integrations: IntegrationsResponse | null;
+  setPage: (page: Page) => void;
+}) {
+  const leadingProject = dashboard.projects[0] ?? fallbackProject;
+  const liveMetrics = [
+    { icon: Inbox, label: "Citizen submissions", value: formatCount(dashboard.totals.submissions), detail: "voice, text, photo and app intake" },
+    { icon: MapPinned, label: "Local wards mapped", value: formatCount(dashboard.totals.wards), detail: `${dashboard.hotspots.length} active hotspot signals` },
+    { icon: Languages, label: "Languages detected", value: `${dashboard.totals.languages}`, detail: "normalized before ranking" },
+    { icon: ShieldCheck, label: "Bot risk", value: dashboard.totals.botRisk.toUpperCase(), detail: "privacy and abuse controls enabled" }
+  ];
+
   return (
-    <>
-      <section className="hero-band">
-        <div>
-          <p className="eyebrow">Citizen voice to funded project</p>
-          <h3>Multilingual problem intake, MP-local prioritization, India-wide public discovery.</h3>
-          <p>Built for voice, text, photo, WhatsApp, privacy aliases, ratings, hard-data scoring, and human review before action.</p>
-          <div className="hero-actions">
-            <a className="primary button-link" href={citizenAppUrl}><Send size={17} /> Open Apni Awaaz</a>
-            <button onClick={() => setPage("explore")}><Globe2 size={17} /> Explore India</button>
+    <main className="home-page">
+      <section className="home-hero" aria-label="LokSetu AI real-time dashboard">
+        <div className="home-shell hero-grid">
+          <div className="hero-copy">
+            <span className="hero-eyebrow">Real-time constituency dashboard</span>
+            <h1>
+              LokSetu AI
+              <span>live priority command center</span>
+            </h1>
+            <p className="hero-subhead">
+              Connecting Every Citizen&apos;s Voice to Every Development Decision. The home screen shows live intake, ranked development priorities, AI processing status, and privacy controls for the selected constituency.
+            </p>
+            <div className="hero-stats" aria-label="Platform coverage">
+              <strong>{formatCount(dashboard.totals.submissions)} Signals</strong>
+              <span />
+              <strong>{dashboard.totals.languages || 0} Languages</strong>
+              <span />
+              <strong>{dashboard.projects.length} Ranked Works</strong>
+            </div>
+            <div className="home-actions">
+              <button className="home-primary" onClick={() => setPage("explore")} type="button">
+                <ArrowRight size={18} /> Explore Live Atlas
+              </button>
+              <a className="home-secondary" href={citizenAppUrl}>
+                <Send size={18} /> Open Apni Awaaz
+              </a>
+            </div>
+            <div className="trust-row" aria-label="Trust signals">
+              <span><LockKeyhole size={15} /> Privacy-first by design</span>
+              <span><Scale size={15} /> Responsible AI controls built-in</span>
+              <span><Bot size={15} /> {aiOps?.provider ?? "Vertex AI"} ready</span>
+            </div>
+          </div>
+
+          <PriorityReportCard dashboard={dashboard} />
+        </div>
+      </section>
+
+      <section className="home-section live-section" aria-label="Live operations snapshot">
+        <div className="home-shell">
+          <div className="live-metric-grid">
+            {liveMetrics.map((metric) => {
+              const Icon = metric.icon;
+              return (
+                <article className="live-metric-card" key={metric.label}>
+                  <Icon size={20} />
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                  <p>{metric.detail}</p>
+                </article>
+              );
+            })}
+          </div>
+          <div className="ops-grid">
+            <article className="ops-card">
+              <PanelTitle title="Current priority signal" icon={Activity} />
+              <h3>{leadingProject.title}</h3>
+              <p>{leadingProject.rationale}</p>
+              <div className="ops-evidence">
+                {leadingProject.evidence.slice(0, 3).map((item) => <span key={item}>{item}</span>)}
+              </div>
+            </article>
+            <article className="ops-card">
+              <PanelTitle title="Processing status" icon={Database} />
+              <div className="ops-row"><span>AI mode</span><strong>{aiOps?.mode ?? "fallback"}</strong></div>
+              <div className="ops-row"><span>Enabled integrations</span><strong>{integrations?.enabled.length ?? 0}</strong></div>
+              <div className="ops-row"><span>Batch queue</span><strong>5 min cadence</strong></div>
+            </article>
           </div>
         </div>
-        <div className="india-card">
-          <span>India readiness</span>
-          <strong>{regions?.coverage.statesReady ?? 28}+{regions?.coverage.unionTerritoriesReady ?? 8}</strong>
-          <small>states and UTs model-ready, target {regions?.coverage.lokSabhaConstituenciesTarget ?? 543} Lok Sabha constituencies</small>
+      </section>
+
+      <section className="home-section problem-section">
+        <div className="home-shell">
+          <div className="section-heading">
+            <span>Evidence gaps monitored</span>
+            <h2>Development decisions made without evidence</h2>
+            <p>Thousands of citizen voices. Zero structured signal.</p>
+          </div>
+          <div className="problem-grid">
+            {problemCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <article className="problem-card" key={card.title}>
+                  <Icon size={32} />
+                  <h3>{card.title}</h3>
+                  <p>{card.body}</p>
+                </article>
+              );
+            })}
+          </div>
+          <div className="bridge-line">
+            <span>LokSetu AI closes all four gaps through one operational workflow.</span>
+          </div>
         </div>
       </section>
-      <MetricGrid dashboard={dashboard} />
-      <section className="three-grid">
-        <Feature title="For citizens" icon={Smartphone} points={["Apni Awaaz app", "Voice, photo, text intake", "Privacy alias", "Batch receipt"]} />
-        <Feature title="For MPs" icon={Building2} points={["Ward queue", "Evidence packs", "Shortlist workflow", "Equity guardrails"]} />
-        <Feature title="For admins" icon={ShieldCheck} points={["Moderation", "Language ops", "Data sources", "Audit trail"]} />
+
+      <section className="home-section solution-section" id="solution">
+        <div className="home-shell">
+          <div className="section-heading">
+            <span>Operating pipeline</span>
+            <h2>From citizen voice to development priority</h2>
+            <p>In any language. Across every channel. With evidence.</p>
+          </div>
+          <div className="pipeline">
+            {pipelineSteps.map((step, index) => (
+              <article className={`pipeline-step ${step.active ? "active" : ""}`} key={step.number}>
+                <span>{step.number}</span>
+                <h3>{step.label}</h3>
+                <p>{step.detail.join("\n")}</p>
+                {index < pipelineSteps.length - 1 ? <i aria-hidden="true" /> : null}
+              </article>
+            ))}
+          </div>
+        </div>
       </section>
-    </>
+    </main>
+  );
+}
+
+function PriorityReportCard({ dashboard }: { dashboard: DashboardResponse }) {
+  const projects = (dashboard.projects.length ? dashboard.projects : [fallbackProject]).slice(0, 3);
+  const area = projects[0]?.ward ? `${projects[0].ward} Ward` : "Selected constituency";
+  const updatedAt = new Date(dashboard.generatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <aside className="priority-card" aria-label="AI Priority Report">
+      <header>
+        <div>
+          <span><MapPinned size={17} /> {area}</span>
+          <strong>Live Priority Report</strong>
+        </div>
+        <small><i /> Live</small>
+      </header>
+      <div className="priority-list">
+        {projects.map((project, index) => (
+          <PriorityItem
+            key={project.id}
+            rank={`Rank #${index + 1}`}
+            title={project.category}
+            submissions={`${formatCount(project.demandCount)} citizen submissions`}
+            confidence={`${Math.round(project.confidence * 100)}%`}
+            priority={project.score >= 85 ? "HIGH" : "MEDIUM"}
+            width={`${Math.max(34, Math.min(96, project.score))}%`}
+            tone={index === 0 ? "saffron" : "teal"}
+          />
+        ))}
+      </div>
+      <footer>
+        <span><Inbox size={15} /> {formatCount(dashboard.totals.submissions)} submissions analyzed</span>
+        <span><Globe2 size={15} /> {dashboard.totals.languages} languages detected</span>
+        <span><Clock size={15} /> Updated {updatedAt}</span>
+      </footer>
+    </aside>
+  );
+}
+
+function PriorityItem({ rank, title, submissions, confidence, priority, width, tone }: { rank: string; title: string; submissions: string; confidence: string; priority: "HIGH" | "MEDIUM"; width: string; tone: "saffron" | "teal" }) {
+  return (
+    <article className="priority-item">
+      <div>
+        <span>{rank}</span>
+        <strong>{title}</strong>
+      </div>
+      <div className={`priority-bar ${tone}`}>
+        <i style={{ width }} />
+      </div>
+      <p>{submissions}</p>
+      <div className="priority-meta">
+        <span>Confidence: {confidence}</span>
+        <mark className={priority === "HIGH" ? "high" : "medium"}>{priority} priority</mark>
+      </div>
+    </article>
   );
 }
 

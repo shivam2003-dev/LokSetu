@@ -5,6 +5,8 @@ test.describe("MP/admin web functional flow", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "LokSetu", exact: true })).toBeVisible();
     await expect(page.getByText("Live · Postgres · Vertex-ready")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "LokSetu AI live priority command center" })).toBeVisible();
+    await expect(page.getByText("Real-time constituency dashboard")).toBeVisible();
 
     await page.getByRole("button", { name: "India Explorer" }).click();
     await expect(page.getByRole("heading", { name: "All-India issue atlas" })).toBeVisible();
