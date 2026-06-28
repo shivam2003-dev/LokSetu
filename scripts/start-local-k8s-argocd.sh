@@ -24,9 +24,6 @@ kubectl config use-context "kind-${CLUSTER_NAME}"
 
 docker build -f services/api/Dockerfile -t "people-priority-api:${LOCAL_IMAGE_TAG}" .
 web_build_args=()
-if [[ -n "${VITE_GOOGLE_MAPS_API_KEY:-}" ]]; then
-  web_build_args+=(--build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}")
-fi
 if [[ -n "${VITE_CITIZEN_APP_URL:-}" ]]; then
   web_build_args+=(--build-arg "VITE_CITIZEN_APP_URL=${VITE_CITIZEN_APP_URL}")
 fi

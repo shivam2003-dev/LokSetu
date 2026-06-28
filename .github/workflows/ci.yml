@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.PUBLIC_GOOGLE_MAPS_API_KEY || secrets.VITE_GOOGLE_MAPS_API_KEY }}
+      GOOGLE_MAPS_MAP_ID: ${{ vars.GOOGLE_MAPS_MAP_ID }}
+      OPENAI_COMPATIBLE_BASE_URL: ${{ vars.OPENAI_COMPATIBLE_BASE_URL || 'https://openrouter.ai/api/v1' }}
+      OPENAI_COMPATIBLE_MODEL: ${{ vars.OPENAI_COMPATIBLE_MODEL || 'google/gemini-2.0-flash-001' }}
+      VITE_CITIZEN_APP_URL: ${{ vars.VITE_CITIZEN_APP_URL }}
 
     steps:
       - name: Checkout
@@ -38,6 +44,30 @@ jobs:
       - name: Functional tests
         run: npm run test:functional
 
+      - name: Secret-backed runtime config smoke
+        if: ${{ env.PUBLIC_GOOGLE_MAPS_API_KEY != '' }}
+        run: |
+          PORT=18180 \
+          VERTEX_AI_DISABLED=true \
+          PUBLIC_GOOGLE_MAPS_API_KEY="${PUBLIC_GOOGLE_MAPS_API_KEY}" \
+          GOOGLE_MAPS_MAP_ID="${GOOGLE_MAPS_MAP_ID}" \
+          OPENAI_COMPATIBLE_BASE_URL="${OPENAI_COMPATIBLE_BASE_URL}" \
+          OPENAI_COMPATIBLE_MODEL="${OPENAI_COMPATIBLE_MODEL}" \
+          npm run dev -w services/api > /tmp/loksetu-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            curl -fsS http://127.0.0.1:18180/healthz >/dev/null && break
+            sleep 1
+          done
+          node --input-type=module -e '
+            const config = await fetch("http://127.0.0.1:18180/api/client-config").then((r) => r.json());
+            if (!config.maps.enabled || config.maps.source !== "runtime-api") {
+              throw new Error(`runtime maps config missing: ${JSON.stringify({ enabled: config.maps.enabled, source: config.maps.source })}`);
+            }
+            console.log(JSON.stringify({ ok: true, maps: config.maps.source, dataMode: config.dataMode }));
+          '
+
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
@@ -47,11 +77,9 @@ jobs:
       - name: Build web image
         run: |
           docker build \
-            --build-arg VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY}" \
+            --build-arg VITE_CITIZEN_APP_URL="${VITE_CITIZEN_APP_URL}" \
             -f apps/web/Dockerfile \
             -t loksetu-web:ci .
-        env:
-          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
 
       - name: Build citizen image
         run: docker build -f apps/citizen/Dockerfile -t loksetu-citizen:ci .

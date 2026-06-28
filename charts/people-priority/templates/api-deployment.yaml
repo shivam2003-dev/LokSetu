@@ -57,6 +57,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.api.googleMaps.existingSecret | quote }}
                   key: {{ .Values.api.googleMaps.secretKey | quote }}
+            - name: PUBLIC_GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.googleMaps.existingSecret | quote }}
+                  key: {{ .Values.api.googleMaps.secretKey | quote }}
             {{- end }}
             - name: BATCH_SCHEDULE
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
