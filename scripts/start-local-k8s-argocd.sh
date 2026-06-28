@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 CLUSTER_NAME="${CLUSTER_NAME:-loksetu}"
 NAMESPACE="${NAMESPACE:-people-priority}"
-LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629}"
+LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629-dashboard}"
 
 for bin in docker kind kubectl helm; do
   if ! command -v "$bin" >/dev/null 2>&1; then
