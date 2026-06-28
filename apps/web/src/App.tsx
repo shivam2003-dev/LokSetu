@@ -154,6 +154,7 @@ declare global {
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const googleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
+const googleMapsMapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "").trim();
 const configuredCitizenAppUrl = (import.meta.env.VITE_CITIZEN_APP_URL ?? "").trim();
 const citizenAppUrl =
   configuredCitizenAppUrl ||
@@ -756,13 +757,14 @@ function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: Dashb
           fullscreenControl: true,
           clickableIcons: false,
           gestureHandling: "cooperative",
+          ...(googleMapsMapId ? { mapId: googleMapsMapId } : {}),
           styles: [
             { featureType: "poi", stylers: [{ visibility: "off" }] },
             { featureType: "transit", stylers: [{ visibility: "off" }] }
           ]
         });
 
-        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, () => openProject(hotspot.projectId)));
+        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(googleMapsMapId), () => openProject(hotspot.projectId)));
 
         if (hotspots.length > 1) map.fitBounds(bounds, 60);
         setMapState("ready");
@@ -882,12 +884,12 @@ function mapStatusText(state: MapLoadState) {
   return "Local map fallback";
 }
 
-function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, onClick: () => void) {
+function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void) {
   const position = { lat: hotspot.lat, lng: hotspot.lng };
   const title = `${hotspot.category} in ${hotspot.ward}`;
   const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
 
-  if (AdvancedMarkerElement) {
+  if (useAdvancedMarker && AdvancedMarkerElement) {
     const content = document.createElement("button");
     content.className = "google-hotspot-marker";
     content.type = "button";
@@ -900,7 +902,7 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
       title,
       content
     });
-    marker.addListener("click", onClick);
+    marker.addEventListener("gmp-click", onClick);
     return;
   }
 
@@ -923,10 +925,10 @@ function loadGoogleMaps(key: string): Promise<void> {
     const params = new URLSearchParams({
       key,
       v: "weekly",
-      libraries: "marker",
       loading: "async",
       callback: "__loksetuGoogleMapsLoaded"
     });
+    if (googleMapsMapId) params.set("libraries", "marker");
     window.__loksetuGoogleMapsLoaded = () => resolve();
     script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
     script.async = true;
