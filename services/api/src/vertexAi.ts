@@ -35,7 +35,7 @@ function vertexConfig() {
   const project = process.env.VERTEX_AI_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT;
   const location = process.env.VERTEX_AI_LOCATION ?? "us-central1";
   const model = process.env.VERTEX_AI_MODEL ?? "gemini-2.0-flash";
-  const enabled = Boolean(project) && process.env.VERTEX_AI_DISABLED !== "true";
+  const enabled = Boolean(project) && process.env.VERTEX_AI_DISABLED !== "true" && process.env.AI_DISABLED !== "true";
   return { project, location, model, enabled };
 }
 
@@ -45,13 +45,27 @@ async function geminiClient() {
   return new GoogleGenAI({ vertexai: true, project, location, apiVersion: "v1" });
 }
 
+function compatibleConfig() {
+  const apiKey = process.env.OPENAI_COMPATIBLE_API_KEY ?? process.env.OPENROUTER_API_KEY;
+  const baseUrl = process.env.OPENAI_COMPATIBLE_BASE_URL ?? "https://openrouter.ai/api/v1";
+  const model = process.env.OPENAI_COMPATIBLE_MODEL ?? "google/gemini-2.0-flash-001";
+  const enabled = Boolean(apiKey) && process.env.AI_DISABLED !== "true";
+  return { apiKey, baseUrl, model, enabled };
+}
+
+export function aiRuntimeMode(): "vertex" | "openai-compatible" | "fallback" {
+  if (vertexConfig().enabled) return "vertex";
+  if (compatibleConfig().enabled) return "openai-compatible";
+  return "fallback";
+}
+
 // ---------------------------------------------------------------------------
 // Text
 // ---------------------------------------------------------------------------
 
 export async function analyzeWithVertexAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
   const { model, enabled } = vertexConfig();
-  if (!enabled) return fallbackAnalysis(text, declaredLanguage);
+  if (!enabled) return analyzeWithCompatibleAi(text, declaredLanguage);
 
   try {
     const ai = await geminiClient();
@@ -70,6 +84,51 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       config: { temperature: 0.1, maxOutputTokens: 512, responseMimeType: "application/json" }
     });
     const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexTextAnalysis>;
+    return {
+      detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
+      normalizedText: cleanText(parsed.normalizedText) || text.trim(),
+      category: asCategory(parsed.category) ?? fallbackCategory(text),
+      confidence: clampConfidence(parsed.confidence)
+    };
+  } catch {
+    return fallbackAnalysis(text, declaredLanguage);
+  }
+}
+
+async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
+  const { apiKey, baseUrl, model, enabled } = compatibleConfig();
+  if (!enabled || !apiKey) return fallbackAnalysis(text, declaredLanguage);
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You analyze citizen civic-development submissions for an Indian constituency platform.",
+              "Return only JSON with detectedLanguage, normalizedText, category, confidence.",
+              `Allowed categories: ${categories.join(", ")}.`
+            ].join(" ")
+          },
+          {
+            role: "user",
+            content: `Declared language: ${declaredLanguage ?? "unknown"}\nSubmission: ${text}`
+          }
+        ]
+      })
+    });
+    if (!response.ok) throw new Error(`compatible AI failed: ${response.status}`);
+    const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const parsed = JSON.parse(payload.choices?.[0]?.message?.content ?? "{}") as Partial<VertexTextAnalysis>;
     return {
       detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
       normalizedText: cleanText(parsed.normalizedText) || text.trim(),

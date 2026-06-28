@@ -161,10 +161,24 @@ button {
 
 nav {
   display: grid;
-  gap: 3px;
+  gap: 16px;
   overflow: auto;
   margin: 0 -4px;
   padding: 0 4px;
+}
+
+.nav-section {
+  display: grid;
+  gap: 3px;
+}
+
+.nav-section > span {
+  color: #7487a7;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  padding: 0 12px 4px;
+  text-transform: uppercase;
 }
 
 .nav-item {
@@ -215,6 +229,26 @@ nav {
   width: 3px;
   border-radius: 999px;
   background: var(--saffron);
+}
+
+.citizen-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid rgba(245, 121, 33, 0.35);
+  border-radius: var(--r-sm);
+  background: rgba(245, 121, 33, 0.12);
+  color: #ffd5b5;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.citizen-link:hover {
+  background: rgba(245, 121, 33, 0.2);
+  color: #fff;
 }
 
 .status-pill {
@@ -278,7 +312,8 @@ nav {
 .icon-button,
 .primary,
 .channel,
-.hero-actions button {
+.hero-actions button,
+.button-link {
   min-height: 42px;
   border-radius: var(--r-sm);
   border: 1px solid var(--line-strong);
@@ -297,7 +332,8 @@ nav {
 
 .icon-button:hover,
 .channel:hover,
-.hero-actions button:hover {
+.hero-actions button:hover,
+.button-link:hover {
   border-color: var(--line-strong);
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
@@ -329,6 +365,10 @@ nav {
 .hero-actions button:not(.primary) {
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(6px);
+}
+
+.button-link {
+  text-decoration: none;
 }
 
 /* ---------------------------------------------------------
@@ -1026,10 +1066,20 @@ meter::-moz-meter-bar {
   padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--line);
+  z-index: 2;
+}
+
+.google-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .hotspot {
   position: absolute;
+  z-index: 3;
   transform: translate(-50%, -50%);
   border-radius: 50%;
   border: 2px solid #fff;

@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 CLUSTER_NAME="${CLUSTER_NAME:-loksetu}"
 NAMESPACE="${NAMESPACE:-people-priority}"
-LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260628}"
+LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629}"
 
 for bin in docker kind kubectl helm; do
   if ! command -v "$bin" >/dev/null 2>&1; then
@@ -31,6 +31,7 @@ kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl -n argocd rollout status deployment/argocd-server --timeout=180s
 
+kubectl -n argocd delete application people-priority-local --ignore-not-found
 kubectl apply -f argocd/application-local.yaml
 
 kubectl -n "$NAMESPACE" rollout status deployment/people-priority-api --timeout=180s

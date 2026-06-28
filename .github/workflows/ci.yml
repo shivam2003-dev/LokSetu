@@ -32,6 +32,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Functional tests
+        run: npm run test:functional
+
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
@@ -57,6 +63,15 @@ jobs:
 
       - name: Helm render local
         run: helm template people-priority charts/people-priority -f charts/people-priority/values-local.yaml > /tmp/people-priority-local.yaml
+
+      - name: Helm render split applications
+        run: |
+          helm template loksetu-platform charts/people-priority -f charts/people-priority/values.yaml -f charts/people-priority/values-platform.yaml > /tmp/loksetu-platform.yaml
+          helm template loksetu-web charts/people-priority -f charts/people-priority/values.yaml -f charts/people-priority/values-web.yaml > /tmp/loksetu-web.yaml
+          helm template apni-awaaz charts/people-priority -f charts/people-priority/values.yaml -f charts/people-priority/values-apni-awaaz.yaml > /tmp/apni-awaaz.yaml
+          helm template loksetu-platform-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-platform.yaml > /tmp/loksetu-platform-local.yaml
+          helm template loksetu-web-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-web.yaml > /tmp/loksetu-web-local.yaml
+          helm template apni-awaaz-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-apni-awaaz.yaml > /tmp/apni-awaaz-local.yaml
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3

@@ -1,3 +1,4 @@
+{{- if .Values.components.citizen }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,3 +39,4 @@ spec:
             periodSeconds: 20
           resources:
             {{- toYaml .Values.citizen.resources | nindent 12 }}
+{{- end }}

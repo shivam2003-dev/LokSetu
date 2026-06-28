@@ -1,4 +1,4 @@
-{{- if and .Values.ingress.enabled .Values.ingress.managedCertificate.enabled }}
+{{- if and .Values.components.managedCertificate .Values.ingress.enabled .Values.ingress.managedCertificate.enabled }}
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:

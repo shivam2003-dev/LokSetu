@@ -1,6 +1,5 @@
 import {
   Activity,
-  AlertTriangle,
   BarChart3,
   Bot,
   Building2,
@@ -15,8 +14,6 @@ import {
   Map,
   MapPin,
   Megaphone,
-  MessageSquareText,
-  Mic,
   Network,
   RefreshCw,
   Search,
@@ -26,11 +23,10 @@ import {
   Star,
   Users
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Page =
   | "home"
-  | "submit"
   | "explore"
   | "mp"
   | "projects"
@@ -41,7 +37,6 @@ type Page =
   | "integrations"
   | "public";
 
-type Channel = "text" | "voice" | "photo" | "whatsapp";
 type Scope = "local" | "mp" | "global";
 
 type RankedProject = {
@@ -99,19 +94,34 @@ type IntegrationsResponse = { enabled: string[]; planned: string[]; local: Recor
 type AuditResponse = { events: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
+const citizenAppUrl =
+  import.meta.env.VITE_CITIZEN_APP_URL ??
+  (["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? "http://localhost:5174"
+    : `https://citizen.${window.location.host}`);
 
-const navItems: Array<{ page: Page; label: string; icon: typeof Home }> = [
-  { page: "home", label: "Home", icon: Home },
-  { page: "submit", label: "Citizen Submit", icon: Send },
-  { page: "explore", label: "India Explorer", icon: Map },
-  { page: "mp", label: "MP Center", icon: Building2 },
-  { page: "projects", label: "Project Rooms", icon: FileText },
-  { page: "analytics", label: "Analytics", icon: BarChart3 },
-  { page: "ai", label: "AI Ops", icon: Bot },
-  { page: "moderation", label: "Moderation", icon: ShieldCheck },
-  { page: "admin", label: "Admin", icon: Users },
-  { page: "integrations", label: "Integrations", icon: Network },
-  { page: "public", label: "Public", icon: Megaphone }
+const navSections: Array<{ title: string; items: Array<{ page: Page; label: string; icon: typeof Home }> }> = [
+  {
+    title: "Workspace",
+    items: [
+      { page: "home", label: "Home", icon: Home },
+      { page: "explore", label: "India Explorer", icon: Map },
+      { page: "mp", label: "MP Center", icon: Building2 },
+      { page: "projects", label: "Project Rooms", icon: FileText },
+      { page: "analytics", label: "Analytics", icon: BarChart3 },
+      { page: "public", label: "Public Board", icon: Megaphone }
+    ]
+  },
+  {
+    title: "Operations",
+    items: [
+      { page: "moderation", label: "Moderation", icon: ShieldCheck },
+      { page: "ai", label: "AI Ops", icon: Bot },
+      { page: "admin", label: "Admin", icon: Users },
+      { page: "integrations", label: "Integrations", icon: Network }
+    ]
+  }
 ];
 
 const fallbackProject: RankedProject = {
@@ -147,6 +157,14 @@ const fallbackDashboard: DashboardResponse = {
   hotspots: []
 };
 
+function pageFromHash(): Page {
+  const raw = window.location.hash.replace("#", "") || "home";
+  if (raw === "intake" || raw === "submit") return "home";
+  const navItems = navSections.flatMap((section) => section.items);
+  if (raw === "india") return "explore";
+  return navItems.some((item) => item.page === raw) ? (raw as Page) : "home";
+}
+
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
     const response = await fetch(`${apiBase}${path}`);
@@ -170,7 +188,7 @@ async function fetchDashboard(filters: { scope: Scope; state: string; district: 
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>("home");
+  const [page, setPageState] = useState<Page>(() => pageFromHash());
   const [scope, setScope] = useState<Scope>("local");
   const [state, setState] = useState("Delhi");
   const [district, setDistrict] = useState("Central Delhi");
@@ -192,7 +210,22 @@ export default function App() {
 
   useEffect(() => {
     refreshAll();
+    const onHashChange = () => setPageState(pageFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      applyFilters();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
+
+  function setPage(next: Page) {
+    setPageState(next);
+    if (window.location.hash !== `#${next}`) window.history.replaceState(null, "", `#${next}`);
+  }
 
   async function refreshAll() {
     const [nextDashboard, nextRegions, nextAnalytics, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
@@ -235,16 +268,25 @@ export default function App() {
           </div>
         </div>
         <nav>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button className={`nav-item ${page === item.page ? "active" : ""}`} key={item.page} onClick={() => setPage(item.page)}>
-                <Icon size={18} />
-                {item.label}
-              </button>
-            );
-          })}
+          {navSections.map((section) => (
+            <div className="nav-section" key={section.title}>
+              <span>{section.title}</span>
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button className={`nav-item ${page === item.page ? "active" : ""}`} key={item.page} onClick={() => setPage(item.page)}>
+                    <Icon size={18} />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
+        <a className="citizen-link" href={citizenAppUrl}>
+          <Send size={16} />
+          Open Apni Awaaz
+        </a>
         <div className="status-pill">
           <CheckCircle2 size={16} />
           <span>{notice} · Postgres · Vertex-ready</span>
@@ -279,7 +321,6 @@ export default function App() {
         />
 
         {page === "home" ? <HomePage dashboard={dashboard} regions={regions} setPage={setPage} /> : null}
-        {page === "submit" ? <SubmitPage refresh={refreshAll} /> : null}
         {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} /> : null}
@@ -359,7 +400,7 @@ function HomePage({ dashboard, regions, setPage }: { dashboard: DashboardRespons
           <h3>Multilingual problem intake, MP-local prioritization, India-wide public discovery.</h3>
           <p>Built for voice, text, photo, WhatsApp, privacy aliases, ratings, hard-data scoring, and human review before action.</p>
           <div className="hero-actions">
-            <button className="primary" onClick={() => setPage("submit")}><Send size={17} /> Submit problem</button>
+            <a className="primary button-link" href={citizenAppUrl}><Send size={17} /> Open Apni Awaaz</a>
             <button onClick={() => setPage("explore")}><Globe2 size={17} /> Explore India</button>
           </div>
         </div>
@@ -371,80 +412,11 @@ function HomePage({ dashboard, regions, setPage }: { dashboard: DashboardRespons
       </section>
       <MetricGrid dashboard={dashboard} />
       <section className="three-grid">
-        <Feature title="For citizens" icon={Smartphone} points={["Default local area", "All-India search", "Privacy alias", "Contribution score"]} />
+        <Feature title="For citizens" icon={Smartphone} points={["Apni Awaaz app", "Voice, photo, text intake", "Privacy alias", "Batch receipt"]} />
         <Feature title="For MPs" icon={Building2} points={["Ward queue", "Evidence packs", "Shortlist workflow", "Equity guardrails"]} />
         <Feature title="For admins" icon={ShieldCheck} points={["Moderation", "Language ops", "Data sources", "Audit trail"]} />
       </section>
     </>
-  );
-}
-
-function SubmitPage({ refresh }: { refresh: () => void }) {
-  const [channel, setChannel] = useState<Channel>("text");
-  const [username, setUsername] = useState("citizen");
-  const [privacyMode, setPrivacyMode] = useState(true);
-  const [language, setLanguage] = useState("Auto detect");
-  const [state, setState] = useState("Delhi");
-  const [district, setDistrict] = useState("Central Delhi");
-  const [ward, setWard] = useState("Kalindi Nagar");
-  const [urgency, setUrgency] = useState(4);
-  const [rating, setRating] = useState(5);
-  const [text, setText] = useState("School toilets are broken and classrooms flood after rain.");
-  const [receiptId, setReceiptId] = useState("");
-  const [result, setResult] = useState("");
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    const response = await fetch(`${apiBase}/api/submissions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel, username, privacyMode, language, state, district, ward, urgency, rating, text })
-    });
-    const payload = await response.json();
-    setReceiptId(payload.rawIntakeId ?? "");
-    setResult(payload.message ?? "Submission received for the next scheduled batch run.");
-    refresh();
-  }
-
-  return (
-    <section className="two-grid">
-      <form className="panel form-panel" onSubmit={submit}>
-        <PanelTitle title="Citizen problem intake" icon={MessageSquareText} />
-        <div className="channel-row">
-          {[
-            ["text", MessageSquareText],
-            ["voice", Mic],
-            ["photo", MapPin],
-            ["whatsapp", Smartphone]
-          ].map(([value, Icon]) => (
-            <button className={`channel ${channel === value ? "active" : ""}`} key={value as string} type="button" onClick={() => setChannel(value as Channel)}>
-              <Icon size={17} /> {value as string}
-            </button>
-          ))}
-        </div>
-        <div className="form-grid">
-          <Input label="Username" value={username} setValue={setUsername} />
-          <label className="check-row"><input checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)} type="checkbox" /> Privacy alias</label>
-          <Select label="Language" value={language} setValue={setLanguage} options={["Auto detect", "Hindi", "Tamil", "Bangla", "Marathi", "English"]} />
-          <Select label="State" value={state} setValue={setState} options={["Delhi", "Maharashtra", "Tamil Nadu", "West Bengal", "Uttar Pradesh"]} />
-          <Select label="District" value={district} setValue={setDistrict} options={["Central Delhi", "East Delhi", "Nashik Rural", "Chennai", "Lucknow"]} />
-          <Select label="Ward/Panchayat" value={ward} setValue={setWard} options={["Kalindi Nagar", "River Market", "East Colony", "North Village"]} />
-        </div>
-        <label>Problem<textarea value={text} onChange={(event) => setText(event.target.value)} /></label>
-        <label>Urgency {urgency}<input min="1" max="5" type="range" value={urgency} onChange={(event) => setUrgency(Number(event.target.value))} /></label>
-        <label>Citizen rating {rating}<input min="1" max="5" type="range" value={rating} onChange={(event) => setRating(Number(event.target.value))} /></label>
-        <button className="primary" type="submit"><Send size={17} /> Submit to batch</button>
-      </form>
-      <section className="panel">
-        <PanelTitle title="AI processing receipt" icon={Bot} />
-        <div className="receipt">
-          <strong>{receiptId ? receiptId.slice(0, 8) : "--"}</strong>
-          <span>batch intake receipt</span>
-          <p>{result || "Submit once to queue language detection, category scoring, aliasing, and MP routing."}</p>
-        </div>
-        <Feature title="Processing pipeline" icon={Languages} points={["Queue raw intake in Postgres", "Run scheduled batch worker", "Normalize through Vertex AI", "Score category and urgency", "Route to MP and ward"]} />
-      </section>
-    </section>
   );
 }
 
@@ -453,21 +425,7 @@ function ExplorePage({ dashboard, regions, setActiveProjectId, setPage }: { dash
     <section className="two-grid wide-left">
       <section className="panel">
         <PanelTitle title="All-India issue atlas" icon={Globe2} />
-        <div className="map-canvas india-map">
-          {dashboard.projects.map((project, index) => (
-            <button
-              className="hotspot"
-              key={project.id}
-              style={{ left: `${18 + (index * 17) % 68}%`, top: `${24 + (index * 23) % 55}%`, width: `${48 + project.score / 3}px`, height: `${48 + project.score / 3}px` }}
-              onClick={() => {
-                setActiveProjectId(project.id);
-                setPage("projects");
-              }}
-            >
-              {project.score}
-            </button>
-          ))}
-        </div>
+        <IssueMap dashboard={dashboard} setActiveProjectId={setActiveProjectId} setPage={setPage} />
       </section>
       <section className="panel">
         <PanelTitle title="State onboarding" icon={Flag} />
@@ -483,6 +441,43 @@ function ExplorePage({ dashboard, regions, setActiveProjectId, setPage }: { dash
       </section>
     </section>
   );
+}
+
+function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: DashboardResponse; setActiveProjectId: (id: string) => void; setPage: (page: Page) => void }) {
+  const staticMapUrl = googleMapsApiKey && dashboard.hotspots.length > 0 ? buildStaticMapUrl(dashboard.hotspots) : "";
+  return (
+    <div className="map-canvas india-map">
+      {staticMapUrl ? <img className="google-map" src={staticMapUrl} alt="Google map of citizen issue hotspots" /> : null}
+      {dashboard.projects.map((project, index) => (
+        <button
+          className="hotspot"
+          key={project.id}
+          style={{ left: `${18 + (index * 17) % 68}%`, top: `${24 + (index * 23) % 55}%`, width: `${48 + project.score / 3}px`, height: `${48 + project.score / 3}px` }}
+          onClick={() => {
+            setActiveProjectId(project.id);
+            setPage("projects");
+          }}
+        >
+          {project.score}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function buildStaticMapUrl(hotspots: DashboardResponse["hotspots"]) {
+  const params = new URLSearchParams({
+    key: googleMapsApiKey,
+    size: "960x520",
+    scale: "2",
+    maptype: "roadmap",
+    center: "22.9734,78.6569",
+    zoom: "5"
+  });
+  hotspots.slice(0, 12).forEach((hotspot) => {
+    params.append("markers", `color:orange|label:${hotspot.category.slice(0, 1).toUpperCase()}|${hotspot.lat},${hotspot.lng}`);
+  });
+  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
 }
 
 function MpPage({ dashboard, activeProject, setActiveProjectId }: { dashboard: DashboardResponse; activeProject: RankedProject; setActiveProjectId: (id: string) => void }) {
@@ -679,18 +674,10 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
   return <div className="evidence"><h4>{title}</h4><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></div>;
 }
 
-function Input({ label, value, setValue }: { label: string; value: string; setValue: (value: string) => void }) {
-  return <label>{label}<input value={value} onChange={(event) => setValue(event.target.value)} /></label>;
-}
-
-function Select({ label, value, setValue, options }: { label: string; value: string; setValue: (value: string) => void; options: string[] }) {
-  return <label>{label}<select value={value} onChange={(event) => setValue(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
-}
-
 function pageLabel(page: Page): string {
-  return ({ home: "Command home", submit: "Citizen channel", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
+  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
 }
 
 function pageTitle(page: Page): string {
-  return ({ home: "LokSetu operating system", submit: "Submit a local problem", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
+  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
 }

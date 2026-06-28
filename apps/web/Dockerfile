@@ -1,5 +1,11 @@
 FROM node:22-alpine AS build
 WORKDIR /app
+ARG VITE_API_BASE_URL=""
+ARG VITE_GOOGLE_MAPS_API_KEY=""
+ARG VITE_CITIZEN_APP_URL=""
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
+ENV VITE_CITIZEN_APP_URL=$VITE_CITIZEN_APP_URL
 COPY package*.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/citizen/package.json apps/citizen/package.json

@@ -1,0 +1,10 @@
+components:
+  serviceAccount: false
+  api: false
+  web: false
+  citizen: true
+  batch: false
+  postgres: false
+  ingress: false
+  managedCertificate: false
+  hpa: false

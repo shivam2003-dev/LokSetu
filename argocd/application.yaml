@@ -1,17 +1,68 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: people-priority
+  name: loksetu-platform
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/people-priority.git
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
     targetRevision: main
     path: charts/people-priority
     helm:
       valueFiles:
         - values.yaml
+        - values-platform.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: people-priority
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loksetu-web
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
+    targetRevision: main
+    path: charts/people-priority
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-web.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: people-priority
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apni-awaaz
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
+    targetRevision: main
+    path: charts/people-priority
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-apni-awaaz.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: people-priority

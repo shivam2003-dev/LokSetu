@@ -7,11 +7,12 @@ import { mpProfiles, seedSubmissions, seedUsers } from "./data.js";
 import { countRawIntakesByStatus, initDatabase, insertRawIntake, isDatabaseEnabled, listRecentBatchRuns, listSubmissions } from "./db.js";
 import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
+import { aiRuntimeMode } from "./vertexAi.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
-const aiMode = process.env.VERTEX_AI_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : "fallback";
+const aiMode = aiRuntimeMode();
 let memorySubmissions = [...seedSubmissions];
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
 
@@ -88,8 +89,8 @@ app.get("/api/analytics", async (_request, response) => {
 
 app.get("/api/ai-ops", (_request, response) => {
   response.json({
-    provider: "Vertex AI Gemini",
-    mode: process.env.VERTEX_AI_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : "fallback",
+    provider: aiMode === "openai-compatible" ? "OpenAI-compatible Gemini" : "Vertex AI Gemini",
+    mode: aiMode,
     tasks: [
       "text: language detection, translation, civic category",
       "image: civic-issue validation and caption (Gemini vision)",
@@ -126,7 +127,7 @@ app.get("/api/moderation", async (_request, response) => {
 
 app.get("/api/integrations", (_request, response) => {
   response.json({
-    enabled: ["Postgres", "Batch data pipeline", "Vertex AI Gemini (text/image/voice)", "Kubernetes", "Argo CD", "Helm"],
+    enabled: ["Postgres", "Batch data pipeline", `${aiMode} AI runtime`, "Kubernetes", "Argo CD", "Helm"],
     planned: ["WhatsApp Cloud API", "BHASHINI", "Vertex Speech-to-Text Chirp", "Cloud Vision OCR", "BigQuery GIS", "data.gov.in", "NDAP"],
     local: {
       database: isDatabaseEnabled() ? "postgres" : "memory",
