@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 CLUSTER_NAME="${CLUSTER_NAME:-loksetu}"
 NAMESPACE="${NAMESPACE:-people-priority}"
-LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629-observability-actions}"
+LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629-maps-fallback}"
 GOOGLE_MAPS_SECRET_NAME="${GOOGLE_MAPS_SECRET_NAME:-people-priority-google-maps}"
 OPENAI_COMPATIBLE_SECRET_NAME="${OPENAI_COMPATIBLE_SECRET_NAME:-people-priority-openai-compatible}"
 
