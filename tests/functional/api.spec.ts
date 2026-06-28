@@ -36,6 +36,13 @@ test.describe("API functional flow", () => {
     await expect(batchStatus).toBeOK();
     expect((await batchStatus.json()).mode).toBe("batch");
 
+    const aiOps = await api.get("/api/ai-ops");
+    await expect(aiOps).toBeOK();
+    await expect(await aiOps.json()).toMatchObject({
+      provider: "Vertex AI Gemini",
+      mode: "fallback"
+    });
+
     await api.dispose();
   });
 
