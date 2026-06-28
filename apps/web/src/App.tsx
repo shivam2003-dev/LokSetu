@@ -148,6 +148,7 @@ declare global {
   interface Window {
     google?: any;
     __loksetuGoogleMapsPromise?: Promise<void>;
+    __loksetuGoogleMapsLoaded?: () => void;
   }
 }
 
@@ -761,16 +762,7 @@ function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: Dashb
           ]
         });
 
-        hotspots.forEach((hotspot, index) => {
-          const marker = new window.google.maps.Marker({
-            map,
-            position: { lat: hotspot.lat, lng: hotspot.lng },
-            title: `${hotspot.category} in ${hotspot.ward}`,
-            label: String(index + 1),
-            optimized: true
-          });
-          marker.addListener("click", () => openProject(hotspot.projectId));
-        });
+        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, () => openProject(hotspot.projectId)));
 
         if (hotspots.length > 1) map.fitBounds(bounds, 60);
         setMapState("ready");
@@ -890,6 +882,38 @@ function mapStatusText(state: MapLoadState) {
   return "Local map fallback";
 }
 
+function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, onClick: () => void) {
+  const position = { lat: hotspot.lat, lng: hotspot.lng };
+  const title = `${hotspot.category} in ${hotspot.ward}`;
+  const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
+
+  if (AdvancedMarkerElement) {
+    const content = document.createElement("button");
+    content.className = "google-hotspot-marker";
+    content.type = "button";
+    content.textContent = String(index + 1);
+    content.title = title;
+
+    const marker = new AdvancedMarkerElement({
+      map,
+      position,
+      title,
+      content
+    });
+    marker.addListener("click", onClick);
+    return;
+  }
+
+  const marker = new window.google.maps.Marker({
+    map,
+    position,
+    title,
+    label: String(index + 1),
+    optimized: true
+  });
+  marker.addListener("click", onClick);
+}
+
 function loadGoogleMaps(key: string): Promise<void> {
   if (window.google?.maps) return Promise.resolve();
   if (window.__loksetuGoogleMapsPromise) return window.__loksetuGoogleMapsPromise;
@@ -898,12 +922,15 @@ function loadGoogleMaps(key: string): Promise<void> {
     const script = document.createElement("script");
     const params = new URLSearchParams({
       key,
-      v: "weekly"
+      v: "weekly",
+      libraries: "marker",
+      loading: "async",
+      callback: "__loksetuGoogleMapsLoaded"
     });
+    window.__loksetuGoogleMapsLoaded = () => resolve();
     script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
     script.async = true;
     script.defer = true;
-    script.onload = () => resolve();
     script.onerror = () => reject(new Error("Google Maps failed to load"));
     document.head.appendChild(script);
   });

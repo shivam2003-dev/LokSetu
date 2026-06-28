@@ -1693,6 +1693,26 @@ meter::-moz-meter-bar {
   height: 100%;
 }
 
+.google-hotspot-marker {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--saffron);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 10px 22px rgba(183, 72, 15, 0.32);
+  cursor: pointer;
+}
+
+.google-hotspot-marker:hover {
+  background: #c2410c;
+}
+
 .fallback-map {
   position: absolute;
   inset: 0;
