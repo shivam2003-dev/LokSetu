@@ -1941,6 +1941,141 @@ meter::-moz-meter-bar {
   padding: 10px 12px;
 }
 
+.map-intel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr);
+  gap: 12px;
+}
+
+.map-intel-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+  padding: 14px;
+}
+
+.map-intel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+}
+
+.map-intel-head div {
+  display: grid;
+  gap: 3px;
+}
+
+.map-intel-head strong {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 900;
+}
+
+.map-intel-head span,
+.map-intel-head small {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.layer-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--base);
+  padding: 4px;
+}
+
+.layer-tabs button {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.layer-tabs button.active {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.boundary-list,
+.cluster-list,
+.boundary-provenance {
+  display: grid;
+  gap: 8px;
+}
+
+.boundary-list button,
+.cluster-list button,
+.boundary-provenance article,
+.cluster-context {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: #fff;
+  padding: 10px;
+  text-align: left;
+}
+
+.boundary-list button:hover,
+.cluster-list button:hover {
+  border-color: var(--saffron);
+  box-shadow: var(--shadow-sm);
+}
+
+.boundary-list button.selected,
+.cluster-list button.selected {
+  border-color: var(--saffron);
+  box-shadow: inset 3px 0 0 var(--saffron);
+}
+
+.boundary-list span,
+.cluster-list span,
+.boundary-provenance span {
+  display: block;
+  color: var(--saffron);
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.boundary-list strong,
+.cluster-list strong,
+.boundary-provenance strong,
+.cluster-context strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.boundary-list small,
+.cluster-list small,
+.boundary-provenance small,
+.boundary-list em,
+.boundary-provenance em,
+.cluster-context p {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .hotspot {
   position: absolute;
   z-index: 3;
@@ -2953,6 +3088,9 @@ meter::-moz-meter-bar {
     grid-template-columns: 1fr;
   }
   .map-layout {
+    grid-template-columns: 1fr;
+  }
+  .map-intel-grid {
     grid-template-columns: 1fr;
   }
   .hotspot-list {

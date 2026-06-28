@@ -13,6 +13,7 @@ import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, copilotKnowledgeSummary } from "./copilot.js";
 import { buildEnterpriseSituation } from "./enterprise.js";
+import { BoundaryLevel, buildBoundaryFeatures, buildHotspotClusters } from "./mapIntelligence.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -62,6 +63,14 @@ const copilotQuerySchema = z.object({
   question: z.string().trim().min(3).max(1_000),
   language: z.string().trim().min(2).max(40).optional(),
   projectId: z.string().trim().optional()
+});
+
+const mapBoundaryQuerySchema = z.object({
+  level: z.enum(["state", "district", "constituency", "ward"]).optional()
+});
+
+const mapClusterQuerySchema = z.object({
+  zoom: z.coerce.number().int().min(1).max(18).default(5)
 });
 
 const simulationScenarios = [
@@ -318,6 +327,44 @@ app.get("/api/enterprise/situation-room", async (_request, response) => {
   const submissions = await getSubmissions();
   const dashboard = await buildDashboardWithOverrides({ scope: "global" });
   response.json(buildEnterpriseSituation(dashboard.projects, submissions));
+});
+
+app.get("/api/maps/boundaries", async (request, response) => {
+  const parsed = mapBoundaryQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid boundary query", details: parsed.error.flatten() });
+    return;
+  }
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const features = buildBoundaryFeatures(dashboard.projects)
+    .filter((feature) => !parsed.data.level || feature.level === parsed.data.level);
+  const levels: BoundaryLevel[] = ["state", "district", "constituency", "ward"];
+  response.json({
+    generatedAt: dashboard.generatedAt,
+    sourceStatus: "official_boundary_procurement_required",
+    levels,
+    features,
+    notes: [
+      "Local boundary features are bbox-derived fixtures generated from ranked project coordinates.",
+      "Production must replace these fixtures with official Survey of India/ISRO Bhuvan/ECI boundary layers or approved state GIS vector tiles.",
+      "Every map response exposes source, version, freshness, and simplification metadata so MPs can see whether a layer is official or provisional."
+    ]
+  });
+});
+
+app.get("/api/maps/clusters", async (request, response) => {
+  const parsed = mapClusterQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid cluster query", details: parsed.error.flatten() });
+    return;
+  }
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  response.json({
+    generatedAt: dashboard.generatedAt,
+    zoom: parsed.data.zoom,
+    source: "ranked_project_hotspots",
+    clusters: buildHotspotClusters(dashboard.projects, parsed.data.zoom)
+  });
 });
 
 app.get("/api/external-signals", async (request, response) => {

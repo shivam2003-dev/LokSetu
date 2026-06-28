@@ -15,12 +15,19 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".hotspot-row").first()).toBeVisible();
     await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
     await expect(page.getByText("Issue drilldown")).toBeVisible();
+    await expect(page.getByText("Boundary layers")).toBeVisible();
+    await expect(page.getByText("Hotspot clusters")).toBeVisible();
+    await expect(page.getByText("Boundary provenance")).toBeVisible();
+    await page.getByRole("button", { name: "district", exact: true }).click();
+    await expect(page.locator(".boundary-list button").first()).toContainText(/production boundary connector|local-simplified-boundary/);
     await page.getByRole("button", { name: "All India" }).click();
     await expect(page.locator(".hotspot-row")).toHaveCount(8);
     await page.locator(".hotspot-row").nth(1).click();
     await expect(page.getByLabel("Applied signal filters")).toContainText("rank=2");
     await expect(page.getByText("Related complaints")).toBeVisible();
     await expect(page.getByText("Evidence timeline")).toBeVisible();
+    await page.locator(".cluster-list button").first().click();
+    await expect(page.getByText("Cluster context")).toBeVisible();
 
     await page.getByRole("button", { name: "My area" }).click();
     await page.getByLabel("State").selectOption("Uttar Pradesh");

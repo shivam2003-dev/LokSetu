@@ -116,6 +116,26 @@ test.describe("API functional flow", () => {
     await expect(dataSources).toBeOK();
     expect((await dataSources.json()).snapshots.length).toBeGreaterThan(0);
 
+    const boundaries = await api.get("/api/maps/boundaries");
+    await expect(boundaries).toBeOK();
+    const boundaryPayload = await boundaries.json();
+    expect(boundaryPayload.sourceStatus).toBe("official_boundary_procurement_required");
+    expect(boundaryPayload.levels).toEqual(["state", "district", "constituency", "ward"]);
+    expect(boundaryPayload.features.length).toBeGreaterThan(0);
+    expect(boundaryPayload.features[0]).toHaveProperty("source");
+    expect(boundaryPayload.features[0]).toHaveProperty("version");
+    expect(boundaryPayload.features[0]).toHaveProperty("freshness");
+    expect(boundaryPayload.features[0].simplification).toHaveProperty("toleranceMeters");
+    expect(boundaryPayload.features.map((feature: { level: string }) => feature.level)).toContain("ward");
+
+    const clusters = await api.get("/api/maps/clusters?zoom=5");
+    await expect(clusters).toBeOK();
+    const clusterPayload = await clusters.json();
+    expect(clusterPayload.source).toBe("ranked_project_hotspots");
+    expect(clusterPayload.clusters.length).toBeGreaterThan(0);
+    expect(clusterPayload.clusters[0].projectIds.length).toBeGreaterThan(0);
+    expect(clusterPayload.clusters[0].categories.length).toBeGreaterThan(0);
+
     const intelligenceSources = await api.get("/api/intelligence/sources");
     await expect(intelligenceSources).toBeOK();
     const sourcePayload = await intelligenceSources.json();

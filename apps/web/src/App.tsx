@@ -115,6 +115,47 @@ type ClientConfig = {
   generatedAt: string;
 };
 
+type BoundaryLevel = "state" | "district" | "constituency" | "ward";
+type BoundaryFeature = {
+  id: string;
+  level: BoundaryLevel;
+  name: string;
+  source: string;
+  sourceUrl: string;
+  version: string;
+  freshness: "fresh" | "stale" | "procurement_required";
+  simplification: {
+    toleranceMeters: number;
+    method: string;
+  };
+  bbox: [number, number, number, number];
+  centroid: { lat: number; lng: number };
+  projectIds: string[];
+};
+type MapBoundaryResponse = {
+  generatedAt: string;
+  sourceStatus: string;
+  levels: BoundaryLevel[];
+  features: BoundaryFeature[];
+  notes: string[];
+};
+type HotspotCluster = {
+  id: string;
+  level: "cluster" | "single";
+  centroid: { lat: number; lng: number };
+  count: number;
+  score: number;
+  categories: string[];
+  projectIds: string[];
+  label: string;
+};
+type MapClusterResponse = {
+  generatedAt: string;
+  zoom: number;
+  source: string;
+  clusters: HotspotCluster[];
+};
+
 type AnalyticsResponse = {
   signals: Array<{ name: string; value: string; trend: string }>;
   categoryMix: Array<{ category: string; score: number; demand: number; rating: number }>;
@@ -332,6 +373,21 @@ const fallbackClientConfig: ClientConfig = {
   generatedAt: new Date().toISOString()
 };
 
+const fallbackMapBoundaries: MapBoundaryResponse = {
+  generatedAt: new Date().toISOString(),
+  sourceStatus: "local_fallback",
+  levels: ["state", "district", "constituency", "ward"],
+  features: [],
+  notes: []
+};
+
+const fallbackMapClusters: MapClusterResponse = {
+  generatedAt: new Date().toISOString(),
+  zoom: 5,
+  source: "local_fallback",
+  clusters: []
+};
+
 const problemCards: Array<{ icon: typeof Home; title: string; body: string }> = [
   {
     icon: GitBranch,
@@ -443,6 +499,8 @@ export default function App() {
   const [moderation, setModeration] = useState<ModerationResponse | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
   const [audit, setAudit] = useState<AuditResponse | null>(null);
+  const [mapBoundaries, setMapBoundaries] = useState<MapBoundaryResponse>(fallbackMapBoundaries);
+  const [mapClusters, setMapClusters] = useState<MapClusterResponse>(fallbackMapClusters);
   const [notice, setNotice] = useState("Connecting");
   const [activeProjectId, setActiveProjectId] = useState(fallbackProject.id);
 
@@ -475,7 +533,7 @@ export default function App() {
 
   async function refreshAll() {
     try {
-      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextEnterprise, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
+      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextEnterprise, nextAiOps, nextModeration, nextIntegrations, nextAudit, nextBoundaries, nextClusters] = await Promise.all([
       requestJson<ClientConfig>("/api/client-config"),
       requestJson<ContextResponse>("/api/context"),
       fetchDashboard(filters),
@@ -491,7 +549,9 @@ export default function App() {
       getJson<AiOpsResponse>("/api/ai-ops", { provider: "Vertex AI", mode: "fallback", tasks: [], guardrails: [] }),
       getJson<ModerationResponse>("/api/moderation", { queue: [], policies: [] }),
       getJson<IntegrationsResponse>("/api/integrations", { enabled: [], planned: [], local: {} }),
-      getJson<AuditResponse>("/api/audit", { events: [] })
+      getJson<AuditResponse>("/api/audit", { events: [] }),
+      getJson<MapBoundaryResponse>("/api/maps/boundaries", fallbackMapBoundaries),
+      getJson<MapClusterResponse>("/api/maps/clusters?zoom=5", fallbackMapClusters)
       ]);
       setClientConfig(mergeClientConfig(nextConfig));
       setContext(nextContext);
@@ -506,6 +566,8 @@ export default function App() {
     setModeration(nextModeration);
     setIntegrations(nextIntegrations);
     setAudit(nextAudit);
+    setMapBoundaries(nextBoundaries);
+    setMapClusters(nextClusters);
     setActiveProjectId(nextDashboard.projects[0]?.id ?? fallbackProject.id);
       setApiConnected(true);
       setConnectionError(null);
@@ -639,7 +701,7 @@ export default function App() {
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
         {page === "home" ? <HomePage dashboard={dashboard} aiOps={aiOps} integrations={integrations} setPage={setPage} citizenAppUrl={effectiveCitizenAppUrl} /> : null}
-        {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
+        {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} sources={intelligenceSources} daily={dailyIntelligence} /> : null}
@@ -937,16 +999,21 @@ function ExplorePage({
   dashboard,
   regions,
   maps,
+  boundaries,
+  clusters,
   setActiveProjectId,
   setPage
 }: {
   dashboard: DashboardResponse;
   regions: RegionResponse | null;
   maps: ClientConfig["maps"];
+  boundaries: MapBoundaryResponse;
+  clusters: MapClusterResponse;
   setActiveProjectId: (id: string) => void;
   setPage: (page: Page) => void;
 }) {
   const [selectedProjectId, setSelectedProjectId] = useState(dashboard.projects[0]?.id ?? fallbackProject.id);
+  const [boundaryLevel, setBoundaryLevel] = useState<BoundaryLevel>("ward");
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
 
   useEffect(() => {
@@ -964,10 +1031,19 @@ function ExplorePage({
     <section className="two-grid wide-left">
       <section className="panel">
         <PanelTitle title="All-India issue atlas" icon={Globe2} />
-        <IssueMap dashboard={dashboard} maps={maps} selectedProjectId={selectedProject.id} selectProject={setSelectedProjectId} />
+        <IssueMap
+          dashboard={dashboard}
+          maps={maps}
+          boundaries={boundaries}
+          clusters={clusters}
+          boundaryLevel={boundaryLevel}
+          setBoundaryLevel={setBoundaryLevel}
+          selectedProjectId={selectedProject.id}
+          selectProject={setSelectedProjectId}
+        />
       </section>
       <section className="explore-side">
-        <HotspotDrilldown project={selectedProject} relatedProjects={dashboard.projects} openProjectRoom={openProjectRoom} />
+        <HotspotDrilldown project={selectedProject} relatedProjects={dashboard.projects} boundaries={boundaries} clusters={clusters} openProjectRoom={openProjectRoom} />
         <section className="panel">
           <PanelTitle title="State onboarding" icon={Flag} />
           <div className="table-list compact-list">
@@ -988,11 +1064,19 @@ function ExplorePage({
 function IssueMap({
   dashboard,
   maps,
+  boundaries,
+  clusters,
+  boundaryLevel,
+  setBoundaryLevel,
   selectedProjectId,
   selectProject
 }: {
   dashboard: DashboardResponse;
   maps: ClientConfig["maps"];
+  boundaries: MapBoundaryResponse;
+  clusters: MapClusterResponse;
+  boundaryLevel: BoundaryLevel;
+  setBoundaryLevel: (level: BoundaryLevel) => void;
   selectedProjectId: string;
   selectProject: (id: string) => void;
 }) {
@@ -1090,7 +1174,85 @@ function IssueMap({
           Google Maps key not configured or unavailable. Showing the local geospatial fallback with the same backend hotspot coordinates.
         </p>
       ) : null}
+      <MapIntelligencePanel
+        boundaries={boundaries}
+        clusters={clusters}
+        boundaryLevel={boundaryLevel}
+        setBoundaryLevel={setBoundaryLevel}
+        selectedProjectId={selectedProjectId}
+        selectProject={selectProject}
+      />
     </div>
+  );
+}
+
+function MapIntelligencePanel({
+  boundaries,
+  clusters,
+  boundaryLevel,
+  setBoundaryLevel,
+  selectedProjectId,
+  selectProject
+}: {
+  boundaries: MapBoundaryResponse;
+  clusters: MapClusterResponse;
+  boundaryLevel: BoundaryLevel;
+  setBoundaryLevel: (level: BoundaryLevel) => void;
+  selectedProjectId: string;
+  selectProject: (id: string) => void;
+}) {
+  const activeFeatures = boundaries.features.filter((feature) => feature.level === boundaryLevel);
+  const selectedFeature = boundaries.features.find((feature) => feature.projectIds.includes(selectedProjectId));
+  return (
+    <section className="map-intel-grid" aria-label="Boundary and cluster intelligence">
+      <article className="map-intel-card">
+        <div className="map-intel-head">
+          <div>
+            <strong>Boundary layers</strong>
+            <span>{boundaries.sourceStatus.replaceAll("_", " ")}</span>
+          </div>
+          <small>{activeFeatures.length} {boundaryLevel} features</small>
+        </div>
+        <div className="layer-tabs" role="tablist" aria-label="Boundary level">
+          {boundaries.levels.map((level) => (
+            <button key={level} className={boundaryLevel === level ? "active" : ""} onClick={() => setBoundaryLevel(level)} type="button">
+              {level}
+            </button>
+          ))}
+        </div>
+        <div className="boundary-list">
+          {(activeFeatures.length ? activeFeatures : boundaries.features).slice(0, 4).map((feature) => (
+            <button key={feature.id} className={feature.projectIds.includes(selectedProjectId) ? "selected" : ""} onClick={() => selectProject(feature.projectIds[0] ?? selectedProjectId)} type="button">
+              <span>{feature.level}</span>
+              <strong>{feature.name}</strong>
+              <small>{feature.source} · {feature.version}</small>
+              <em>{feature.freshness} · {feature.simplification.toleranceMeters}m simplification</em>
+            </button>
+          ))}
+        </div>
+        {selectedFeature ? (
+          <p className="map-note">Selected issue intersects {selectedFeature.name}; source freshness is {selectedFeature.freshness}.</p>
+        ) : null}
+      </article>
+      <article className="map-intel-card">
+        <div className="map-intel-head">
+          <div>
+            <strong>Hotspot clusters</strong>
+            <span>{clusters.source} · zoom {clusters.zoom}</span>
+          </div>
+          <small>{clusters.clusters.length} clusters</small>
+        </div>
+        <div className="cluster-list">
+          {clusters.clusters.slice(0, 5).map((cluster) => (
+            <button key={cluster.id} className={cluster.projectIds.includes(selectedProjectId) ? "selected" : ""} onClick={() => selectProject(cluster.projectIds[0] ?? selectedProjectId)} type="button">
+              <span>{cluster.count} issues</span>
+              <strong>{cluster.label}</strong>
+              <small>{cluster.categories.join(", ")} · score {cluster.score}</small>
+            </button>
+          ))}
+        </div>
+      </article>
+    </section>
   );
 }
 
@@ -1123,10 +1285,14 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
 function HotspotDrilldown({
   project,
   relatedProjects,
+  boundaries,
+  clusters,
   openProjectRoom
 }: {
   project: RankedProject;
   relatedProjects: RankedProject[];
+  boundaries: MapBoundaryResponse;
+  clusters: MapClusterResponse;
   openProjectRoom: (id: string) => void;
 }) {
   const related = relatedProjects
@@ -1144,6 +1310,10 @@ function HotspotDrilldown({
     message: `${project.category} issue reported in ${project.ward}`,
     signal: project.languageMix[index % Math.max(1, project.languageMix.length)] ?? "Local language"
   }));
+  const intersectingBoundaries = boundaries.features
+    .filter((feature) => feature.projectIds.includes(project.id))
+    .sort((a, b) => boundaryOrder(a.level) - boundaryOrder(b.level));
+  const intersectingCluster = clusters.clusters.find((cluster) => cluster.projectIds.includes(project.id));
 
   return (
     <aside className="panel observability-drilldown" aria-label="Selected issue drilldown">
@@ -1184,6 +1354,36 @@ function HotspotDrilldown({
           ))}
         </div>
       </section>
+
+      <section className="drilldown-section">
+        <div className="drilldown-section-title">
+          <strong>Boundary provenance</strong>
+          <span>source visible to operators</span>
+        </div>
+        <div className="boundary-provenance">
+          {intersectingBoundaries.map((feature) => (
+            <article key={feature.id}>
+              <span>{feature.level}</span>
+              <strong>{feature.name}</strong>
+              <small>{feature.source}</small>
+              <em>{feature.version} · {feature.freshness}</em>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {intersectingCluster ? (
+        <section className="drilldown-section">
+          <div className="drilldown-section-title">
+            <strong>Cluster context</strong>
+            <span>{intersectingCluster.count} ranked issues nearby</span>
+          </div>
+          <div className="cluster-context">
+            <strong>{intersectingCluster.label}</strong>
+            <p>{intersectingCluster.categories.join(", ")} signals at score {intersectingCluster.score}; centroid {intersectingCluster.centroid.lat}, {intersectingCluster.centroid.lng}.</p>
+          </div>
+        </section>
+      ) : null}
 
       <section className="drilldown-section">
         <div className="drilldown-section-title">
@@ -1243,6 +1443,10 @@ function HotspotDrilldown({
       </section>
     </aside>
   );
+}
+
+function boundaryOrder(level: BoundaryLevel) {
+  return ["state", "district", "constituency", "ward"].indexOf(level);
 }
 
 function buildMapHotspots(dashboard: DashboardResponse): Array<Hotspot & { projectId: string }> {

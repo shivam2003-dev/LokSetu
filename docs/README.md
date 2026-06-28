@@ -8,6 +8,7 @@ Architecture and operating notes for LokSetu.
 - `diagrams.md`: Mermaid architecture diagrams.
 - `ai-pipeline.md`: Vertex/OpenAI-compatible AI flow and guardrails.
 - `batch-data-pipeline.md`: batch-first intake and scoring.
+- `maps-boundaries.md`: Google Maps runtime behavior, official boundary procurement path, and hotspot clustering.
 - `whatsapp-setup.md`: WhatsApp simulator and webhook setup.
 
 ## Maintenance
