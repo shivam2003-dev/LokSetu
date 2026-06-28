@@ -43,11 +43,8 @@ export async function initDatabase(): Promise<void> {
     )
   `);
 
-  const existing = await pool.query<{ count: string }>("select count(*) from submissions");
-  if (Number(existing.rows[0]?.count ?? 0) === 0) {
-    for (const submission of seedSubmissions) {
-      await insertSubmission(submission);
-    }
+  for (const submission of seedSubmissions) {
+    await insertSubmission(submission);
   }
 }
 

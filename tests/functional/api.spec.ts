@@ -12,7 +12,11 @@ test.describe("API functional flow", () => {
 
     const priorities = await api.get("/api/priorities?scope=global");
     await expect(priorities).toBeOK();
-    expect((await priorities.json()).projects.length).toBeGreaterThan(0);
+    const globalPriorities = await priorities.json();
+    expect(globalPriorities.projects.length).toBeGreaterThanOrEqual(8);
+    expect(globalPriorities.hotspots.length).toBeGreaterThanOrEqual(6);
+    expect(globalPriorities.projects.map((project: { category: string }) => project.category)).toContain("Sanitation");
+    expect(globalPriorities.projects.map((project: { category: string }) => project.category)).toContain("Digital Access");
 
     const submission = await api.post("/api/submissions", {
       data: {

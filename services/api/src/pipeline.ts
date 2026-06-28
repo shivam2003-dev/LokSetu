@@ -6,14 +6,20 @@ const categoryTerms: Record<string, string[]> = {
   Education: ["school", "classroom", "teacher", "toilet", "student", "bench", "enrollment"],
   Roads: ["road", "pothole", "street", "bridge", "traffic", "ambulance", "flood"],
   Health: ["clinic", "hospital", "doctor", "medicine", "elderly", "opd", "health"],
-  Water: ["water", "tap", "tanker", "drinking", "pipeline", "supply"]
+  Water: ["water", "tap", "tanker", "drinking", "pipeline", "supply"],
+  Sanitation: ["garbage", "waste", "drain", "sewer", "toilet", "cleaning", "solid waste"],
+  Power: ["streetlight", "light", "electricity", "transformer", "power", "dark"],
+  "Digital Access": ["internet", "network", "mobile", "tower", "broadband", "digital", "signal"]
 };
 
 const projectTitles: Record<string, string> = {
   Education: "Repair classrooms and toilets",
   Roads: "Resurface priority access road",
   Health: "Add evening clinic access",
-  Water: "Stabilize drinking water supply"
+  Water: "Stabilize drinking water supply",
+  Sanitation: "Upgrade drainage and waste collection",
+  Power: "Restore streetlights and safe public lighting",
+  "Digital Access": "Improve mobile and broadband access"
 };
 
 type SubmissionInput = {
@@ -97,13 +103,17 @@ export function buildDashboard(submissions: Submission[], filters: DashboardFilt
       botRisk: repeatedTextRatio(visible) > 0.35 ? "medium" : "low"
     },
     projects,
-    hotspots: projects.slice(0, 6).map((project, index) => ({
-      ward: project.ward,
-      category: project.category,
-      intensity: project.score,
-      lat: 28.57 + index * 0.018,
-      lng: 77.18 + index * 0.021
-    }))
+    hotspots: projects.slice(0, 8).map((project, index) => {
+      const civic = civicForProject(project);
+      const fallback = seededHotspot(index);
+      return {
+        ward: project.ward,
+        category: project.category,
+        intensity: project.score,
+        lat: civic?.lat ?? fallback.lat,
+        lng: civic?.lng ?? fallback.lng
+      };
+    })
   };
 }
 
@@ -165,6 +175,30 @@ function rationale(category: string, indicators: string[], demandCount: number):
 
 function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
+function civicForProject(project: Pick<RankedProject, "state" | "district" | "ward" | "category">) {
+  return civicDatasets.find(
+    (dataset) =>
+      dataset.state === project.state &&
+      dataset.district === project.district &&
+      dataset.ward === project.ward &&
+      dataset.category === project.category
+  );
+}
+
+function seededHotspot(index: number) {
+  const points = [
+    { lat: 28.62, lng: 77.3 },
+    { lat: 20.01, lng: 73.79 },
+    { lat: 13.08, lng: 80.27 },
+    { lat: 22.57, lng: 88.36 },
+    { lat: 26.85, lng: 80.95 },
+    { lat: 12.97, lng: 77.59 },
+    { lat: 23.03, lng: 72.58 },
+    { lat: 26.91, lng: 75.79 }
+  ];
+  return points[index % points.length];
 }
 
 function applyFilters(submissions: Submission[], filters: DashboardFilters): Submission[] {

@@ -94,6 +94,8 @@ export type CivicDataset = {
   state: string;
   district: string;
   ward: string;
+  lat?: number;
+  lng?: number;
   mpId: string;
   mpName: string;
   category: string;
