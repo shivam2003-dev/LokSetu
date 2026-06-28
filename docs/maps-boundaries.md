@@ -22,6 +22,42 @@ LokSetu separates map rendering from geospatial intelligence so the platform can
 
 Current local boundaries are bbox-derived fixtures generated from ranked project coordinates. They are marked `official_boundary_procurement_required` and `freshness=procurement_required`.
 
+## Official GeoJSON Ingestion
+
+The API will load official boundaries from `BOUNDARY_GEOJSON_DIR` when the directory is mounted. Files may be `.geojson` or `.json` and must contain GeoJSON `Feature` or `FeatureCollection` documents.
+
+Each feature should include these properties:
+
+```json
+{
+  "level": "ward",
+  "name": "Kalindi Nagar",
+  "source": "Approved State GIS Portal",
+  "sourceUrl": "https://example.gov.in/gis",
+  "version": "2026-06",
+  "freshness": "fresh",
+  "toleranceMeters": 25,
+  "simplificationMethod": "official vector tile simplification"
+}
+```
+
+Enable the mount through Helm:
+
+```yaml
+api:
+  boundaries:
+    configMapName: loksetu-boundaries-delhi
+    mountPath: /app/services/api/boundaries
+```
+
+Create the ConfigMap from approved files:
+
+```bash
+kubectl create configmap loksetu-boundaries-delhi \
+  --from-file=delhi-wards.geojson \
+  -n people-priority
+```
+
 ## Production Boundary Sources
 
 Production rollout must replace local fixtures with approved GeoJSON/vector-tile layers from official or state-authorized sources, such as:

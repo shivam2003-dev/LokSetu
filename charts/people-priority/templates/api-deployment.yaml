@@ -63,8 +63,18 @@ spec:
                   name: {{ .Values.api.googleMaps.existingSecret | quote }}
                   key: {{ .Values.api.googleMaps.secretKey | quote }}
             {{- end }}
+            {{- if .Values.api.boundaries.configMapName }}
+            - name: BOUNDARY_GEOJSON_DIR
+              value: {{ .Values.api.boundaries.mountPath | quote }}
+            {{- end }}
             - name: BATCH_SCHEDULE
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
+          {{- if .Values.api.boundaries.configMapName }}
+          volumeMounts:
+            - name: boundary-geojson
+              mountPath: {{ .Values.api.boundaries.mountPath | quote }}
+              readOnly: true
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz
@@ -79,4 +89,10 @@ spec:
             periodSeconds: 20
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if .Values.api.boundaries.configMapName }}
+      volumes:
+        - name: boundary-geojson
+          configMap:
+            name: {{ .Values.api.boundaries.configMapName | quote }}
+      {{- end }}
 {{- end }}

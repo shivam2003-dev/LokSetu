@@ -339,9 +339,12 @@ app.get("/api/maps/boundaries", async (request, response) => {
   const features = buildBoundaryFeatures(dashboard.projects)
     .filter((feature) => !parsed.data.level || feature.level === parsed.data.level);
   const levels: BoundaryLevel[] = ["state", "district", "constituency", "ward"];
+  const sourceStatus = features.some((feature) => feature.freshness === "procurement_required")
+    ? "official_boundary_procurement_required"
+    : "official_boundary_configured";
   response.json({
     generatedAt: dashboard.generatedAt,
-    sourceStatus: "official_boundary_procurement_required",
+    sourceStatus,
     levels,
     features,
     notes: [
