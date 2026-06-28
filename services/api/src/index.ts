@@ -7,7 +7,7 @@ import { areaMappings, mpProfiles, seedSubmissions, seedUsers, sourceSnapshots }
 import { countRawIntakesByStatus, initDatabase, insertRawIntake, isDatabaseEnabled, listRecentBatchRuns, listSubmissions } from "./db.js";
 import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
-import { RankedProject, UserProfile } from "./types.js";
+import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
 import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
 
@@ -19,6 +19,8 @@ let memorySubmissions = [...seedSubmissions];
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
 const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
+const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
+const memoryProjectRatings = new Map<string, Array<{ rating: number; createdAt: string }>>();
 
 const dashboardQuerySchema = z.object({
   scope: z.enum(["local", "global", "mp"]).optional(),
@@ -45,6 +47,11 @@ const mappingUpdateSchema = z.object({
   ward: z.string(),
   mpId: z.string(),
   wardStaffUserIds: z.array(z.string()).default([])
+});
+
+const projectStatusSchema = z.object({
+  actorId: z.string().default("mp-user-delhi-central"),
+  status: z.enum(["review", "shortlist", "approved"])
 });
 
 const simulationScenarios = [
@@ -208,7 +215,7 @@ app.get("/api/regions", (_request, response) => {
 
 app.get("/api/analytics", async (_request, response) => {
   const submissions = await getSubmissions();
-  const dashboard = buildDashboard(submissions, { scope: "global" });
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
   response.json({
     summary: dashboard.totals,
     topProjects: dashboard.projects.slice(0, 5),
@@ -291,7 +298,7 @@ app.get("/api/public/projects", async (request, response) => {
     return;
   }
   const { limit, offset, category, ...filters } = parsed.data;
-  const dashboard = buildDashboard(await getSubmissions(), filters);
+  const dashboard = await buildDashboardWithOverrides(filters);
   const sorted = dashboard.projects
     .filter((project) => !category || project.category.toLowerCase() === category.toLowerCase())
     .sort((a, b) => b.score - a.score || b.demandCount - a.demandCount || a.title.localeCompare(b.title));
@@ -306,7 +313,7 @@ app.get("/api/public/projects", async (request, response) => {
 });
 
 app.get("/api/public/projects/:projectId", async (request, response) => {
-  const dashboard = buildDashboard(await getSubmissions(), { scope: "global" });
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
   const project = dashboard.projects.find((item) => item.id === request.params.projectId);
   if (!project) {
     response.status(404).json({ error: "Project not found" });
@@ -335,7 +342,7 @@ app.get("/api/mp/queue", async (request, response) => {
     response.status(403).json({ error: "Role is not allowed to access this MP queue" });
     return;
   }
-  const dashboard = buildDashboard(await getSubmissions(), { scope: "mp", mpId: targetMpId });
+  const dashboard = await buildDashboardWithOverrides({ scope: "mp", mpId: targetMpId });
   response.json({
     actor: publicUser(actor),
     mpId: targetMpId,
@@ -432,7 +439,7 @@ app.get("/api/audit", async (_request, response) => {
 app.get("/api/priorities", async (request, response) => {
   const parsed = dashboardQuerySchema.safeParse(request.query);
   const submissions = await getSubmissions();
-  response.json(buildDashboard(submissions, parsed.success ? parsed.data : {}));
+  response.json(await buildDashboardWithOverrides(parsed.success ? parsed.data : {}));
 });
 
 // Dashboard / power-user submission (kept for backward compatibility).
@@ -462,13 +469,66 @@ app.post("/api/simulation/submit", async (request, response) => {
   );
 });
 
+app.patch("/api/projects/:projectId/status", async (request, response) => {
+  const parsed = projectStatusSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid project status update", details: parsed.error.flatten() });
+    return;
+  }
+  const actor = getActor(parsed.data.actorId);
+  if (!actor || !["mp", "district_admin", "state_admin"].includes(actor.role)) {
+    response.status(403).json({ error: "Role is not allowed to update project status" });
+    return;
+  }
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const project = dashboard.projects.find((item) => item.id === request.params.projectId);
+  if (!project) {
+    response.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (actor.role === "mp" && actor.mpId !== project.mpId) {
+    response.status(403).json({ error: "MP can update only their own project queue" });
+    return;
+  }
+
+  const updatedAt = new Date().toISOString();
+  memoryProjectStatus.set(project.id, { status: parsed.data.status, updatedAt, actor: actor.displayName });
+  memoryAuditEvents.unshift({
+    at: updatedAt,
+    actor: actor.displayName,
+    action: "updated_project_status",
+    object: `${project.title} -> ${parsed.data.status}`,
+    privacyMode: false
+  });
+  const updatedProject = { ...project, status: parsed.data.status };
+  response.json({ project: updatedProject, updatedAt });
+});
+
 app.post("/api/projects/:projectId/ratings", async (request, response) => {
   const parsed = z.object({ rating: z.coerce.number().min(1).max(5) }).safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid rating" });
     return;
   }
-  response.status(201).json({ ok: true, rating: parsed.data.rating });
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const project = dashboard.projects.find((item) => item.id === request.params.projectId);
+  if (!project) {
+    response.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const ratings = memoryProjectRatings.get(project.id) ?? [];
+  ratings.push({ rating: parsed.data.rating, createdAt: new Date().toISOString() });
+  memoryProjectRatings.set(project.id, ratings);
+  const allRatings = [project.averageRating, ...ratings.map((item) => item.rating)];
+  const averageRating = Number((allRatings.reduce((sum, value) => sum + value, 0) / allRatings.length).toFixed(2));
+  response.status(201).json({
+    ok: true,
+    projectId: project.id,
+    rating: parsed.data.rating,
+    ratings: project.ratings + ratings.length,
+    averageRating,
+    message: "Rating recorded for public transparency metrics."
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -562,12 +622,38 @@ async function handleIntake(
     status: "pending_batch",
     message: "Submission received. It will be processed in the next scheduled batch run.",
     nextStep: "Batch worker will run OCR/speech/Vertex AI classification, scoring, clustering, and MP routing.",
-    dashboard: options.friendly ? undefined : buildDashboard(submissions)
+    dashboard: options.friendly ? undefined : applyProjectOverrides(buildDashboard(submissions))
   });
 }
 
 async function getSubmissions() {
   return isDatabaseEnabled() ? listSubmissions() : memorySubmissions;
+}
+
+async function buildDashboardWithOverrides(filters: DashboardFilters = {}) {
+  return applyProjectOverrides(buildDashboard(await getSubmissions(), filters));
+}
+
+function applyProjectOverrides<T extends { projects: RankedProject[] }>(dashboard: T): T {
+  return {
+    ...dashboard,
+    projects: dashboard.projects.map((project) => {
+      const statusOverride = memoryProjectStatus.get(project.id);
+      const ratings = memoryProjectRatings.get(project.id) ?? [];
+      if (!statusOverride && ratings.length === 0) return project;
+      const ratingValues = [project.averageRating, ...ratings.map((item) => item.rating)];
+      const averageRating = ratings.length
+        ? Number((ratingValues.reduce((sum, value) => sum + value, 0) / ratingValues.length).toFixed(2))
+        : project.averageRating;
+      return {
+        ...project,
+        status: statusOverride?.status ?? project.status,
+        averageRating,
+        ratings: project.ratings + ratings.length,
+        evidence: statusOverride ? [`MP status updated to ${statusOverride.status} by ${statusOverride.actor}`, ...project.evidence] : project.evidence
+      };
+    })
+  };
 }
 
 async function enqueueRaw(payload: ReturnType<typeof toRawIntakePayload>) {
@@ -622,6 +708,7 @@ function publicProjectDto(project: RankedProject, includeDetail = false) {
     confidence: project.confidence,
     demandCount: project.demandCount,
     averageRating: project.averageRating,
+    ratings: project.ratings,
     status: project.status,
     rationale: project.rationale,
     sourceSnapshotIds: sourceIds,

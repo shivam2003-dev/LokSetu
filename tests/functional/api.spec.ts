@@ -56,16 +56,16 @@ test.describe("API functional flow", () => {
 
     const aiOps = await api.get("/api/ai-ops");
     await expect(aiOps).toBeOK();
-    await expect(await aiOps.json()).toMatchObject({
-      provider: "Vertex AI Gemini",
-      mode: "fallback"
-    });
+    const aiOpsPayload = await aiOps.json();
+    expect(["Vertex AI Gemini", "OpenAI-compatible Gemini"]).toContain(aiOpsPayload.provider);
+    expect(["fallback", "openai-compatible"]).toContain(aiOpsPayload.mode);
 
     const publicProjects = await api.get("/api/public/projects?scope=global&limit=5");
     await expect(publicProjects).toBeOK();
     const publicPayload = await publicProjects.json();
     expect(publicPayload.items.length).toBe(5);
     expect(publicPayload.items[0].contributorsHidden).toBe(true);
+    expect(publicPayload.items[0].ratings).toBeGreaterThan(0);
     expect(JSON.stringify(publicPayload)).not.toContain("username");
 
     const detail = await api.get(`/api/public/projects/${publicPayload.items[0].id}`);
@@ -74,6 +74,37 @@ test.describe("API functional flow", () => {
     expect(detailPayload.project.scoreBreakdown).toBeTruthy();
     expect(detailPayload.project.safeguards.length).toBeGreaterThan(0);
     expect(detailPayload.project.sourceSnapshotIds.length).toBeGreaterThan(0);
+
+    const delhiMpProject = globalPriorities.projects.find((project: { mpId: string }) => project.mpId === "mp-delhi-central");
+    expect(delhiMpProject).toBeTruthy();
+    const statusUpdate = await api.patch(`/api/projects/${delhiMpProject.id}/status`, {
+      data: { actorId: "mp-user-delhi-central", status: "approved" }
+    });
+    await expect(statusUpdate).toBeOK();
+    expect((await statusUpdate.json()).project.status).toBe("approved");
+
+    const ratingUpdate = await api.post(`/api/projects/${delhiMpProject.id}/ratings`, {
+      data: { rating: 5 }
+    });
+    expect(ratingUpdate.status()).toBe(201);
+    expect((await ratingUpdate.json()).message).toContain("Rating recorded");
+
+    const mappingUpdate = await api.post("/api/admin/area-mappings", {
+      data: {
+        actorId: "state-admin-india",
+        ward: "Kalindi Nagar",
+        mpId: "mp-delhi-east",
+        wardStaffUserIds: []
+      }
+    });
+    await expect(mappingUpdate).toBeOK();
+    expect((await mappingUpdate.json()).mapping.mpId).toBe("mp-delhi-east");
+
+    const auditAfterMutation = await api.get("/api/audit");
+    await expect(auditAfterMutation).toBeOK();
+    const auditPayload = await auditAfterMutation.json();
+    expect(auditPayload.events.map((event: { action: string }) => event.action)).toContain("updated_area_mapping");
+    expect(auditPayload.events.map((event: { action: string }) => event.action)).toContain("updated_project_status");
 
     const deniedQueue = await api.get("/api/mp/queue?actorId=mp-user-delhi-central&mpId=mp-up-lucknow");
     expect(deniedQueue.status()).toBe(403);

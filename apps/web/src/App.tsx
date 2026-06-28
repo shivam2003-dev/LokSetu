@@ -135,6 +135,7 @@ type PublicProject = {
   confidence: number;
   demandCount: number;
   averageRating: number;
+  ratings: number;
   status: RankedProject["status"];
   rationale: string;
   sourceSnapshotIds: string[];
@@ -557,13 +558,13 @@ export default function App() {
 
         {page === "home" ? <HomePage dashboard={dashboard} aiOps={aiOps} integrations={integrations} setPage={setPage} citizenAppUrl={effectiveCitizenAppUrl} /> : null}
         {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
-        {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} /> : null}
-        {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} /> : null}
+        {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
+        {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} /> : null}
         {page === "simulation" ? <SimulationPage refreshAll={refreshAll} /> : null}
         {page === "ai" ? <AiPage aiOps={aiOps} /> : null}
         {page === "moderation" ? <ModerationPage moderation={moderation} audit={audit} /> : null}
-        {page === "admin" ? <AdminPage regions={regions} /> : null}
+        {page === "admin" ? <AdminPage regions={regions} context={context} audit={audit} refreshAll={refreshAll} /> : null}
         {page === "integrations" ? <IntegrationsPage integrations={integrations} /> : null}
         {page === "public" ? <PublicPage filters={filters} /> : null}
       </section>
@@ -861,23 +862,40 @@ function ExplorePage({
   setActiveProjectId: (id: string) => void;
   setPage: (page: Page) => void;
 }) {
+  const [selectedProjectId, setSelectedProjectId] = useState(dashboard.projects[0]?.id ?? fallbackProject.id);
+  const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
+
+  useEffect(() => {
+    if (!dashboard.projects.some((project) => project.id === selectedProjectId)) {
+      setSelectedProjectId(dashboard.projects[0]?.id ?? fallbackProject.id);
+    }
+  }, [dashboard.projects, selectedProjectId]);
+
+  function openProjectRoom(projectId: string) {
+    setActiveProjectId(projectId);
+    setPage("projects");
+  }
+
   return (
     <section className="two-grid wide-left">
       <section className="panel">
         <PanelTitle title="All-India issue atlas" icon={Globe2} />
-        <IssueMap dashboard={dashboard} maps={maps} setActiveProjectId={setActiveProjectId} setPage={setPage} />
+        <IssueMap dashboard={dashboard} maps={maps} selectedProjectId={selectedProject.id} selectProject={setSelectedProjectId} />
       </section>
-      <section className="panel">
-        <PanelTitle title="State onboarding" icon={Flag} />
-        <div className="table-list">
-          {(regions?.onboardingStates ?? []).map((item) => (
-            <div className="table-row" key={item.state}>
-              <span>{item.state}</span>
-              <strong>{item.readiness}%</strong>
-              <small>{item.constituencies} constituencies · {item.districts} districts</small>
-            </div>
-          ))}
-        </div>
+      <section className="explore-side">
+        <HotspotDrilldown project={selectedProject} relatedProjects={dashboard.projects} openProjectRoom={openProjectRoom} />
+        <section className="panel">
+          <PanelTitle title="State onboarding" icon={Flag} />
+          <div className="table-list compact-list">
+            {(regions?.onboardingStates ?? []).map((item) => (
+              <div className="table-row" key={item.state}>
+                <span>{item.state}</span>
+                <strong>{item.readiness}%</strong>
+                <small>{item.constituencies} constituencies · {item.districts} districts</small>
+              </div>
+            ))}
+          </div>
+        </section>
       </section>
     </section>
   );
@@ -886,13 +904,13 @@ function ExplorePage({
 function IssueMap({
   dashboard,
   maps,
-  setActiveProjectId,
-  setPage
+  selectedProjectId,
+  selectProject
 }: {
   dashboard: DashboardResponse;
   maps: ClientConfig["maps"];
-  setActiveProjectId: (id: string) => void;
-  setPage: (page: Page) => void;
+  selectedProjectId: string;
+  selectProject: (id: string) => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
@@ -929,7 +947,7 @@ function IssueMap({
           ]
         });
 
-        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => openProject(hotspot.projectId)));
+        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => selectProject(hotspot.projectId)));
 
         if (hotspots.length > 1) map.fitBounds(bounds, 60);
         setMapState("ready");
@@ -941,12 +959,7 @@ function IssueMap({
     return () => {
       cancelled = true;
     };
-  }, [hotspots, maps.apiKey, maps.mapId, setActiveProjectId, setPage]);
-
-  function openProject(projectId: string) {
-    setActiveProjectId(projectId);
-    setPage("projects");
-  }
+  }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
 
   return (
     <div className="map-stack">
@@ -960,11 +973,11 @@ function IssueMap({
       <div className="map-layout">
         <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""}`}>
           <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
-          {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} openProject={openProject} /> : null}
+          {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
         </div>
         <div className="hotspot-list" aria-label="Map hotspot details">
           {hotspots.map((hotspot, index) => (
-            <button className="hotspot-row" key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => openProject(hotspot.projectId)}>
+            <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)}>
               <span>{index + 1}</span>
               <strong>{hotspot.category}</strong>
               <small>{hotspot.ward} · score {hotspot.intensity}</small>
@@ -981,14 +994,14 @@ function IssueMap({
   );
 }
 
-function FallbackSignalMap({ hotspots, openProject }: { hotspots: Array<Hotspot & { projectId: string }>; openProject: (projectId: string) => void }) {
+function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hotspots: Array<Hotspot & { projectId: string }>; selectedProjectId: string; selectProject: (projectId: string) => void }) {
   return (
     <div className="fallback-map" aria-label="Local fallback map">
       {hotspots.map((hotspot, index) => {
         const position = indiaProjection(hotspot.lat, hotspot.lng);
         return (
           <button
-            className="hotspot"
+            className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
             key={`${hotspot.projectId}-${index}`}
             style={{
               left: `${position.x}%`,
@@ -996,7 +1009,7 @@ function FallbackSignalMap({ hotspots, openProject }: { hotspots: Array<Hotspot 
               width: `${48 + hotspot.intensity / 3}px`,
               height: `${48 + hotspot.intensity / 3}px`
             }}
-            onClick={() => openProject(hotspot.projectId)}
+            onClick={() => selectProject(hotspot.projectId)}
             title={`${hotspot.category} in ${hotspot.ward}`}
           >
             {index + 1}
@@ -1004,6 +1017,131 @@ function FallbackSignalMap({ hotspots, openProject }: { hotspots: Array<Hotspot 
         );
       })}
     </div>
+  );
+}
+
+function HotspotDrilldown({
+  project,
+  relatedProjects,
+  openProjectRoom
+}: {
+  project: RankedProject;
+  relatedProjects: RankedProject[];
+  openProjectRoom: (id: string) => void;
+}) {
+  const related = relatedProjects
+    .filter((item) => item.id !== project.id && (item.category === project.category || item.ward === project.ward || item.district === project.district))
+    .slice(0, 4);
+  const areaBreakdown = [
+    { label: "state", value: project.state, count: relatedProjects.filter((item) => item.state === project.state).length },
+    { label: "district", value: project.district, count: relatedProjects.filter((item) => item.district === project.district).length },
+    { label: "ward", value: project.ward, count: relatedProjects.filter((item) => item.ward === project.ward).length },
+    { label: "mp", value: project.mpName, count: relatedProjects.filter((item) => item.mpId === project.mpId).length }
+  ];
+  const complaintStream = project.recentCitizenAliases.slice(0, 6).map((alias, index) => ({
+    alias,
+    area: index % 2 === 0 ? project.ward : project.district,
+    message: `${project.category} issue reported in ${project.ward}`,
+    signal: project.languageMix[index % Math.max(1, project.languageMix.length)] ?? "Local language"
+  }));
+
+  return (
+    <aside className="panel observability-drilldown" aria-label="Selected issue drilldown">
+      <header className="drilldown-header">
+        <div>
+          <span className="drilldown-kicker"><MapPinned size={15} /> Issue drilldown</span>
+          <h3>{project.title}</h3>
+        </div>
+        <button className="primary" type="button" onClick={() => openProjectRoom(project.id)}>Open room</button>
+      </header>
+
+      <div className="drilldown-querybar" aria-label="Applied signal filters">
+        <span>rank={Math.max(1, relatedProjects.findIndex((item) => item.id === project.id) + 1)}</span>
+        <span>category={project.category}</span>
+        <span>ward={project.ward}</span>
+        <span>status={project.status}</span>
+      </div>
+
+      <section className="drilldown-summary" aria-label="Priority summary">
+        <div><span>Score</span><strong>{project.score}</strong></div>
+        <div><span>Reports</span><strong>{formatCount(project.demandCount)}</strong></div>
+        <div><span>Confidence</span><strong>{Math.round(project.confidence * 100)}%</strong></div>
+        <div><span>Rating</span><strong>{project.averageRating}/5</strong></div>
+      </section>
+
+      <section className="drilldown-section">
+        <div className="drilldown-section-title">
+          <strong>Area facets</strong>
+          <span>map selection updates this pane</span>
+        </div>
+        <div className="area-facets" aria-label="Area drilldown">
+          {areaBreakdown.map((item) => (
+            <button key={item.label} type="button">
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <small>{item.count} ranked signals</small>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="drilldown-section">
+        <div className="drilldown-section-title">
+          <strong>Related complaints</strong>
+          <span>privacy-safe aliases only</span>
+        </div>
+        <div className="complaint-stream">
+          {complaintStream.map((item) => (
+            <article className="complaint-row" key={`${project.id}-${item.alias}`}>
+              <span className="stream-dot" />
+              <div>
+                <strong>{item.alias}</strong>
+                <p>{item.message}</p>
+                <small>{item.area} · {item.signal}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="drilldown-section">
+        <div className="drilldown-section-title">
+          <strong>Evidence timeline</strong>
+          <span>signals used by ranking pipeline</span>
+        </div>
+        <div className="evidence-timeline">
+          {project.evidence.slice(0, 6).map((item, index) => (
+            <article key={item}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <p>{item}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {related.length ? (
+        <section className="drilldown-section">
+          <div className="drilldown-section-title">
+            <strong>Nearby ranked issues</strong>
+            <span>same category, ward, or district</span>
+          </div>
+          <div className="related-issues">
+            {related.map((item) => (
+              <button key={item.id} onClick={() => openProjectRoom(item.id)} type="button">
+                <span>{item.category}</span>
+                <strong>{item.title}</strong>
+                <small>{item.ward} · score {item.score}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="drilldown-rationale">
+        <strong>Ranking rationale</strong>
+        <p>{project.rationale}</p>
+      </section>
+    </aside>
   );
 }
 
@@ -1105,26 +1243,46 @@ function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
   return window.__loksetuGoogleMapsPromise;
 }
 
-function MpPage({ dashboard, activeProject, setActiveProjectId }: { dashboard: DashboardResponse; activeProject: RankedProject; setActiveProjectId: (id: string) => void }) {
+function MpPage({
+  dashboard,
+  activeProject,
+  setActiveProjectId,
+  refreshAll
+}: {
+  dashboard: DashboardResponse;
+  activeProject: RankedProject;
+  setActiveProjectId: (id: string) => void;
+  refreshAll: () => Promise<void>;
+}) {
   return (
     <section className="two-grid">
       <section className="panel">
         <PanelTitle title="MP action queue" icon={Building2} />
         <ProjectList projects={dashboard.projects} activeId={activeProject.id} setActiveProjectId={setActiveProjectId} />
       </section>
-      <ProjectBrief project={activeProject} />
+      <ProjectBrief project={activeProject} refreshAll={refreshAll} />
     </section>
   );
 }
 
-function ProjectPage({ project, projects, setActiveProjectId }: { project: RankedProject; projects: RankedProject[]; setActiveProjectId: (id: string) => void }) {
+function ProjectPage({
+  project,
+  projects,
+  setActiveProjectId,
+  refreshAll
+}: {
+  project: RankedProject;
+  projects: RankedProject[];
+  setActiveProjectId: (id: string) => void;
+  refreshAll: () => Promise<void>;
+}) {
   return (
     <section className="two-grid wide-right">
       <section className="panel">
         <PanelTitle title="Project rooms" icon={FileText} />
         <ProjectList projects={projects} activeId={project.id} setActiveProjectId={setActiveProjectId} />
       </section>
-      <ProjectBrief project={project} full />
+      <ProjectBrief project={project} full refreshAll={refreshAll} />
     </section>
   );
 }
@@ -1317,12 +1475,114 @@ function ModerationPage({ moderation, audit }: { moderation: ModerationResponse 
   );
 }
 
-function AdminPage({ regions }: { regions: RegionResponse | null }) {
+function AdminPage({
+  regions,
+  context,
+  audit,
+  refreshAll
+}: {
+  regions: RegionResponse | null;
+  context: ContextResponse;
+  audit: AuditResponse | null;
+  refreshAll: () => Promise<void>;
+}) {
+  const allWards = useMemo(() => {
+    const seen = new Set<string>();
+    return Object.values(context.wardsByDistrict).flat().filter((item) => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+  }, [context.wardsByDistrict]);
+  const [selectedWard, setSelectedWard] = useState(allWards[0] ?? "Kalindi Nagar");
+  const [selectedMpId, setSelectedMpId] = useState(context.mps[0]?.id ?? "mp-delhi-central");
+  const [receipt, setReceipt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const latestAudit = audit?.events[0];
+
+  useEffect(() => {
+    if (allWards.length && !allWards.includes(selectedWard)) setSelectedWard(allWards[0]);
+    if (context.mps.length && !context.mps.some((mp) => mp.id === selectedMpId)) setSelectedMpId(context.mps[0].id);
+  }, [allWards, context.mps, selectedMpId, selectedWard]);
+
+  async function updateMapping() {
+    setBusy(true);
+    setReceipt("");
+    try {
+      const response = await fetch(`${apiBase}/api/admin/area-mappings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          actorId: "state-admin-india",
+          ward: selectedWard,
+          mpId: selectedMpId,
+          wardStaffUserIds: []
+        })
+      });
+      if (!response.ok) throw new Error("Area mapping update failed");
+      const payload = await response.json() as { mapping: { ward: string; mpId: string; updatedAt: string } };
+      const mpName = context.mps.find((mp) => mp.id === payload.mapping.mpId)?.name ?? payload.mapping.mpId;
+      setReceipt(`${payload.mapping.ward} is now routed to ${mpName}.`);
+      await refreshAll();
+    } catch (error) {
+      setReceipt(error instanceof Error ? error.message : "Area mapping update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <section className="three-grid">
-      <Feature title="User and role model" icon={Users} points={["Citizen accounts", "MP accounts", "Ward staff", "State admin", "Privacy defaults"]} />
-      <Feature title="India hierarchy" icon={MapPin} points={["State", "District", "Constituency", "Ward/Panchayat", regions?.coverage.wardModel ?? "local unit"]} />
-      <Feature title="Operations" icon={Activity} points={["SLO dashboard", "Queue replay", "Data retention", "Incident audit", "Model versioning"]} />
+    <section className="admin-grid">
+      <section className="panel admin-console">
+        <PanelTitle title="Area routing console" icon={Users} detail="API-backed ward to MP mapping" />
+        <div className="form-grid two">
+          <label>Ward or panchayat
+            <select value={selectedWard} onChange={(event) => setSelectedWard(event.target.value)}>
+              {allWards.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>Responsible MP
+            <select value={selectedMpId} onChange={(event) => setSelectedMpId(event.target.value)}>
+              {context.mps.map((mp) => <option key={mp.id} value={mp.id}>{mp.name} · {mp.district}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="admin-actions">
+          <button className="primary" disabled={busy} type="button" onClick={updateMapping}>{busy ? "Updating..." : "Update mapping"}</button>
+          <span>{regions?.coverage.wardModel ?? "ward and panchayat"} model · {context.mps.length} MP accounts loaded</span>
+        </div>
+        {receipt ? <div className="action-receipt">{receipt}</div> : null}
+      </section>
+
+      <section className="panel">
+        <PanelTitle title="India hierarchy coverage" icon={MapPin} />
+        <div className="admin-stat-grid">
+          <Metric label="States ready" value={String(regions?.coverage.statesReady ?? 0)} detail="state rollout records" />
+          <Metric label="UTs ready" value={String(regions?.coverage.unionTerritoriesReady ?? 0)} detail="union territory records" />
+          <Metric label="Lok Sabha target" value={formatCount(regions?.coverage.lokSabhaConstituenciesTarget ?? 543)} detail="constituency scale" />
+          <Metric label="District target" value={formatCount(regions?.coverage.districtsTarget ?? 700)} detail="administrative districts" />
+        </div>
+      </section>
+
+      <section className="panel">
+        <PanelTitle title="Latest platform audit" icon={Activity} />
+        {latestAudit ? (
+          <div className="receipt small">
+            <strong>{latestAudit.action}</strong>
+            <span>{latestAudit.object}</span>
+            <p>{latestAudit.actor} · {new Date(latestAudit.at).toLocaleString()}</p>
+          </div>
+        ) : <div className="empty-state">No audit events are available yet.</div>}
+        <div className="table-list compact-list audit-preview">
+          {(audit?.events ?? []).slice(0, 5).map((event) => (
+            <div className="table-row" key={`${event.at}-${event.actor}-${event.object}`}>
+              <span>{event.actor}</span>
+              <strong>{event.action}</strong>
+              <small>{event.object}</small>
+            </div>
+          ))}
+        </div>
+      </section>
     </section>
   );
 }
@@ -1434,6 +1694,7 @@ function PublicProjectDetail({ project }: { project: PublicProject }) {
       <PanelTitle title="Public project detail" icon={FileText} detail={`${project.score} score · ${Math.round(project.confidence * 100)}% confidence`} />
       <h3>{project.title}</h3>
       <p>{project.rationale}</p>
+      <PublicRatingControl project={project} />
       <div className="score-grid">
         <ScoreBar label="Demand" value={project.scoreBreakdown?.demand ?? 0} max={40} />
         <ScoreBar label="Need" value={project.scoreBreakdown?.need ?? 0} max={35} />
@@ -1444,6 +1705,50 @@ function PublicProjectDetail({ project }: { project: PublicProject }) {
       <Evidence title="Safeguards" items={project.safeguards ?? ["Public view hides private contributor identity"]} />
       <Evidence title="Source snapshots" items={project.sourceSnapshotIds.length ? project.sourceSnapshotIds : ["Official source snapshot pending"]} />
     </aside>
+  );
+}
+
+function PublicRatingControl({ project }: { project: PublicProject }) {
+  const [rating, setRating] = useState(5);
+  const [busy, setBusy] = useState(false);
+  const [receipt, setReceipt] = useState(`${project.averageRating}/5 from ${project.ratings} public ratings`);
+
+  useEffect(() => {
+    setReceipt(`${project.averageRating}/5 from ${project.ratings} public ratings`);
+  }, [project.averageRating, project.ratings, project.id]);
+
+  async function submitRating(nextRating = rating) {
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBase}/api/projects/${project.id}/ratings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: nextRating })
+      });
+      if (!response.ok) throw new Error("Rating failed");
+      const payload = await response.json() as { averageRating: number; ratings: number; message: string };
+      setReceipt(`${payload.message} Average ${payload.averageRating}/5 from ${payload.ratings} ratings.`);
+    } catch (error) {
+      setReceipt(error instanceof Error ? error.message : "Rating failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rating-control" aria-label="Rate public priority">
+      <div>
+        <strong>Public rating</strong>
+        <span>{receipt}</span>
+      </div>
+      <div className="rating-buttons">
+        {[1, 2, 3, 4, 5].map((value) => (
+          <button className={rating === value ? "active" : ""} disabled={busy} key={value} onClick={() => { setRating(value); submitRating(value); }} type="button">
+            {value}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1471,7 +1776,29 @@ function ProjectList({ projects, activeId, setActiveProjectId }: { projects: Ran
   );
 }
 
-function ProjectBrief({ project, full }: { project: RankedProject; full?: boolean }) {
+function ProjectBrief({ project, full, refreshAll }: { project: RankedProject; full?: boolean; refreshAll: () => Promise<void> }) {
+  const [busyStatus, setBusyStatus] = useState<RankedProject["status"] | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function updateStatus(status: RankedProject["status"]) {
+    setBusyStatus(status);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiBase}/api/projects/${project.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorId: "state-admin-india", status })
+      });
+      if (!response.ok) throw new Error("Project status update failed");
+      setMessage(`Status updated to ${status}.`);
+      await refreshAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Project status update failed");
+    } finally {
+      setBusyStatus(null);
+    }
+  }
+
   return (
     <section className="panel">
       <PanelTitle title={project.title} icon={FileText} detail={`${project.mpName} · ${Math.round(project.confidence * 100)}% confidence`} />
@@ -1480,7 +1807,22 @@ function ProjectBrief({ project, full }: { project: RankedProject; full?: boolea
         <span><Star size={14} /> {project.averageRating}/5 from {project.ratings}</span>
         <span><Languages size={14} /> {project.languageMix.join(", ")}</span>
         <span><MapPin size={14} /> {project.district}, {project.state}</span>
+        <span><CheckCircle2 size={14} /> {project.status}</span>
       </div>
+      <div className="action-row" aria-label="Project status actions">
+        {(["review", "shortlist", "approved"] as const).map((status) => (
+          <button
+            className={project.status === status ? "active" : ""}
+            disabled={busyStatus !== null || project.status === status}
+            key={status}
+            onClick={() => updateStatus(status)}
+            type="button"
+          >
+            {busyStatus === status ? "Saving..." : status === "approved" ? "Approve" : status === "shortlist" ? "Shortlist" : "Return to review"}
+          </button>
+        ))}
+      </div>
+      {message ? <div className="action-receipt">{message}</div> : null}
       <div className="score-grid">
         <ScoreBar label="Demand" value={project.demandScore} max={40} />
         <ScoreBar label="Need" value={project.needScore} max={35} />
