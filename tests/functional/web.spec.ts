@@ -67,6 +67,13 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Citizen Sources")).toBeVisible();
     await expect(page.getByText("Top emerging issues")).toBeVisible();
 
+    await page.getByRole("button", { name: "AI Copilot" }).click();
+    await expect(page.getByRole("heading", { name: "LokSetu AI Copilot" })).toBeVisible();
+    await page.getByRole("button", { name: "Ask Copilot" }).click();
+    await expect(page.getByRole("heading", { name: "Grounded answer" })).toBeVisible();
+    await expect(page.getByText("Suggested actions")).toBeVisible();
+    await expect(page.getByText("Citations")).toBeVisible();
+
     await page.getByRole("button", { name: "Simulation" }).click();
     await expect(page.getByRole("heading", { name: "Simulation workbench" })).toBeVisible();
     await page.getByRole("button", { name: /School flooding/ }).click();

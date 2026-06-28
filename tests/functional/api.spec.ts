@@ -132,6 +132,26 @@ test.describe("API functional flow", () => {
     expect(dailyPayload.indices).toHaveProperty("developmentOpportunityIndex");
     expect(dailyPayload.recommendations.length).toBeGreaterThan(0);
 
+    const copilotCapabilities = await api.get("/api/copilot/capabilities");
+    await expect(copilotCapabilities).toBeOK();
+    const copilotMeta = await copilotCapabilities.json();
+    expect(copilotMeta.agents.map((agent: { id: string }) => agent.id)).toContain("mp-copilot");
+    expect(copilotMeta.supportedRoles).toContain("citizen");
+
+    const copilotAnswer = await api.post("/api/copilot/query", {
+      data: {
+        role: "mp",
+        language: "English",
+        question: "Why is the highest ranked project urgent?",
+        projectId: globalPriorities.projects[0].id
+      }
+    });
+    await expect(copilotAnswer).toBeOK();
+    const copilotPayload = await copilotAnswer.json();
+    expect(copilotPayload.answer).toContain(globalPriorities.projects[0].title);
+    expect(copilotPayload.citations.length).toBeGreaterThan(0);
+    expect(copilotPayload.guardrails.length).toBeGreaterThan(0);
+
     const externalSignals = await api.get("/api/external-signals?provider=x&q=school%20road%20India");
     await expect(externalSignals).toBeOK();
     expect((await externalSignals.json()).totalAccepted).toBeGreaterThan(0);

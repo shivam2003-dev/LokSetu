@@ -11,6 +11,7 @@ import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./t
 import { aiRuntimeMode } from "./vertexAi.js";
 import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
+import { answerCopilot, copilotKnowledgeSummary } from "./copilot.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -53,6 +54,13 @@ const mappingUpdateSchema = z.object({
 const projectStatusSchema = z.object({
   actorId: z.string().default("mp-user-delhi-central"),
   status: z.enum(["review", "shortlist", "approved"])
+});
+
+const copilotQuerySchema = z.object({
+  role: z.enum(["mp", "collector", "citizen", "analyst"]).default("mp"),
+  question: z.string().trim().min(3).max(1_000),
+  language: z.string().trim().min(2).max(40).optional(),
+  projectId: z.string().trim().optional()
 });
 
 const simulationScenarios = [
@@ -288,6 +296,21 @@ app.get("/api/intelligence/daily", async (_request, response) => {
   const submissions = await getSubmissions();
   const dashboard = await buildDashboardWithOverrides({ scope: "global" });
   response.json(buildDailyIntelligence(dashboard.projects, submissions));
+});
+
+app.get("/api/copilot/capabilities", (_request, response) => {
+  response.json(copilotKnowledgeSummary());
+});
+
+app.post("/api/copilot/query", async (request, response) => {
+  const parsed = copilotQuerySchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid copilot query", details: parsed.error.flatten() });
+    return;
+  }
+  const submissions = await getSubmissions();
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  response.json(answerCopilot(parsed.data, dashboard.projects, submissions));
 });
 
 app.get("/api/external-signals", async (request, response) => {

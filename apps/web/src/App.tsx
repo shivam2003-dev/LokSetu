@@ -21,6 +21,7 @@ import {
   MapPinned,
   MapPin,
   Megaphone,
+  MessageSquareText,
   Network,
   RefreshCw,
   Scale,
@@ -38,6 +39,7 @@ type Page =
   | "mp"
   | "projects"
   | "analytics"
+  | "copilot"
   | "ai"
   | "moderation"
   | "admin"
@@ -144,6 +146,29 @@ type DailyIntelligenceResponse = {
   sourceCoverage: IntelligenceSourcesResponse["coverage"];
 };
 
+type CopilotCapabilitiesResponse = {
+  agents: Array<{ id: string; label: string; purpose: string }>;
+  sourceFamilies: Array<{ category: string; sourceCount: number }>;
+  supportedRoles: Array<"mp" | "collector" | "citizen" | "analyst">;
+  supportedInputs: string[];
+  currentLimitations: string[];
+};
+
+type CopilotAnswer = {
+  generatedAt: string;
+  role: string;
+  language: string;
+  agent: { id: string; label: string; purpose: string };
+  intent: string;
+  answer: string;
+  confidence: number;
+  evidence: Array<{ type: string; text: string }>;
+  citations: Array<{ type: string; id: string; title: string; snippet: string }>;
+  suggestedActions: string[];
+  followUpQuestions: string[];
+  guardrails: string[];
+};
+
 type AiOpsResponse = { provider: string; mode: string; tasks: string[]; guardrails: string[] };
 type ModerationResponse = { queue: Array<{ id: string; alias: string; ward: string; category: string; language: string; risk: string; status: string }>; policies: string[] };
 type IntegrationsResponse = { enabled: string[]; planned: string[]; local: Record<string, string> };
@@ -220,6 +245,7 @@ const navSections: Array<{ title: string; items: Array<{ page: Page; label: stri
       { page: "mp", label: "MP Center", icon: Building2 },
       { page: "projects", label: "Project Rooms", icon: FileText },
       { page: "analytics", label: "Analytics", icon: BarChart3 },
+      { page: "copilot", label: "AI Copilot", icon: MessageSquareText },
       { page: "simulation", label: "Simulation", icon: DatabaseZap },
       { page: "public", label: "Public Board", icon: Megaphone }
     ]
@@ -394,6 +420,7 @@ export default function App() {
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [intelligenceSources, setIntelligenceSources] = useState<IntelligenceSourcesResponse | null>(null);
   const [dailyIntelligence, setDailyIntelligence] = useState<DailyIntelligenceResponse | null>(null);
+  const [copilotCapabilities, setCopilotCapabilities] = useState<CopilotCapabilitiesResponse | null>(null);
   const [aiOps, setAiOps] = useState<AiOpsResponse | null>(null);
   const [moderation, setModeration] = useState<ModerationResponse | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
@@ -430,7 +457,7 @@ export default function App() {
 
   async function refreshAll() {
     try {
-      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
+      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
       requestJson<ClientConfig>("/api/client-config"),
       requestJson<ContextResponse>("/api/context"),
       fetchDashboard(filters),
@@ -441,6 +468,7 @@ export default function App() {
       getJson<AnalyticsResponse>("/api/analytics", { signals: [], categoryMix: [] }),
       getJson<IntelligenceSourcesResponse>("/api/intelligence/sources", { groups: [], coverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} }, governance: [] }),
       getJson<DailyIntelligenceResponse>("/api/intelligence/daily", { digest: [], topEmergingIssues: [], viralLocalTopics: [], alerts: [], indices: {}, recommendations: [], forecast: [], sourceCoverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} } }),
+      getJson<CopilotCapabilitiesResponse>("/api/copilot/capabilities", { agents: [], sourceFamilies: [], supportedRoles: ["mp"], supportedInputs: [], currentLimitations: [] }),
       getJson<AiOpsResponse>("/api/ai-ops", { provider: "Vertex AI", mode: "fallback", tasks: [], guardrails: [] }),
       getJson<ModerationResponse>("/api/moderation", { queue: [], policies: [] }),
       getJson<IntegrationsResponse>("/api/integrations", { enabled: [], planned: [], local: {} }),
@@ -453,6 +481,7 @@ export default function App() {
     setAnalytics(nextAnalytics);
     setIntelligenceSources(nextSources);
     setDailyIntelligence(nextDaily);
+    setCopilotCapabilities(nextCopilot);
     setAiOps(nextAiOps);
     setModeration(nextModeration);
     setIntegrations(nextIntegrations);
@@ -594,6 +623,7 @@ export default function App() {
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} sources={intelligenceSources} daily={dailyIntelligence} /> : null}
+        {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} projects={dashboard.projects} /> : null}
         {page === "simulation" ? <SimulationPage refreshAll={refreshAll} /> : null}
         {page === "ai" ? <AiPage aiOps={aiOps} /> : null}
         {page === "moderation" ? <ModerationPage moderation={moderation} audit={audit} /> : null}
@@ -1442,6 +1472,141 @@ function AnalyticsPage({
   );
 }
 
+function CopilotPage({ capabilities, projects }: { capabilities: CopilotCapabilitiesResponse | null; projects: RankedProject[] }) {
+  const prompts = [
+    "What are the top 10 issues in my constituency this month?",
+    "Why is the highest ranked project urgent? Show evidence.",
+    "Which scheme or budget path can fund this?",
+    "Summarize today's citizen feedback for a public meeting.",
+    "What changed compared to yesterday?",
+    "What should the district officer do next?"
+  ];
+  const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
+  const [language, setLanguage] = useState("English");
+  const [question, setQuestion] = useState(prompts[0]);
+  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const [answer, setAnswer] = useState<CopilotAnswer | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!projectId && projects[0]?.id) setProjectId(projects[0].id);
+  }, [projectId, projects]);
+
+  async function askCopilot(nextQuestion = question) {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/api/copilot/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, language, question: nextQuestion, projectId: projectId || undefined })
+      });
+      if (!response.ok) throw new Error("Copilot query failed");
+      setAnswer(await response.json());
+      setQuestion(nextQuestion);
+    } catch (queryError) {
+      setError(queryError instanceof Error ? queryError.message : "Copilot query failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="copilot-layout">
+      <section className="panel copilot-console">
+        <PanelTitle title="LokSetu AI Copilot" icon={MessageSquareText} detail="grounded constituency intelligence assistant" />
+        <div className="copilot-controls">
+          <label>Role
+            <select value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
+              {(capabilities?.supportedRoles ?? ["mp", "collector", "citizen", "analyst"]).map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>Language
+            <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+              {["English", "Hindi", "Tamil", "Bengali", "Marathi", "Kannada", "Telugu"].map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>Ground project
+            <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            </select>
+          </label>
+        </div>
+        <label>Question
+          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
+        </label>
+        <div className="prompt-grid">
+          {prompts.map((prompt) => (
+            <button key={prompt} onClick={() => askCopilot(prompt)} type="button">{prompt}</button>
+          ))}
+        </div>
+        <button className="primary full-width" disabled={busy} onClick={() => askCopilot()} type="button">{busy ? "Thinking..." : "Ask Copilot"}</button>
+        {error ? <div className="error-state">{error}</div> : null}
+      </section>
+
+      <section className="panel copilot-answer">
+        <PanelTitle title="Grounded answer" icon={Bot} detail={answer ? `${answer.agent.label} · ${answer.confidence}% confidence` : "waiting for a question"} />
+        {answer ? (
+          <>
+            <div className="answer-bubble">
+              <span>{answer.intent} · {answer.language}</span>
+              <p>{answer.answer}</p>
+            </div>
+            <section className="copilot-section">
+              <strong>Suggested actions</strong>
+              <div className="action-chip-list">
+                {answer.suggestedActions.map((item) => <span key={item}>{item}</span>)}
+              </div>
+            </section>
+            <section className="copilot-section">
+              <strong>Evidence</strong>
+              <div className="evidence-timeline compact">
+                {answer.evidence.map((item, index) => (
+                  <article key={`${item.type}-${index}`}>
+                    <span>{item.type}</span>
+                    <p>{item.text}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+            <section className="copilot-section">
+              <strong>Citations</strong>
+              <div className="citation-list">
+                {answer.citations.map((item) => (
+                  <article key={`${item.type}-${item.id}`}>
+                    <span>{item.type}</span>
+                    <strong>{item.title}</strong>
+                    <p>{item.snippet}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </>
+        ) : (
+          <div className="empty-state">Ask about priorities, evidence, schemes, briefings, maps, documents, or citizen-facing status.</div>
+        )}
+      </section>
+
+      <section className="panel copilot-side">
+        <PanelTitle title="Agent routing" icon={Network} detail={`${capabilities?.agents.length ?? 0} agents`} />
+        <div className="agent-list">
+          {(capabilities?.agents ?? []).map((agent) => (
+            <article key={agent.id}>
+              <strong>{agent.label}</strong>
+              <p>{agent.purpose}</p>
+            </article>
+          ))}
+        </div>
+        <PanelTitle title="Knowledge coverage" icon={Database} detail={`${capabilities?.sourceFamilies.length ?? 0} source families`} />
+        <div className="source-family-list">
+          {(capabilities?.sourceFamilies ?? []).map((family) => <span key={family.category}>{family.category} · {family.sourceCount}</span>)}
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function AiPage({ aiOps }: { aiOps: AiOpsResponse | null }) {
   return (
     <section className="two-grid">
@@ -1999,9 +2164,9 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", simulation: "Simulation workbench", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
+  return ({ home: "Command home", explore: "India problem search", mp: "MP workspace", projects: "Project evidence", analytics: "Demand intelligence", copilot: "AI constituency copilot", simulation: "Simulation workbench", ai: "Vertex AI operations", moderation: "Trust and safety", admin: "Platform administration", integrations: "Cloud and data", public: "Public transparency" })[page];
 }
 
 function pageTitle(page: Page): string {
-  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", simulation: "Generate realistic civic intake", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
+  return ({ home: "LokSetu operating system", explore: "Search problems across India", mp: "Localized MP command center", projects: "Evidence-backed project rooms", analytics: "Demand, equity, and urgency analytics", copilot: "Policy and constituency intelligence assistant", simulation: "Generate realistic civic intake", ai: "AI pipeline and model controls", moderation: "Privacy, abuse, and review queues", admin: "Users, regions, and rollout controls", integrations: "Production integration status", public: "Citizen-facing transparency" })[page];
 }
