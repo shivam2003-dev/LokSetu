@@ -923,6 +923,7 @@ function IssueMap({
     }
 
     let cancelled = false;
+    let mapErrorTimer = 0;
     setMapState("loading");
 
     loadGoogleMaps(maps.apiKey, maps.mapId)
@@ -951,6 +952,11 @@ function IssueMap({
 
         if (hotspots.length > 1) map.fitBounds(bounds, 60);
         setMapState("ready");
+        mapErrorTimer = window.setTimeout(() => {
+          if (!cancelled && mapRef.current?.querySelector(".gm-err-container, .gm-err-title, .gm-err-message")) {
+            setMapState("fallback");
+          }
+        }, 1500);
       })
       .catch(() => {
         if (!cancelled) setMapState("fallback");
@@ -958,6 +964,7 @@ function IssueMap({
 
     return () => {
       cancelled = true;
+      if (mapErrorTimer) window.clearTimeout(mapErrorTimer);
     };
   }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
 
