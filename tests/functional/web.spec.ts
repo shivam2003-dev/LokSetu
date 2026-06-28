@@ -4,7 +4,7 @@ test.describe("MP/admin web functional flow", () => {
   test("navigation, filtering, submission, and public transparency render", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "LokSetu", exact: true })).toBeVisible();
-    await expect(page.getByText("Live · Postgres · Vertex-ready")).toBeVisible();
+    await expect(page.getByText(/Live · (memory|postgres) · Vertex-ready/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "LokSetu AI live priority command center" })).toBeVisible();
     await expect(page.getByText("Real-time constituency dashboard")).toBeVisible();
 
@@ -14,6 +14,13 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Local map fallback")).toBeVisible();
     await expect(page.locator(".hotspot").first()).toBeVisible();
     await expect(page.locator(".hotspot-row").first()).toBeVisible();
+
+    await page.getByLabel("State").selectOption("Uttar Pradesh");
+    await expect(page.getByLabel("District")).toHaveValue("Lucknow");
+    await expect(page.getByLabel("Ward")).toHaveValue("Aminabad Basti");
+    await expect(page.getByLabel("MP")).toHaveValue("mp-up-lucknow");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page.locator(".hotspot-row").first()).toContainText("Aminabad Basti");
 
     await expect(page.getByRole("link", { name: "Open Apni Awaaz" })).toHaveAttribute("href", "http://localhost:5174");
 

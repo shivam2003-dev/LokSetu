@@ -18,6 +18,20 @@ test.describe("API functional flow", () => {
     expect(globalPriorities.projects.map((project: { category: string }) => project.category)).toContain("Sanitation");
     expect(globalPriorities.projects.map((project: { category: string }) => project.category)).toContain("Digital Access");
 
+    const clientConfig = await api.get("/api/client-config");
+    await expect(clientConfig).toBeOK();
+    const configPayload = await clientConfig.json();
+    expect(configPayload.maps).toHaveProperty("enabled");
+    expect(configPayload.maps).toHaveProperty("source");
+
+    const context = await api.get("/api/context");
+    await expect(context).toBeOK();
+    const contextPayload = await context.json();
+    expect(contextPayload.states).toContain("Tamil Nadu");
+    expect(contextPayload.districtsByState["Uttar Pradesh"]).toContain("Lucknow");
+    expect(contextPayload.wardsByDistrict["Uttar Pradesh::Lucknow"]).toContain("Aminabad Basti");
+    expect(contextPayload.mps.map((mp: { id: string }) => mp.id)).toContain("mp-up-lucknow");
+
     const submission = await api.post("/api/submissions", {
       data: {
         channel: "text",

@@ -9,7 +9,7 @@
     "services/api"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w services/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/citizen\"",
+    "dev": "concurrently \"PORT=18080 npm run dev -w services/api\" \"npm run dev -w apps/web\" \"VITE_API_BASE_URL=http://127.0.0.1:18080 npm run dev -w apps/citizen\"",
     "local": "bash scripts/start-local.sh",
     "local:k8s": "bash scripts/start-local-k8s-argocd.sh",
     "build": "npm run build -w services/api && npm run build -w apps/web && npm run build -w apps/citizen",

@@ -91,6 +91,27 @@ type RegionResponse = {
   onboardingStates: Array<{ state: string; districts: number; constituencies: number; readiness: number }>;
 };
 
+type ContextResponse = {
+  mps: Array<{ id: string; name: string; state: string; district: string; wards: string[] }>;
+  states: string[];
+  districts: string[];
+  wards: string[];
+  districtsByState: Record<string, string[]>;
+  wardsByDistrict: Record<string, string[]>;
+};
+
+type ClientConfig = {
+  dataMode: "postgres" | "memory";
+  maps: {
+    enabled: boolean;
+    apiKey: string;
+    mapId: string;
+    source: string;
+  };
+  citizenAppUrl?: string;
+  generatedAt: string;
+};
+
 type AnalyticsResponse = {
   signals: Array<{ name: string; value: string; trend: string }>;
   categoryMix: Array<{ category: string; score: number; demand: number; rating: number }>;
@@ -153,8 +174,8 @@ declare global {
 }
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
-const googleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
-const googleMapsMapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "").trim();
+const envGoogleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
+const envGoogleMapsMapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "").trim();
 const configuredCitizenAppUrl = (import.meta.env.VITE_CITIZEN_APP_URL ?? "").trim();
 const citizenAppUrl =
   configuredCitizenAppUrl ||
@@ -217,6 +238,27 @@ const fallbackDashboard: DashboardResponse = {
   totals: { submissions: 0, wards: 0, languages: 0, botRisk: "low" },
   projects: [fallbackProject],
   hotspots: []
+};
+
+const fallbackContext: ContextResponse = {
+  mps: [{ id: fallbackProject.mpId, name: fallbackProject.mpName, state: fallbackProject.state, district: fallbackProject.district, wards: [fallbackProject.ward] }],
+  states: [fallbackProject.state],
+  districts: [fallbackProject.district],
+  wards: [fallbackProject.ward],
+  districtsByState: { [fallbackProject.state]: [fallbackProject.district] },
+  wardsByDistrict: { [`${fallbackProject.state}::${fallbackProject.district}`]: [fallbackProject.ward] }
+};
+
+const fallbackClientConfig: ClientConfig = {
+  dataMode: "memory",
+  maps: {
+    enabled: Boolean(envGoogleMapsApiKey),
+    apiKey: envGoogleMapsApiKey,
+    mapId: envGoogleMapsMapId,
+    source: envGoogleMapsApiKey ? "vite-env" : "not-configured"
+  },
+  citizenAppUrl,
+  generatedAt: new Date().toISOString()
 };
 
 const problemCards: Array<{ icon: typeof Home; title: string; body: string }> = [
@@ -289,6 +331,12 @@ async function getJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
+async function requestJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`);
+  if (!response.ok) throw new Error(path);
+  return response.json();
+}
+
 async function fetchDashboard(filters: { scope: Scope; state: string; district: string; ward: string; mpId: string; q: string }) {
   const params = new URLSearchParams({ scope: filters.scope });
   if (filters.scope === "local") {
@@ -298,7 +346,7 @@ async function fetchDashboard(filters: { scope: Scope; state: string; district: 
   }
   if (filters.scope === "mp") params.set("mpId", filters.mpId);
   if (filters.q.trim()) params.set("q", filters.q.trim());
-  return getJson<DashboardResponse>(`/api/priorities?${params}`, fallbackDashboard);
+  return requestJson<DashboardResponse>(`/api/priorities?${params}`);
 }
 
 export default function App() {
@@ -310,6 +358,10 @@ export default function App() {
   const [mpId, setMpId] = useState("mp-delhi-central");
   const [query, setQuery] = useState("");
   const [dashboard, setDashboard] = useState<DashboardResponse>(fallbackDashboard);
+  const [context, setContext] = useState<ContextResponse>(fallbackContext);
+  const [clientConfig, setClientConfig] = useState<ClientConfig>(fallbackClientConfig);
+  const [apiConnected, setApiConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [regions, setRegions] = useState<RegionResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [aiOps, setAiOps] = useState<AiOpsResponse | null>(null);
@@ -321,6 +373,7 @@ export default function App() {
 
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
+  const effectiveCitizenAppUrl = clientConfig.citizenAppUrl?.trim() || citizenAppUrl;
 
   useEffect(() => {
     refreshAll();
@@ -328,6 +381,10 @@ export default function App() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  useEffect(() => {
+    reconcileSelection(context);
+  }, [context]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -342,7 +399,10 @@ export default function App() {
   }
 
   async function refreshAll() {
-    const [nextDashboard, nextRegions, nextAnalytics, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
+    try {
+      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextAiOps, nextModeration, nextIntegrations, nextAudit] = await Promise.all([
+      requestJson<ClientConfig>("/api/client-config"),
+      requestJson<ContextResponse>("/api/context"),
       fetchDashboard(filters),
       getJson<RegionResponse>("/api/regions", {
         coverage: { statesReady: 28, unionTerritoriesReady: 8, lokSabhaConstituenciesTarget: 543, districtsTarget: 700, wardModel: "ward and panchayat" },
@@ -353,7 +413,9 @@ export default function App() {
       getJson<ModerationResponse>("/api/moderation", { queue: [], policies: [] }),
       getJson<IntegrationsResponse>("/api/integrations", { enabled: [], planned: [], local: {} }),
       getJson<AuditResponse>("/api/audit", { events: [] })
-    ]);
+      ]);
+      setClientConfig(mergeClientConfig(nextConfig));
+      setContext(nextContext);
     setDashboard(nextDashboard);
     setRegions(nextRegions);
     setAnalytics(nextAnalytics);
@@ -362,13 +424,69 @@ export default function App() {
     setIntegrations(nextIntegrations);
     setAudit(nextAudit);
     setActiveProjectId(nextDashboard.projects[0]?.id ?? fallbackProject.id);
-    setNotice("Live");
+      setApiConnected(true);
+      setConnectionError(null);
+      setNotice("Live");
+    } catch (error) {
+      setApiConnected(false);
+      setConnectionError(error instanceof Error ? error.message : "API unavailable");
+      setNotice("Disconnected");
+    }
   }
 
   async function applyFilters() {
-    const next = await fetchDashboard(filters);
-    setDashboard(next);
-    setActiveProjectId(next.projects[0]?.id ?? fallbackProject.id);
+    try {
+      const next = await fetchDashboard(filters);
+      setDashboard(next);
+      setActiveProjectId(next.projects[0]?.id ?? fallbackProject.id);
+      setApiConnected(true);
+      setConnectionError(null);
+      setNotice("Live");
+    } catch (error) {
+      setApiConnected(false);
+      setConnectionError(error instanceof Error ? error.message : "API unavailable");
+      setNotice("Disconnected");
+    }
+  }
+
+  function reconcileSelection(nextContext: ContextResponse) {
+    const nextState = nextContext.states.includes(state) ? state : nextContext.states[0] ?? state;
+    const districts = nextContext.districtsByState[nextState] ?? [];
+    const nextDistrict = districts.includes(district) ? district : districts[0] ?? district;
+    const wards = nextContext.wardsByDistrict[`${nextState}::${nextDistrict}`] ?? [];
+    const nextWard = wards.includes(ward) ? ward : wards[0] ?? ward;
+    const matchingMp = nextContext.mps.find((mp) => mp.state === nextState && mp.district === nextDistrict && mp.wards.includes(nextWard)) ?? nextContext.mps[0];
+    if (nextState !== state) setState(nextState);
+    if (nextDistrict !== district) setDistrict(nextDistrict);
+    if (nextWard !== ward) setWard(nextWard);
+    if (matchingMp && !nextContext.mps.some((mp) => mp.id === mpId)) setMpId(matchingMp.id);
+  }
+
+  function updateState(value: string) {
+    const districts = context.districtsByState[value] ?? [];
+    const nextDistrict = districts[0] ?? district;
+    const wards = context.wardsByDistrict[`${value}::${nextDistrict}`] ?? [];
+    const nextWard = wards[0] ?? ward;
+    const nextMp = context.mps.find((mp) => mp.state === value && mp.district === nextDistrict && mp.wards.includes(nextWard));
+    setState(value);
+    setDistrict(nextDistrict);
+    setWard(nextWard);
+    if (nextMp) setMpId(nextMp.id);
+  }
+
+  function updateDistrict(value: string) {
+    const wards = context.wardsByDistrict[`${state}::${value}`] ?? [];
+    const nextWard = wards[0] ?? ward;
+    const nextMp = context.mps.find((mp) => mp.state === state && mp.district === value && mp.wards.includes(nextWard));
+    setDistrict(value);
+    setWard(nextWard);
+    if (nextMp) setMpId(nextMp.id);
+  }
+
+  function updateWard(value: string) {
+    const nextMp = context.mps.find((mp) => mp.state === state && mp.district === district && mp.wards.includes(value));
+    setWard(value);
+    if (nextMp) setMpId(nextMp.id);
   }
 
   return (
@@ -397,13 +515,13 @@ export default function App() {
             </div>
           ))}
         </nav>
-        <a className="citizen-link" href={citizenAppUrl}>
+        <a className="citizen-link" href={effectiveCitizenAppUrl}>
           <Send size={16} />
           Open Apni Awaaz
         </a>
-        <div className="status-pill">
+        <div className={`status-pill ${apiConnected ? "connected" : "disconnected"}`}>
           <CheckCircle2 size={16} />
-          <span>{notice} · Postgres · Vertex-ready</span>
+          <span>{notice} · {clientConfig.dataMode} · Vertex-ready</span>
         </div>
       </aside>
 
@@ -419,14 +537,15 @@ export default function App() {
         </header>
 
         <ControlStrip
+          context={context}
           scope={scope}
           setScope={setScope}
           state={state}
-          setState={setState}
+          setState={updateState}
           district={district}
-          setDistrict={setDistrict}
+          setDistrict={updateDistrict}
           ward={ward}
-          setWard={setWard}
+          setWard={updateWard}
           mpId={mpId}
           setMpId={setMpId}
           query={query}
@@ -434,8 +553,10 @@ export default function App() {
           apply={applyFilters}
         />
 
-        {page === "home" ? <HomePage dashboard={dashboard} aiOps={aiOps} integrations={integrations} setPage={setPage} /> : null}
-        {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
+        {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
+
+        {page === "home" ? <HomePage dashboard={dashboard} aiOps={aiOps} integrations={integrations} setPage={setPage} citizenAppUrl={effectiveCitizenAppUrl} /> : null}
+        {page === "explore" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "mp" ? <MpPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} /> : null}
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} /> : null}
@@ -451,6 +572,7 @@ export default function App() {
 }
 
 function ControlStrip(props: {
+  context: ContextResponse;
   scope: Scope;
   setScope: (scope: Scope) => void;
   state: string;
@@ -465,6 +587,10 @@ function ControlStrip(props: {
   setQuery: (value: string) => void;
   apply: () => void;
 }) {
+  const districtOptions = props.context.districtsByState[props.state] ?? props.context.districts;
+  const wardOptions = props.context.wardsByDistrict[`${props.state}::${props.district}`] ?? props.context.wards;
+  const mpOptions = props.context.mps.filter((mp) => props.scope === "global" || mp.state === props.state);
+
   return (
     <section className="control-strip" aria-label="India search and locality controls">
       <div className="segmented">
@@ -473,29 +599,16 @@ function ControlStrip(props: {
         <button className={props.scope === "global" ? "active" : ""} onClick={() => props.setScope("global")}>All India</button>
       </div>
       <select value={props.state} onChange={(event) => props.setState(event.target.value)} aria-label="State">
-        <option>Delhi</option>
-        <option>Maharashtra</option>
-        <option>Tamil Nadu</option>
-        <option>West Bengal</option>
-        <option>Uttar Pradesh</option>
+        {props.context.states.map((item) => <option key={item}>{item}</option>)}
       </select>
       <select value={props.district} onChange={(event) => props.setDistrict(event.target.value)} aria-label="District">
-        <option>Central Delhi</option>
-        <option>East Delhi</option>
-        <option>Nashik Rural</option>
-        <option>Chennai</option>
-        <option>Lucknow</option>
+        {districtOptions.map((item) => <option key={item}>{item}</option>)}
       </select>
       <select value={props.ward} onChange={(event) => props.setWard(event.target.value)} aria-label="Ward">
-        <option>Kalindi Nagar</option>
-        <option>River Market</option>
-        <option>East Colony</option>
-        <option>North Village</option>
+        {wardOptions.map((item) => <option key={item}>{item}</option>)}
       </select>
       <select value={props.mpId} onChange={(event) => props.setMpId(event.target.value)} aria-label="MP">
-        <option value="mp-delhi-central">MP Central Delhi</option>
-        <option value="mp-delhi-east">MP East Delhi</option>
-        <option value="mp-maharashtra-north">MP North Maharashtra</option>
+        {mpOptions.map((mp) => <option value={mp.id} key={mp.id}>{mp.name}</option>)}
       </select>
       <span className="search-box">
         <Search size={16} />
@@ -506,6 +619,34 @@ function ControlStrip(props: {
   );
 }
 
+function ConnectionBanner({ error }: { error: string | null }) {
+  return (
+    <section className="connection-banner" role="status">
+      <strong>API connection required</strong>
+      <span>
+        Live priorities, Maps runtime config, and locality controls are not connected. Start the API or Kubernetes service; current data is a disconnected placeholder.
+        {error ? ` Last error: ${error}` : ""}
+      </span>
+    </section>
+  );
+}
+
+function mergeClientConfig(config: ClientConfig): ClientConfig {
+  const apiKey = config.maps.apiKey || envGoogleMapsApiKey;
+  const mapId = config.maps.mapId || envGoogleMapsMapId;
+  return {
+    ...config,
+    maps: {
+      ...config.maps,
+      enabled: Boolean(apiKey),
+      apiKey,
+      mapId,
+      source: config.maps.source || (apiKey ? "runtime-api" : "not-configured")
+    },
+    citizenAppUrl: config.citizenAppUrl?.trim() || citizenAppUrl
+  };
+}
+
 function formatCount(value: number) {
   return value.toLocaleString("en-IN");
 }
@@ -514,12 +655,14 @@ function HomePage({
   dashboard,
   aiOps,
   integrations,
-  setPage
+  setPage,
+  citizenAppUrl
 }: {
   dashboard: DashboardResponse;
   aiOps: AiOpsResponse | null;
   integrations: IntegrationsResponse | null;
   setPage: (page: Page) => void;
+  citizenAppUrl: string;
 }) {
   const leadingProject = dashboard.projects[0] ?? fallbackProject;
   const liveMetrics = [
@@ -705,12 +848,24 @@ function PriorityItem({ rank, title, submissions, confidence, priority, width, t
   );
 }
 
-function ExplorePage({ dashboard, regions, setActiveProjectId, setPage }: { dashboard: DashboardResponse; regions: RegionResponse | null; setActiveProjectId: (id: string) => void; setPage: (page: Page) => void }) {
+function ExplorePage({
+  dashboard,
+  regions,
+  maps,
+  setActiveProjectId,
+  setPage
+}: {
+  dashboard: DashboardResponse;
+  regions: RegionResponse | null;
+  maps: ClientConfig["maps"];
+  setActiveProjectId: (id: string) => void;
+  setPage: (page: Page) => void;
+}) {
   return (
     <section className="two-grid wide-left">
       <section className="panel">
         <PanelTitle title="All-India issue atlas" icon={Globe2} />
-        <IssueMap dashboard={dashboard} setActiveProjectId={setActiveProjectId} setPage={setPage} />
+        <IssueMap dashboard={dashboard} maps={maps} setActiveProjectId={setActiveProjectId} setPage={setPage} />
       </section>
       <section className="panel">
         <PanelTitle title="State onboarding" icon={Flag} />
@@ -728,13 +883,23 @@ function ExplorePage({ dashboard, regions, setActiveProjectId, setPage }: { dash
   );
 }
 
-function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: DashboardResponse; setActiveProjectId: (id: string) => void; setPage: (page: Page) => void }) {
+function IssueMap({
+  dashboard,
+  maps,
+  setActiveProjectId,
+  setPage
+}: {
+  dashboard: DashboardResponse;
+  maps: ClientConfig["maps"];
+  setActiveProjectId: (id: string) => void;
+  setPage: (page: Page) => void;
+}) {
   const mapRef = useRef<HTMLDivElement | null>(null);
-  const [mapState, setMapState] = useState<MapLoadState>(googleMapsApiKey ? "idle" : "fallback");
+  const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
   const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
 
   useEffect(() => {
-    if (!googleMapsApiKey || hotspots.length === 0 || !mapRef.current) {
+    if (!maps.apiKey || hotspots.length === 0 || !mapRef.current) {
       setMapState("fallback");
       return;
     }
@@ -742,7 +907,7 @@ function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: Dashb
     let cancelled = false;
     setMapState("loading");
 
-    loadGoogleMaps(googleMapsApiKey)
+    loadGoogleMaps(maps.apiKey, maps.mapId)
       .then(() => {
         if (cancelled || !mapRef.current || !window.google?.maps) return;
 
@@ -757,14 +922,14 @@ function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: Dashb
           fullscreenControl: true,
           clickableIcons: false,
           gestureHandling: "cooperative",
-          ...(googleMapsMapId ? { mapId: googleMapsMapId } : {}),
+          ...(maps.mapId ? { mapId: maps.mapId } : {}),
           styles: [
             { featureType: "poi", stylers: [{ visibility: "off" }] },
             { featureType: "transit", stylers: [{ visibility: "off" }] }
           ]
         });
 
-        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(googleMapsMapId), () => openProject(hotspot.projectId)));
+        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => openProject(hotspot.projectId)));
 
         if (hotspots.length > 1) map.fitBounds(bounds, 60);
         setMapState("ready");
@@ -776,7 +941,7 @@ function IssueMap({ dashboard, setActiveProjectId, setPage }: { dashboard: Dashb
     return () => {
       cancelled = true;
     };
-  }, [hotspots, setActiveProjectId, setPage]);
+  }, [hotspots, maps.apiKey, maps.mapId, setActiveProjectId, setPage]);
 
   function openProject(projectId: string) {
     setActiveProjectId(projectId);
@@ -916,7 +1081,7 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
   marker.addListener("click", onClick);
 }
 
-function loadGoogleMaps(key: string): Promise<void> {
+function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
   if (window.google?.maps) return Promise.resolve();
   if (window.__loksetuGoogleMapsPromise) return window.__loksetuGoogleMapsPromise;
 
@@ -928,7 +1093,7 @@ function loadGoogleMaps(key: string): Promise<void> {
       loading: "async",
       callback: "__loksetuGoogleMapsLoaded"
     });
-    if (googleMapsMapId) params.set("libraries", "marker");
+    if (mapId) params.set("libraries", "marker");
     window.__loksetuGoogleMapsLoaded = () => resolve();
     script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
     script.async = true;

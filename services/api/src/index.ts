@@ -111,13 +111,57 @@ app.get("/healthz", (_request, response) => {
   });
 });
 
+app.get("/api/client-config", (_request, response) => {
+  const browserMapsKey =
+    process.env.PUBLIC_GOOGLE_MAPS_API_KEY ??
+    process.env.GOOGLE_MAPS_BROWSER_API_KEY ??
+    process.env.VITE_GOOGLE_MAPS_API_KEY ??
+    process.env.GOOGLE_MAPS_API_KEY ??
+    "";
+  response.json({
+    dataMode: isDatabaseEnabled() ? "postgres" : "memory",
+    maps: {
+      enabled: Boolean(browserMapsKey),
+      apiKey: browserMapsKey,
+      mapId: process.env.GOOGLE_MAPS_MAP_ID ?? process.env.VITE_GOOGLE_MAPS_MAP_ID ?? "",
+      source: browserMapsKey ? "runtime-api" : "not-configured"
+    },
+    citizenAppUrl: process.env.CITIZEN_APP_URL ?? "",
+    generatedAt: new Date().toISOString()
+  });
+});
+
 app.get("/api/context", (_request, response) => {
+  const states = [...new Set(areaMappings.map((mapping) => mapping.state))].sort();
+  const districtsByState = Object.fromEntries(
+    states.map((state) => [
+      state,
+      [...new Set(areaMappings.filter((mapping) => mapping.state === state).map((mapping) => mapping.district))].sort()
+    ])
+  );
+  const wardsByDistrict = Object.fromEntries(
+    [...new Set(areaMappings.map((mapping) => `${mapping.state}::${mapping.district}`))]
+      .sort()
+      .map((key) => {
+        const [state, district] = key.split("::");
+        return [
+          key,
+          areaMappings
+            .filter((mapping) => mapping.state === state && mapping.district === district)
+            .map((mapping) => mapping.ward)
+            .sort()
+        ];
+      })
+  );
   response.json({
     mps: mpProfiles,
     users: seedUsers,
-    states: [...new Set(mpProfiles.map((mp) => mp.state))],
-    districts: [...new Set(mpProfiles.map((mp) => mp.district))],
-    wards: [...new Set(mpProfiles.flatMap((mp) => mp.wards))]
+    states,
+    districts: [...new Set(areaMappings.map((mapping) => mapping.district))].sort(),
+    wards: [...new Set(areaMappings.map((mapping) => mapping.ward))].sort(),
+    districtsByState,
+    wardsByDistrict,
+    areaMappings
   });
 });
 

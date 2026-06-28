@@ -825,6 +825,16 @@ nav {
   flex-shrink: 0;
 }
 
+.status-pill.disconnected {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+}
+
+.status-pill.disconnected svg {
+  color: #f59e0b;
+}
+
 /* ---------------------------------------------------------
    Workspace + topbar
    --------------------------------------------------------- */
@@ -836,6 +846,27 @@ nav {
   align-content: start;
   max-width: 1480px;
   width: 100%;
+}
+
+.connection-banner {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #fcd34d;
+  border-radius: var(--r-md);
+  background: #fffbeb;
+  color: #92400e;
+  padding: 13px 16px;
+  box-shadow: var(--shadow-xs);
+}
+
+.connection-banner strong {
+  color: #78350f;
+  font-size: 14px;
+}
+
+.connection-banner span {
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .topbar {
