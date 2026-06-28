@@ -11,10 +11,20 @@ api:
     VERTEX_AI_LOCATION: us-central1
     VERTEX_AI_MODEL: gemini-1.5-flash
     VERTEX_AI_DISABLED: "true"
+    BATCH_SCHEDULE: "*/5 * * * *"
+
+batch:
+  enabled: true
+  schedule: "*/5 * * * *"
 
 web:
   image:
     repository: people-priority-web
+    tag: local
+
+citizen:
+  image:
+    repository: people-priority-citizen
     tag: local
 
 postgres:
@@ -24,3 +34,6 @@ postgres:
   username: loksetu
   password: loksetu
   storage: 2Gi
+
+ingress:
+  enabled: false

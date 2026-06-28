@@ -91,6 +91,16 @@ sequenceDiagram
   API->>SQL: Query MP/ward-scoped projects
 ```
 
+## Batch Processing Model
+
+LokSetu is batch-first for AI processing. The online API stores raw intake and returns `pending_batch`; scheduled workers process pending rows, call Vertex AI, update processed tables, and refresh dashboard views. This avoids request-path latency and keeps MP dashboards stable during AI/API outages.
+
+Recommended production schedule:
+
+- Every 5-15 minutes for normal citizen intake.
+- Hourly for heavier geospatial joins.
+- Nightly for full dedupe, embeddings refresh, and official dataset reconciliation.
+
 ## GitOps and Release Architecture
 
 ```mermaid

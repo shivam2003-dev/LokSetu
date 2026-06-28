@@ -4,50 +4,16 @@ import helmet from "helmet";
 import pino from "pino";
 import { z } from "zod";
 import { mpProfiles, seedSubmissions, seedUsers } from "./data.js";
-import { initDatabase, insertSubmission, isDatabaseEnabled, listSubmissions } from "./db.js";
-import { resolveLocation } from "./geo.js";
-import { buildDashboard, normalizeSubmission } from "./pipeline.js";
-import { Submission } from "./types.js";
-import {
-  analyzeImageWithVertexAi,
-  analyzeWithVertexAi,
-  transcribeWithVertexAi,
-  VertexMediaAnalysis,
-  VertexTextAnalysis
-} from "./vertexAi.js";
+import { countRawIntakesByStatus, initDatabase, insertRawIntake, isDatabaseEnabled, listRecentBatchRuns, listSubmissions } from "./db.js";
+import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
+import { buildDashboard } from "./pipeline.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
+const aiMode = process.env.VERTEX_AI_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : "fallback";
 let memorySubmissions = [...seedSubmissions];
-
-const aiEnabled = Boolean(process.env.VERTEX_AI_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT);
-
-// Unified intake schema. The simple citizen app and the dashboard share it.
-// text OR media must be present; ward/lat/lng drive location resolution.
-const intakeSchema = z
-  .object({
-    channel: z.enum(["text", "voice", "photo", "whatsapp"]),
-    language: z.string().min(2).max(64).optional(),
-    userId: z.string().min(2).max(96).default("guest"),
-    username: z.string().min(1).max(64).default("citizen"),
-    privacyMode: z.coerce.boolean().default(true),
-    state: z.string().min(2).max(96).optional(),
-    district: z.string().min(2).max(96).optional(),
-    ward: z.string().min(2).max(96).optional(),
-    lat: z.coerce.number().min(-90).max(90).optional(),
-    lng: z.coerce.number().min(-180).max(180).optional(),
-    urgency: z.coerce.number().min(1).max(5).default(3),
-    rating: z.coerce.number().min(1).max(5).default(4),
-    text: z.string().max(4000).optional(),
-    // data URL: "data:image/jpeg;base64,..." or "data:audio/webm;base64,..."
-    media: z.string().max(14_000_000).optional()
-  })
-  .refine((value) => Boolean(value.text?.trim()) || Boolean(value.media), {
-    message: "Provide text or media"
-  });
-
-type Intake = z.infer<typeof intakeSchema>;
+const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
 
 const dashboardQuerySchema = z.object({
   scope: z.enum(["local", "global", "mp"]).optional(),
@@ -67,7 +33,7 @@ app.get("/healthz", (_request, response) => {
     ok: true,
     service: "people-priority-api",
     database: isDatabaseEnabled() ? "postgres" : "memory",
-    ai: aiEnabled ? "vertex-ai" : "fallback"
+    processing: "batch"
   });
 });
 
@@ -123,7 +89,7 @@ app.get("/api/analytics", async (_request, response) => {
 app.get("/api/ai-ops", (_request, response) => {
   response.json({
     provider: "Vertex AI Gemini",
-    mode: aiEnabled ? "vertex" : "fallback",
+    mode: process.env.VERTEX_AI_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : "fallback",
     tasks: [
       "text: language detection, translation, civic category",
       "image: civic-issue validation and caption (Gemini vision)",
@@ -160,14 +126,23 @@ app.get("/api/moderation", async (_request, response) => {
 
 app.get("/api/integrations", (_request, response) => {
   response.json({
-    enabled: ["Postgres", "Vertex AI Gemini (text/image/voice)", "Kubernetes", "Argo CD", "Helm"],
+    enabled: ["Postgres", "Batch data pipeline", "Vertex AI Gemini (text/image/voice)", "Kubernetes", "Argo CD", "Helm"],
     planned: ["WhatsApp Cloud API", "BHASHINI", "Vertex Speech-to-Text Chirp", "Cloud Vision OCR", "BigQuery GIS", "data.gov.in", "NDAP"],
     local: {
       database: isDatabaseEnabled() ? "postgres" : "memory",
-      ai: aiEnabled ? "vertex-ai" : "fallback",
+      processing: "scheduled batch",
       k8s: "kind supported",
       gitops: "argocd/application-local.yaml"
     }
+  });
+});
+
+app.get("/api/batch/status", async (_request, response) => {
+  response.json({
+    mode: "batch",
+    rawIntake: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length },
+    recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns() : [],
+    schedule: process.env.BATCH_SCHEDULE ?? "*/15 * * * *"
   });
 });
 
@@ -224,11 +199,10 @@ app.get("/api/whatsapp/webhook", (request, response) => {
 });
 
 app.post("/api/whatsapp/webhook", async (request, response) => {
-  // Acknowledge fast (Meta requires <10s), then process.
   response.sendStatus(200);
   try {
     for (const message of extractWhatsAppMessages(request.body)) {
-      await ingest(message);
+      await enqueueRaw(message);
       logger.info({ from: message.userId, channel: "whatsapp" }, "whatsapp message processed");
     }
   } catch (error) {
@@ -269,7 +243,7 @@ app.post("/api/whatsapp/simulate", async (request, response) => {
 initDatabase()
   .then(() => {
     app.listen(port, () => {
-      logger.info({ port, database: isDatabaseEnabled() ? "postgres" : "memory", ai: aiEnabled ? "vertex" : "fallback" }, "api listening");
+      logger.info({ port, database: isDatabaseEnabled() ? "postgres" : "memory", ai: aiMode }, "api listening");
     });
   })
   .catch((error: unknown) => {
@@ -278,7 +252,7 @@ initDatabase()
   });
 
 // ---------------------------------------------------------------------------
-// Intake engine
+// Batch-first intake engine
 // ---------------------------------------------------------------------------
 
 async function handleIntake(
@@ -292,141 +266,32 @@ async function handleIntake(
     return;
   }
 
-  const { submission, analysis } = await processIntake(parsed.data);
-  await saveSubmission(submission);
+  const raw = await enqueueRaw(toRawIntakePayload(parsed.data));
   const submissions = await getSubmissions();
-  logger.info({ submissionId: submission.id, channel: submission.channel, ward: submission.ward, ai: aiEnabled ? "vertex" : "fallback" }, "submission processed");
+  logger.info({ rawIntakeId: raw.id, channel: parsed.data.channel }, "submission queued for batch processing");
 
-  response.status(201).json({
-    submission,
-    citizenScore: submission.citizenScore,
-    message: receiptMessage(submission, analysis),
+  response.status(202).json({
+    rawIntakeId: raw.id,
+    status: "pending_batch",
+    message: "Submission received. It will be processed in the next scheduled batch run.",
+    nextStep: "Batch worker will run OCR/speech/Vertex AI classification, scoring, clustering, and MP routing.",
     dashboard: options.friendly ? undefined : buildDashboard(submissions)
   });
-}
-
-// Fire-and-store path for channels without an HTTP response (WhatsApp webhook).
-async function ingest(body: unknown) {
-  const parsed = intakeSchema.safeParse(body);
-  if (!parsed.success) return;
-  const { submission } = await processIntake(parsed.data);
-  await saveSubmission(submission);
-}
-
-async function processIntake(input: Intake): Promise<{ submission: Submission; analysis: VertexTextAnalysis | VertexMediaAnalysis }> {
-  const media = input.media ? parseDataUrl(input.media) : null;
-  const location = await resolveLocation(input);
-
-  let analysis: VertexTextAnalysis | VertexMediaAnalysis;
-  let mediaType: Submission["mediaType"] = "none";
-  let transcript: string | undefined;
-  let imageSummary: string | undefined;
-  let isCivicIssue: boolean | undefined;
-
-  if (media?.kind === "image") {
-    const result = await analyzeImageWithVertexAi(media.base64, media.mimeType, input.language);
-    analysis = result;
-    mediaType = "image";
-    imageSummary = result.mediaSummary;
-    isCivicIssue = result.isCivicIssue;
-  } else if (media?.kind === "audio") {
-    const result = await transcribeWithVertexAi(media.base64, media.mimeType, input.language);
-    analysis = result;
-    mediaType = "audio";
-    transcript = result.mediaSummary;
-    isCivicIssue = result.isCivicIssue;
-  } else {
-    analysis = await analyzeWithVertexAi(input.text ?? "", input.language);
-  }
-
-  const submission = normalizeSubmission(
-    {
-      userId: input.userId,
-      username: input.username,
-      privacyMode: input.privacyMode,
-      state: location.state,
-      district: location.district,
-      ward: location.ward,
-      channel: input.channel,
-      language: input.language,
-      urgency: input.urgency,
-      rating: input.rating,
-      text: input.text ?? "",
-      mediaType,
-      lat: input.lat,
-      lng: input.lng,
-      locationLabel: location.label,
-      transcript,
-      imageSummary,
-      isCivicIssue
-    },
-    analysis
-  );
-
-  return { submission, analysis };
-}
-
-function receiptMessage(submission: Submission, analysis: VertexTextAnalysis | VertexMediaAnalysis): string {
-  if ("isCivicIssue" in analysis && analysis.isCivicIssue === false) {
-    return "We could not detect a civic issue in this upload. Please add a photo of the problem or a short description.";
-  }
-  return `Thank you. We logged a ${submission.category} issue in ${submission.locationLabel ?? submission.ward}, detected ${submission.detectedLanguage}, and routed it to your MP.`;
-}
-
-function parseDataUrl(media: string): { mimeType: string; base64: string; kind: "image" | "audio" | "other" } | null {
-  const match = /^data:([^;]+);base64,(.+)$/s.exec(media.trim());
-  if (!match) return null;
-  const mimeType = match[1];
-  const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : "other";
-  return { mimeType, base64: match[2], kind };
-}
-
-type WhatsAppIntake = {
-  channel: "whatsapp";
-  userId: string;
-  username: string;
-  privacyMode: boolean;
-  text?: string;
-  media?: string;
-  lat?: number;
-  lng?: number;
-};
-
-// Parse Meta WhatsApp Cloud API webhook payloads into intake records.
-function extractWhatsAppMessages(body: unknown): WhatsAppIntake[] {
-  const intakes: WhatsAppIntake[] = [];
-  const payload = body as {
-    entry?: Array<{ changes?: Array<{ value?: { messages?: Array<Record<string, unknown>> } }> }>;
-  };
-  for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
-      for (const message of change.value?.messages ?? []) {
-        const from = String(message.from ?? "unknown");
-        const base = { channel: "whatsapp" as const, userId: `wa-${from}`, username: from, privacyMode: true };
-        const text = (message.text as { body?: string } | undefined)?.body;
-        const location = message.location as { latitude?: number; longitude?: number } | undefined;
-        // Note: real image/audio arrive as media IDs to fetch via Graph API.
-        // The fetched bytes should be passed as a data URL in `media`.
-        intakes.push({
-          ...base,
-          text,
-          lat: location?.latitude,
-          lng: location?.longitude
-        });
-      }
-    }
-  }
-  return intakes;
 }
 
 async function getSubmissions() {
   return isDatabaseEnabled() ? listSubmissions() : memorySubmissions;
 }
 
-async function saveSubmission(submission: Submission) {
-  if (isDatabaseEnabled()) {
-    await insertSubmission(submission);
-    return;
-  }
-  memorySubmissions = [...memorySubmissions, submission];
+async function enqueueRaw(payload: ReturnType<typeof toRawIntakePayload>) {
+  if (isDatabaseEnabled()) return insertRawIntake(payload);
+  const raw = {
+    id: crypto.randomUUID(),
+    payload,
+    status: "pending" as const,
+    attempts: 0,
+    createdAt: new Date().toISOString()
+  };
+  memoryRawQueue.push(raw);
+  return raw;
 }

@@ -39,6 +39,8 @@ spec:
               value: {{ .Values.api.env.VERTEX_AI_MODEL | quote }}
             - name: VERTEX_AI_DISABLED
               value: {{ .Values.api.env.VERTEX_AI_DISABLED | quote }}
+            - name: BATCH_SCHEDULE
+              value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
           readinessProbe:
             httpGet:
               path: /healthz

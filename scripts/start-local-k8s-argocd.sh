@@ -21,8 +21,10 @@ kubectl config use-context "kind-${CLUSTER_NAME}"
 
 docker build -f services/api/Dockerfile -t people-priority-api:local .
 docker build -f apps/web/Dockerfile -t people-priority-web:local .
+docker build -f apps/citizen/Dockerfile -t people-priority-citizen:local .
 kind load docker-image people-priority-api:local --name "$CLUSTER_NAME"
 kind load docker-image people-priority-web:local --name "$CLUSTER_NAME"
+kind load docker-image people-priority-citizen:local --name "$CLUSTER_NAME"
 
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
@@ -32,12 +34,16 @@ kubectl apply -f argocd/application-local.yaml
 
 kubectl -n "$NAMESPACE" rollout status deployment/people-priority-api --timeout=180s
 kubectl -n "$NAMESPACE" rollout status deployment/people-priority-web --timeout=180s
+kubectl -n "$NAMESPACE" rollout status deployment/people-priority-citizen --timeout=180s
 
 cat <<EOF
 Local Kubernetes ready.
 
 Dashboard:
   kubectl -n $NAMESPACE port-forward svc/people-priority-web 5173:80
+
+Citizen app:
+  kubectl -n $NAMESPACE port-forward svc/people-priority-citizen 5174:80
 
 API:
   kubectl -n $NAMESPACE port-forward svc/people-priority-api 8080:8080

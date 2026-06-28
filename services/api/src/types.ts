@@ -47,6 +47,47 @@ export type Submission = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  processingStatus?: "processed";
+  rawIntakeId?: string;
+  batchId?: string;
+  processedAt?: string;
+};
+
+export type RawIntakePayload = {
+  channel: Channel;
+  language?: string;
+  userId: string;
+  username: string;
+  privacyMode: boolean;
+  state?: string;
+  district?: string;
+  ward?: string;
+  lat?: number;
+  lng?: number;
+  urgency: number;
+  rating: number;
+  text?: string;
+  media?: string;
+};
+
+export type RawIntakeRecord = {
+  id: string;
+  payload: RawIntakePayload;
+  status: "pending" | "processing" | "processed" | "failed";
+  attempts: number;
+  error?: string;
+  createdAt: string;
+  processedAt?: string;
+};
+
+export type BatchRun = {
+  id: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: "running" | "succeeded" | "failed";
+  processed: number;
+  failed: number;
+  error?: string;
 };
 
 export type CivicDataset = {

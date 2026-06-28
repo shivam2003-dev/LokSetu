@@ -1,0 +1,47 @@
+{{- if .Values.batch.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "people-priority.name" . }}-batch
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: batch
+spec:
+  schedule: {{ .Values.batch.schedule | quote }}
+  concurrencyPolicy: {{ .Values.batch.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.batch.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.batch.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.batch.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "people-priority.name" . }}
+            app.kubernetes.io/component: batch
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "people-priority.name" . }}
+          containers:
+            - name: batch
+              image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+              imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+              command: ["node", "services/api/dist/batch.js"]
+              env:
+                - name: NODE_ENV
+                  value: {{ .Values.api.env.NODE_ENV | quote }}
+                {{- if .Values.api.env.DATABASE_URL }}
+                - name: DATABASE_URL
+                  value: {{ .Values.api.env.DATABASE_URL | quote }}
+                {{- end }}
+                - name: VERTEX_AI_LOCATION
+                  value: {{ .Values.api.env.VERTEX_AI_LOCATION | quote }}
+                - name: VERTEX_AI_MODEL
+                  value: {{ .Values.api.env.VERTEX_AI_MODEL | quote }}
+                - name: VERTEX_AI_DISABLED
+                  value: {{ .Values.api.env.VERTEX_AI_DISABLED | quote }}
+                - name: BATCH_SCHEDULE
+                  value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
+              resources:
+                {{- toYaml .Values.batch.resources | nindent 16 }}
+{{- end }}

@@ -27,9 +27,9 @@ type GeoState = {
 
 type Receipt = {
   message: string;
-  category: string;
-  detectedLanguage: string;
-  citizenScore: number;
+  rawIntakeId: string;
+  status: string;
+  nextStep: string;
   area: string;
 };
 
@@ -149,10 +149,10 @@ export default function App() {
       const payload = await response.json();
       setReceipt({
         message: payload.message,
-        category: payload.submission.category,
-        detectedLanguage: payload.submission.detectedLanguage,
-        citizenScore: payload.citizenScore,
-        area: payload.submission.locationLabel ?? payload.submission.ward
+        rawIntakeId: payload.rawIntakeId,
+        status: payload.status,
+        nextStep: payload.nextStep,
+        area: geo.label
       });
       setStep("done");
     } catch {
@@ -312,22 +312,22 @@ export default function App() {
             <p className="receipt-line">{receipt.message}</p>
             <div className="receipt-grid">
               <div>
-                <span>Category</span>
-                <strong>{receipt.category}</strong>
+                <span>Status</span>
+                <strong>{receipt.status.replace("_", " ")}</strong>
               </div>
               <div>
                 <span>
-                  <Languages size={13} /> Language
+                  <Languages size={13} /> AI batch
                 </span>
-                <strong>{receipt.detectedLanguage}</strong>
+                <strong>Queued for processing</strong>
               </div>
               <div>
                 <span>Area</span>
                 <strong>{receipt.area}</strong>
               </div>
               <div>
-                <span>Your impact score</span>
-                <strong className="score">{receipt.citizenScore}</strong>
+                <span>Receipt ID</span>
+                <strong className="score">{receipt.rawIntakeId.slice(0, 8)}</strong>
               </div>
             </div>
             <button className="submit" onClick={reset} type="button">

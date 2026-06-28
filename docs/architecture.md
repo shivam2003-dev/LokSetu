@@ -1,6 +1,6 @@
 # Technical Architecture
 
-See [diagrams.md](./diagrams.md) for system, AI pipeline, GitOps, data, and security diagrams. See [gcp-cloud-architecture.md](./gcp-cloud-architecture.md) for the Google Cloud production architecture.
+See [diagrams.md](./diagrams.md) for system, AI pipeline, GitOps, data, and security diagrams. See [gcp-cloud-architecture.md](./gcp-cloud-architecture.md) for the Google Cloud production architecture and [batch-data-pipeline.md](./batch-data-pipeline.md) for scheduled processing.
 
 ## System Flow
 
@@ -17,7 +17,9 @@ Citizen channels
 
 ## Services
 
-`apps/web` is the dashboard and intake console. MPs see ranked needs, evidence, hotspots, model confidence, and review state. Constituency staff can submit voice/photo/text samples during field work.
+`apps/web` is the MP/admin dashboard and intake console. MPs see ranked needs, evidence, hotspots, model confidence, and review state. Constituency staff can submit voice/photo/text samples during field work.
+
+`apps/citizen` is the lightweight public capture app for phone-first voice, photo, and text reports. It returns a batch receipt immediately while AI scoring runs on the schedule.
 
 `services/api` exposes submission and ranking endpoints. It is Vertex-first: when `VERTEX_AI_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` is configured, Gemini on Vertex AI detects language, normalizes/ translates text, and classifies the civic category. Local fallback keeps development deterministic when credentials are missing.
 
@@ -42,7 +44,7 @@ The API returns component scores and plain-language rationale so final MP decisi
 
 Terraform provisions GCP resources: VPC, GKE, Artifact Registry, GCS buckets, Pub/Sub topics, BigQuery datasets, and service accounts.
 
-Helm packages both services with probes, resource limits, HPAs, and service accounts. Argo CD watches the chart and reconciles the cluster from Git. Local development can run with Docker Compose Postgres or with `kind` + Argo CD + an in-cluster Postgres StatefulSet using `values-local.yaml`.
+Helm packages the MP web app, citizen web app, API, batch CronJob, probes, resource limits, HPAs, and service accounts. Argo CD watches the chart and reconciles the cluster from Git. Local development can run with Docker Compose Postgres or with `kind` + Argo CD + an in-cluster Postgres StatefulSet using `values-local.yaml`.
 
 ## Security
 

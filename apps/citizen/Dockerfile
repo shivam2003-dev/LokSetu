@@ -6,11 +6,10 @@ COPY apps/citizen/package.json apps/citizen/package.json
 COPY services/api/package.json services/api/package.json
 COPY tsconfig.base.json tsconfig.base.json
 RUN npm install
-COPY apps/web apps/web
-RUN npm run build -w apps/web
+COPY apps/citizen apps/citizen
+RUN npm run build -w apps/citizen
 
 FROM nginx:1.27-alpine
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/apps/web/dist /usr/share/nginx/html
-EXPOSE 8080
+COPY --from=build /app/apps/citizen/dist /usr/share/nginx/html
+EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

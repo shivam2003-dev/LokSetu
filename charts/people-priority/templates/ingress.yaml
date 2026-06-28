@@ -5,6 +5,10 @@ metadata:
   name: {{ include "people-priority.name" . }}
   labels:
     {{- include "people-priority.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
@@ -25,4 +29,14 @@ spec:
                 name: {{ include "people-priority.name" . }}-api
                 port:
                   number: {{ .Values.api.service.port }}
+    - host: {{ .Values.ingress.citizenHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "people-priority.name" . }}-citizen
+                port:
+                  number: {{ .Values.citizen.service.port }}
 {{- end }}

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "people-priority.name" . }}-citizen
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: citizen
+spec:
+  replicas: {{ .Values.citizen.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      app.kubernetes.io/component: citizen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "people-priority.name" . }}
+        app.kubernetes.io/component: citizen
+    spec:
+      serviceAccountName: {{ include "people-priority.name" . }}
+      containers:
+        - name: citizen
+          image: "{{ .Values.citizen.image.repository }}:{{ .Values.citizen.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.citizen.service.targetPort }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.citizen.service.targetPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.citizen.service.targetPort }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.citizen.resources | nindent 12 }}

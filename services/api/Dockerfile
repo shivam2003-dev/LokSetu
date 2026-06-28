@@ -2,6 +2,7 @@ FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 COPY apps/web/package.json apps/web/package.json
+COPY apps/citizen/package.json apps/citizen/package.json
 COPY services/api/package.json services/api/package.json
 COPY tsconfig.base.json tsconfig.base.json
 RUN npm install

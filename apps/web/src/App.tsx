@@ -390,7 +390,7 @@ function SubmitPage({ refresh }: { refresh: () => void }) {
   const [urgency, setUrgency] = useState(4);
   const [rating, setRating] = useState(5);
   const [text, setText] = useState("School toilets are broken and classrooms flood after rain.");
-  const [score, setScore] = useState<number | null>(null);
+  const [receiptId, setReceiptId] = useState("");
   const [result, setResult] = useState("");
 
   async function submit(event: FormEvent) {
@@ -401,8 +401,8 @@ function SubmitPage({ refresh }: { refresh: () => void }) {
       body: JSON.stringify({ channel, username, privacyMode, language, state, district, ward, urgency, rating, text })
     });
     const payload = await response.json();
-    setScore(payload.citizenScore);
-    setResult(`${payload.submission.detectedLanguage} · ${payload.submission.category} · ${payload.submission.displayName}`);
+    setReceiptId(payload.rawIntakeId ?? "");
+    setResult(payload.message ?? "Submission received for the next scheduled batch run.");
     refresh();
   }
 
@@ -433,16 +433,16 @@ function SubmitPage({ refresh }: { refresh: () => void }) {
         <label>Problem<textarea value={text} onChange={(event) => setText(event.target.value)} /></label>
         <label>Urgency {urgency}<input min="1" max="5" type="range" value={urgency} onChange={(event) => setUrgency(Number(event.target.value))} /></label>
         <label>Citizen rating {rating}<input min="1" max="5" type="range" value={rating} onChange={(event) => setRating(Number(event.target.value))} /></label>
-        <button className="primary" type="submit"><Send size={17} /> Submit and score</button>
+        <button className="primary" type="submit"><Send size={17} /> Submit to batch</button>
       </form>
       <section className="panel">
         <PanelTitle title="AI processing receipt" icon={Bot} />
         <div className="receipt">
-          <strong>{score ?? "--"}</strong>
-          <span>society contribution score</span>
-          <p>{result || "Submit once to see language, category, alias, and score."}</p>
+          <strong>{receiptId ? receiptId.slice(0, 8) : "--"}</strong>
+          <span>batch intake receipt</span>
+          <p>{result || "Submit once to queue language detection, category scoring, aliasing, and MP routing."}</p>
         </div>
-        <Feature title="Processing pipeline" icon={Languages} points={["Detect language", "Normalize text through Vertex AI", "Classify civic category", "Route to MP and ward", "Save in Postgres"]} />
+        <Feature title="Processing pipeline" icon={Languages} points={["Queue raw intake in Postgres", "Run scheduled batch worker", "Normalize through Vertex AI", "Score category and urgency", "Route to MP and ward"]} />
       </section>
     </section>
   );

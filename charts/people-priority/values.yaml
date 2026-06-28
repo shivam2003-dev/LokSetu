@@ -1,6 +1,9 @@
 global:
   imagePullPolicy: IfNotPresent
 
+serviceAccount:
+  annotations: {}
+
 web:
   replicaCount: 2
   image:
@@ -16,6 +19,22 @@ web:
     limits:
       cpu: 300m
       memory: 256Mi
+
+citizen:
+  replicaCount: 2
+  image:
+    repository: us-central1-docker.pkg.dev/PROJECT_ID/people-priority/citizen
+    tag: latest
+  service:
+    port: 80
+    targetPort: 80
+  resources:
+    requests:
+      cpu: 80m
+      memory: 96Mi
+    limits:
+      cpu: 250m
+      memory: 192Mi
 
 api:
   replicaCount: 2
@@ -37,11 +56,37 @@ api:
     VERTEX_AI_LOCATION: us-central1
     VERTEX_AI_MODEL: gemini-1.5-flash
     VERTEX_AI_DISABLED: "false"
+    BATCH_SCHEDULE: "*/15 * * * *"
+
+batch:
+  enabled: true
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
 
 ingress:
-  enabled: false
+  enabled: true
   className: gce
   host: people-priority.example.gov
+  citizenHost: citizen.people-priority.example.gov
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: people-priority-ingress-ip
+    networking.gke.io/managed-certificates: people-priority-cert
+  managedCertificate:
+    enabled: true
+    name: people-priority-cert
+    domains:
+      - people-priority.example.gov
+      - citizen.people-priority.example.gov
 
 autoscaling:
   enabled: true

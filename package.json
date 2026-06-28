@@ -14,7 +14,9 @@
     "local:k8s": "bash scripts/start-local-k8s-argocd.sh",
     "build": "npm run build -w services/api && npm run build -w apps/web && npm run build -w apps/citizen",
     "lint": "npm run lint -w services/api && npm run lint -w apps/web && npm run lint -w apps/citizen",
-    "typecheck": "npm run typecheck -w services/api && npm run typecheck -w apps/web && npm run typecheck -w apps/citizen"
+    "typecheck": "npm run typecheck -w services/api && npm run typecheck -w apps/web && npm run typecheck -w apps/citizen",
+    "test": "npm run typecheck && npm run build",
+    "batch": "npm run batch -w services/api"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

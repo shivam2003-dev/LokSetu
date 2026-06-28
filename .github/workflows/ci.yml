@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Build, Helm, Terraform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+      - name: Build API image
+        run: docker build -f services/api/Dockerfile -t loksetu-api:ci .
+
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t loksetu-web:ci .
+
+      - name: Build citizen image
+        run: docker build -f apps/citizen/Dockerfile -t loksetu-citizen:ci .
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Helm lint
+        run: helm lint charts/people-priority
+
+      - name: Helm render production
+        run: helm template people-priority charts/people-priority > /tmp/people-priority.yaml
+
+      - name: Helm render local
+        run: helm template people-priority charts/people-priority -f charts/people-priority/values-local.yaml > /tmp/people-priority-local.yaml
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: infra/terraform
+        run: terraform validate
