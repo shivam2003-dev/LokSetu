@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w services/api\" \"npm run dev -w apps/web\"",
+    "local": "bash scripts/start-local.sh",
+    "local:k8s": "bash scripts/start-local-k8s-argocd.sh",
     "build": "npm run build -w services/api && npm run build -w apps/web",
     "lint": "npm run lint -w services/api && npm run lint -w apps/web",
     "typecheck": "npm run typecheck -w services/api && npm run typecheck -w apps/web"

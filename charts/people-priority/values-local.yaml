@@ -1,0 +1,26 @@
+global:
+  imagePullPolicy: IfNotPresent
+
+api:
+  image:
+    repository: people-priority-api
+    tag: local
+  env:
+    NODE_ENV: production
+    DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
+    VERTEX_AI_LOCATION: us-central1
+    VERTEX_AI_MODEL: gemini-1.5-flash
+    VERTEX_AI_DISABLED: "true"
+
+web:
+  image:
+    repository: people-priority-web
+    tag: local
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  database: loksetu
+  username: loksetu
+  password: loksetu
+  storage: 2Gi

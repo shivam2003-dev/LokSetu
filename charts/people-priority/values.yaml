@@ -33,6 +33,10 @@ api:
       memory: 512Mi
   env:
     NODE_ENV: production
+    DATABASE_URL: ""
+    VERTEX_AI_LOCATION: us-central1
+    VERTEX_AI_MODEL: gemini-1.5-flash
+    VERTEX_AI_DISABLED: "false"
 
 ingress:
   enabled: false
@@ -44,3 +48,11 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 8
   targetCPUUtilizationPercentage: 70
+
+postgres:
+  enabled: false
+  image: postgres:16-alpine
+  database: loksetu
+  username: loksetu
+  password: loksetu
+  storage: 10Gi

@@ -29,6 +29,16 @@ spec:
               value: {{ .Values.api.env.NODE_ENV | quote }}
             - name: PORT
               value: {{ .Values.api.service.port | quote }}
+            {{- if .Values.api.env.DATABASE_URL }}
+            - name: DATABASE_URL
+              value: {{ .Values.api.env.DATABASE_URL | quote }}
+            {{- end }}
+            - name: VERTEX_AI_LOCATION
+              value: {{ .Values.api.env.VERTEX_AI_LOCATION | quote }}
+            - name: VERTEX_AI_MODEL
+              value: {{ .Values.api.env.VERTEX_AI_MODEL | quote }}
+            - name: VERTEX_AI_DISABLED
+              value: {{ .Values.api.env.VERTEX_AI_DISABLED | quote }}
           readinessProbe:
             httpGet:
               path: /healthz

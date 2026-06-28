@@ -5,10 +5,11 @@ Production-oriented hackathon scaffold for ranking constituency development need
 ## What It Does
 
 - Accepts citizen suggestions by text, voice metadata, photo metadata, and messaging channels.
-- Normalizes multilingual submissions into a common analysis text.
+- Uses Vertex AI for language detection, translation/normalization, and category extraction when configured.
 - Extracts development themes, clusters repeated needs, and joins them with civic data.
 - Ranks projects using demand, objective need, urgency, and equity signals.
-- Gives MPs an explainable dashboard with project scores, evidence, and operational signals.
+- Gives MPs a localized dashboard by ward/constituency, while citizens can search all-India public issues.
+- Supports privacy mode with random aliases and citizen contribution scores.
 
 ## Local Run
 
@@ -20,6 +21,22 @@ npm run dev
 Frontend: `http://localhost:5173`
 
 API: `http://localhost:8080`
+
+Postgres-backed local run:
+
+```bash
+npm run local
+```
+
+This starts Postgres in Docker and runs the API with `DATABASE_URL=postgres://loksetu:loksetu@localhost:5432/loksetu`.
+
+Local Kubernetes + Argo CD:
+
+```bash
+npm run local:k8s
+```
+
+This creates a `kind` cluster, builds local API/web images, installs Argo CD, creates a local Postgres StatefulSet through Helm values, and lets Argo CD reconcile the chart from Git.
 
 ## Repository Layout
 

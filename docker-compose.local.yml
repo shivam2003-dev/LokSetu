@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: loksetu-postgres
+    environment:
+      POSTGRES_DB: loksetu
+      POSTGRES_USER: loksetu
+      POSTGRES_PASSWORD: loksetu
+    ports:
+      - "5432:5432"
+    volumes:
+      - loksetu-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loksetu -d loksetu"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  loksetu-postgres:

@@ -160,6 +160,57 @@ nav {
   gap: 12px;
 }
 
+.filters {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 240px) minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 42px;
+}
+
+.segmented button {
+  border: 0;
+  background: #fff;
+  padding: 0 14px;
+  color: #344054;
+  border-right: 1px solid var(--line);
+}
+
+.segmented button:last-child {
+  border-right: 0;
+}
+
+.segmented button.active {
+  background: #e7f7f8;
+  color: #065d66;
+  font-weight: 800;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fff;
+}
+
+.search-box input {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  outline: 0;
+}
+
 .metric-card,
 .panel {
   background: var(--panel);
@@ -331,6 +382,8 @@ label {
   font-weight: 700;
 }
 
+input[type="text"],
+input:not([type]),
 select,
 textarea,
 input[type="range"] {
@@ -339,6 +392,39 @@ input[type="range"] {
   padding: 10px;
   background: #fff;
   color: var(--ink);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chips span,
+.score-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fbfb;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.check-row {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-row input {
+  width: 18px;
+  height: 18px;
 }
 
 textarea {
@@ -425,6 +511,7 @@ textarea {
 
   .content-grid,
   .content-grid.lower,
+  .filters,
   .metrics {
     grid-template-columns: 1fr;
   }

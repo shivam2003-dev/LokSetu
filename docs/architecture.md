@@ -17,13 +17,13 @@ Citizen channels
 
 `apps/web` is the dashboard and intake console. MPs see ranked needs, evidence, hotspots, model confidence, and review state. Constituency staff can submit voice/photo/text samples during field work.
 
-`services/api` exposes submission and ranking endpoints. Demo mode uses deterministic local adapters, while production mode should replace those adapters with managed GCP services:
+`services/api` exposes submission and ranking endpoints. It is Vertex-first: when `VERTEX_AI_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` is configured, Gemini on Vertex AI detects language, normalizes/ translates text, and classifies the civic category. Local fallback keeps development deterministic when credentials are missing.
 
 - Speech: Cloud Speech-to-Text or Bhashini-backed service for Indian languages.
 - OCR: Cloud Vision OCR for photos and documents.
 - Translation: Cloud Translation or a domain-specific multilingual model.
-- NLP: Vertex AI embeddings plus clustering, backed by BigQuery for durable analytics.
-- Summaries: Gemini/Vertex AI with retrieval-grounded project evidence only.
+- NLP: Vertex AI Gemini for intake analysis, Vertex AI embeddings plus clustering for larger-scale similarity matching, backed by BigQuery for durable analytics.
+- Summaries: Gemini on Vertex AI with retrieval-grounded project evidence only.
 
 ## Ranking Model
 
@@ -40,7 +40,7 @@ The API returns component scores and plain-language rationale so final MP decisi
 
 Terraform provisions GCP resources: VPC, GKE, Artifact Registry, GCS buckets, Pub/Sub topics, BigQuery datasets, and service accounts.
 
-Helm packages both services with probes, resource limits, HPAs, and service accounts. Argo CD watches the chart and reconciles the cluster from Git.
+Helm packages both services with probes, resource limits, HPAs, and service accounts. Argo CD watches the chart and reconciles the cluster from Git. Local development can run with Docker Compose Postgres or with `kind` + Argo CD + an in-cluster Postgres StatefulSet using `values-local.yaml`.
 
 ## Security
 

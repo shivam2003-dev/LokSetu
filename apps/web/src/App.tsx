@@ -9,9 +9,11 @@ import {
   MessageSquareText,
   Mic,
   RefreshCw,
+  Search,
   Send,
   ShieldCheck,
   Smartphone,
+  Star,
   Upload
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -22,14 +24,22 @@ type RankedProject = {
   id: string;
   title: string;
   category: string;
+  state: string;
+  district: string;
   ward: string;
+  mpId: string;
+  mpName: string;
   score: number;
   confidence: number;
   demandCount: number;
+  averageRating: number;
+  ratings: number;
   demandScore: number;
   needScore: number;
   urgencyScore: number;
   equityScore: number;
+  languageMix: string[];
+  recentCitizenAliases: string[];
   rationale: string;
   evidence: string[];
   safeguards: string[];
@@ -48,6 +58,8 @@ type DashboardResponse = {
   hotspots: Array<{ ward: string; category: string; intensity: number; lat: number; lng: number }>;
 };
 
+type Scope = "local" | "mp" | "global";
+
 const fallback: DashboardResponse = {
   generatedAt: new Date().toISOString(),
   totals: { submissions: 162, wards: 8, languages: 6, botRisk: "low" },
@@ -56,14 +68,22 @@ const fallback: DashboardResponse = {
       id: "school-kalindi",
       title: "Repair classrooms and toilets at Kalindi Nagar school",
       category: "Education",
+      state: "Delhi",
+      district: "Central Delhi",
       ward: "Kalindi Nagar",
+      mpId: "mp-delhi-central",
+      mpName: "MP Central Delhi",
       score: 91,
       confidence: 0.88,
       demandCount: 48,
+      averageRating: 4.8,
+      ratings: 48,
       demandScore: 36,
       needScore: 31,
       urgencyScore: 14,
       equityScore: 10,
+      languageMix: ["Hindi", "English"],
+      recentCitizenAliases: ["Local Voice 482", "Local Voice 917"],
       rationale: "Repeated citizen reports match high enrolment pressure and low sanitation coverage.",
       evidence: ["48 similar requests", "1.7x classroom crowding", "Girls' attendance below ward average"],
       safeguards: ["No single identity shown", "Human engineer review required before tender"],
@@ -73,14 +93,22 @@ const fallback: DashboardResponse = {
       id: "road-river",
       title: "Resurface river market access road",
       category: "Roads",
+      state: "Delhi",
+      district: "Central Delhi",
       ward: "River Market",
+      mpId: "mp-delhi-central",
+      mpName: "MP Central Delhi",
       score: 84,
       confidence: 0.82,
       demandCount: 37,
+      averageRating: 4.6,
+      ratings: 37,
       demandScore: 31,
       needScore: 28,
       urgencyScore: 15,
       equityScore: 10,
+      languageMix: ["English", "Hindi"],
+      recentCitizenAliases: ["market-worker"],
       rationale: "Pothole and ambulance-delay reports overlap with poor road-condition survey data.",
       evidence: ["37 similar requests", "2.8 km damaged segment", "Clinic route affected"],
       safeguards: ["Duplicate campaign risk checked", "PWD plan overlap check pending"],
@@ -90,14 +118,22 @@ const fallback: DashboardResponse = {
       id: "clinic-east",
       title: "Add evening clinic hours in East Colony",
       category: "Health",
+      state: "Delhi",
+      district: "East Delhi",
       ward: "East Colony",
+      mpId: "mp-delhi-east",
+      mpName: "MP East Delhi",
       score: 78,
       confidence: 0.76,
       demandCount: 29,
+      averageRating: 4.2,
+      ratings: 29,
       demandScore: 27,
       needScore: 25,
       urgencyScore: 13,
       equityScore: 13,
+      languageMix: ["Bangla"],
+      recentCitizenAliases: ["clinic-helper"],
       rationale: "Health access complaints align with distance-to-clinic and elderly population signals.",
       evidence: ["29 similar requests", "3.9 km median clinic distance", "High elderly share"],
       safeguards: ["Demographic weighting applied", "PHC capacity validation needed"],
@@ -118,9 +154,20 @@ const channelOptions: Array<{ value: Channel; label: string; icon: typeof Messag
   { value: "whatsapp", label: "WhatsApp", icon: Smartphone }
 ];
 
-async function fetchDashboard(): Promise<DashboardResponse> {
+async function fetchDashboard(filters?: { scope: Scope; state: string; district: string; ward: string; mpId: string; q: string }): Promise<DashboardResponse> {
   const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
-  const response = await fetch(`${apiBase}/api/priorities`);
+  const params = new URLSearchParams();
+  if (filters) {
+    params.set("scope", filters.scope);
+    if (filters.scope === "local") {
+      params.set("state", filters.state);
+      params.set("district", filters.district);
+      params.set("ward", filters.ward);
+    }
+    if (filters.scope === "mp") params.set("mpId", filters.mpId);
+    if (filters.q.trim()) params.set("q", filters.q.trim());
+  }
+  const response = await fetch(`${apiBase}/api/priorities${params.size ? `?${params}` : ""}`);
   if (!response.ok) throw new Error("Dashboard API failed");
   return response.json();
 }
@@ -129,15 +176,24 @@ export default function App() {
   const [data, setData] = useState<DashboardResponse>(fallback);
   const [activeProject, setActiveProject] = useState(fallback.projects[0].id);
   const [channel, setChannel] = useState<Channel>("text");
+  const [scope, setScope] = useState<Scope>("local");
+  const [state, setState] = useState("Delhi");
+  const [district, setDistrict] = useState("Central Delhi");
+  const [mpId, setMpId] = useState("mp-delhi-central");
+  const [query, setQuery] = useState("");
+  const [username, setUsername] = useState("citizen");
+  const [privacyMode, setPrivacyMode] = useState(true);
   const [language, setLanguage] = useState("Hindi");
   const [ward, setWard] = useState("Kalindi Nagar");
   const [urgency, setUrgency] = useState(4);
+  const [rating, setRating] = useState(5);
+  const [citizenScore, setCitizenScore] = useState<number | null>(null);
   const [text, setText] = useState("School toilets are broken and classrooms flood after rain.");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("Live API pending");
 
   useEffect(() => {
-    fetchDashboard()
+    fetchDashboard({ scope, state, district, ward, mpId, q: query })
       .then((next) => {
         setData(next);
         setActiveProject(next.projects[0]?.id ?? "");
@@ -147,7 +203,7 @@ export default function App() {
   }, []);
 
   const project = useMemo(
-    () => data.projects.find((item) => item.id === activeProject) ?? data.projects[0],
+    () => data.projects.find((item) => item.id === activeProject) ?? data.projects[0] ?? fallback.projects[0],
     [activeProject, data.projects]
   );
 
@@ -159,13 +215,14 @@ export default function App() {
       const response = await fetch(`${apiBase}/api/submissions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, language, ward, urgency, text })
+        body: JSON.stringify({ channel, language, username, privacyMode, state, district, ward, urgency, rating, text })
       });
       if (!response.ok) throw new Error("Submission failed");
       const next = await response.json();
       setData(next.dashboard);
       setActiveProject(next.dashboard.projects[0]?.id ?? activeProject);
-      setNotice("Submission processed");
+      setCitizenScore(next.citizenScore);
+      setNotice(`Submission processed · score ${next.citizenScore}`);
     } catch {
       setNotice("API unavailable; local preview unchanged");
     } finally {
@@ -206,13 +263,39 @@ export default function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">MP review queue</p>
-            <h2>Ranked development projects</h2>
+            <p className="eyebrow">{scope === "global" ? "India search" : scope === "mp" ? "MP constituency view" : "Local ward view"}</p>
+            <h2>{scope === "global" ? "Explore public problems across India" : "Ranked development projects"}</h2>
           </div>
-          <button className="icon-button" title="Refresh dashboard" onClick={() => fetchDashboard().then(setData)}>
+          <button className="icon-button" title="Refresh dashboard" onClick={() => fetchDashboard({ scope, state, district, ward, mpId, q: query }).then(setData)}>
             <RefreshCw size={18} />
           </button>
         </header>
+
+        <section className="panel filters" aria-label="Location and search controls">
+          <div className="segmented">
+            <button className={scope === "local" ? "active" : ""} type="button" onClick={() => setScope("local")}>My ward</button>
+            <button className={scope === "mp" ? "active" : ""} type="button" onClick={() => setScope("mp")}>My MP</button>
+            <button className={scope === "global" ? "active" : ""} type="button" onClick={() => setScope("global")}>All India</button>
+          </div>
+          <label>
+            MP
+            <select value={mpId} onChange={(event) => setMpId(event.target.value)}>
+              <option value="mp-delhi-central">MP Central Delhi</option>
+              <option value="mp-delhi-east">MP East Delhi</option>
+              <option value="mp-maharashtra-north">MP North Maharashtra</option>
+            </select>
+          </label>
+          <label>
+            Search
+            <span className="search-box">
+              <Search size={16} />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="road, school, water, ward" />
+            </span>
+          </label>
+          <button className="primary" type="button" onClick={() => fetchDashboard({ scope, state, district, ward, mpId, q: query }).then(setData)}>
+            Apply
+          </button>
+        </section>
 
         <section className="metrics" aria-label="Platform metrics">
           <Metric label="Submissions" value={data.totals.submissions.toString()} detail="deduped citizen inputs" />
@@ -240,6 +323,9 @@ export default function App() {
                     <small>
                       {item.category} · {item.ward} · {item.demandCount} reports
                     </small>
+                    <small>
+                      {item.mpName} · {item.state} · {item.averageRating}/5
+                    </small>
                   </span>
                 </button>
               ))}
@@ -249,9 +335,14 @@ export default function App() {
           <section className="panel detail-panel">
             <div className="panel-title">
               <h3>{project.title}</h3>
-              <span>{Math.round(project.confidence * 100)}% confidence</span>
+              <span>{project.mpName} · {Math.round(project.confidence * 100)}% confidence</span>
             </div>
             <p className="rationale">{project.rationale}</p>
+            <div className="chips">
+              <span><Star size={14} /> {project.averageRating}/5 from {project.ratings}</span>
+              <span><Languages size={14} /> {project.languageMix.join(", ")}</span>
+              <span><MapPin size={14} /> {project.district}, {project.state}</span>
+            </div>
             <div className="score-grid">
               <ScoreBar label="Demand" value={project.demandScore} max={40} />
               <ScoreBar label="Need" value={project.needScore} max={35} />
@@ -260,6 +351,7 @@ export default function App() {
             </div>
             <div className="evidence-grid">
               <Evidence title="Evidence" items={project.evidence} />
+              <Evidence title="Visible contributors" items={project.recentCitizenAliases} />
               <Evidence title="Controls" items={project.safeguards} />
             </div>
           </section>
@@ -290,13 +382,33 @@ export default function App() {
             </div>
             <div className="form-grid">
               <label>
+                Username
+                <input value={username} onChange={(event) => setUsername(event.target.value)} />
+              </label>
+              <label>
                 Language
                 <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+                  <option>Auto detect</option>
                   <option>Hindi</option>
                   <option>Tamil</option>
                   <option>Bangla</option>
                   <option>Marathi</option>
                   <option>English</option>
+                </select>
+              </label>
+              <label>
+                State
+                <select value={state} onChange={(event) => setState(event.target.value)}>
+                  <option>Delhi</option>
+                  <option>Maharashtra</option>
+                </select>
+              </label>
+              <label>
+                District
+                <select value={district} onChange={(event) => setDistrict(event.target.value)}>
+                  <option>Central Delhi</option>
+                  <option>East Delhi</option>
+                  <option>Nashik Rural</option>
                 </select>
               </label>
               <label>
@@ -317,6 +429,15 @@ export default function App() {
               Urgency: {urgency}
               <input min="1" max="5" type="range" value={urgency} onChange={(event) => setUrgency(Number(event.target.value))} />
             </label>
+            <label>
+              Problem rating: {rating}
+              <input min="1" max="5" type="range" value={rating} onChange={(event) => setRating(Number(event.target.value))} />
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)} />
+              Privacy mode
+            </label>
+            {citizenScore ? <div className="score-note">Your society contribution score: {citizenScore}</div> : null}
             <div className="submit-row">
               <label className="upload" title="Attach supporting media">
                 <Upload size={17} />
