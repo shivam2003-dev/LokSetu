@@ -11,7 +11,7 @@ import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./t
 import { aiRuntimeMode } from "./vertexAi.js";
 import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
-import { answerCopilot, copilotKnowledgeSummary } from "./copilot.js";
+import { answerCopilot, buildCopilotRagStatus, copilotKnowledgeSummary } from "./copilot.js";
 import { buildEnterpriseSituation } from "./enterprise.js";
 import { BoundaryLevel, buildBoundaryFeatures, buildHotspotClusters } from "./mapIntelligence.js";
 
@@ -310,6 +310,12 @@ app.get("/api/intelligence/daily", async (_request, response) => {
 
 app.get("/api/copilot/capabilities", (_request, response) => {
   response.json(copilotKnowledgeSummary());
+});
+
+app.get("/api/copilot/rag-status", async (_request, response) => {
+  const submissions = await getSubmissions();
+  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  response.json(buildCopilotRagStatus(dashboard.projects, submissions));
 });
 
 app.post("/api/copilot/query", async (request, response) => {

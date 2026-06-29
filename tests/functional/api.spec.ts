@@ -157,6 +157,15 @@ test.describe("API functional flow", () => {
     const copilotMeta = await copilotCapabilities.json();
     expect(copilotMeta.agents.map((agent: { id: string }) => agent.id)).toContain("mp-copilot");
     expect(copilotMeta.supportedRoles).toContain("citizen");
+    expect(copilotMeta.rag.mode).toBe("local-hybrid-rag");
+
+    const ragStatus = await api.get("/api/copilot/rag-status");
+    await expect(ragStatus).toBeOK();
+    const ragPayload = await ragStatus.json();
+    expect(ragPayload.mode).toBe("local-hybrid-rag");
+    expect(ragPayload.corpusDocuments).toBeGreaterThan(0);
+    expect(ragPayload.bySource.ranked_project).toBeGreaterThan(0);
+    expect(ragPayload.bySource.citizen_signal).toBeGreaterThan(0);
 
     const copilotAnswer = await api.post("/api/copilot/query", {
       data: {
@@ -171,6 +180,10 @@ test.describe("API functional flow", () => {
     expect(copilotPayload.answer).toContain(globalPriorities.projects[0].title);
     expect(copilotPayload.citations.length).toBeGreaterThan(0);
     expect(copilotPayload.guardrails.length).toBeGreaterThan(0);
+    expect(copilotPayload.retrieval.mode).toBe("local-hybrid-rag");
+    expect(copilotPayload.retrieval.corpusDocuments).toBeGreaterThan(0);
+    expect(copilotPayload.retrievedContext.length).toBeGreaterThan(0);
+    expect(JSON.stringify(copilotPayload)).not.toContain("username");
 
     const enterprise = await api.get("/api/enterprise/situation-room");
     await expect(enterprise).toBeOK();

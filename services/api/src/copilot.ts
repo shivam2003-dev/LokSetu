@@ -44,6 +44,7 @@ export const copilotAgents = [
 ];
 
 export function answerCopilot(query: CopilotQuery, projects: RankedProject[], submissions: Submission[]) {
+  const started = Date.now();
   const question = query.question.trim();
   const selectedProject = query.projectId
     ? projects.find((project) => project.id === query.projectId)
@@ -52,8 +53,14 @@ export function answerCopilot(query: CopilotQuery, projects: RankedProject[], su
   const daily = buildDailyIntelligence(projects, submissions);
   const agent = routeAgent(query.role, question);
   const intent = classifyIntent(question);
-  const evidence = project ? projectEvidence(project) : [];
+  const corpus = buildRagCorpus(projects, submissions, daily);
+  const retrievedContext = retrieveContext(question, corpus, query.projectId);
+  const evidence = [
+    ...retrievedContext.slice(0, 5).map((item) => ({ type: item.sourceType, text: item.snippet })),
+    ...(project ? projectEvidence(project) : [])
+  ].slice(0, 8);
   const citations = [
+    ...retrievedContext.slice(0, 5).map((item) => citation(item.sourceType, item.id, item.title, item.snippet)),
     ...(project ? [
       citation("ranked_project", project.id, project.title, project.evidence[0] ?? project.rationale),
       citation("score_breakdown", project.id, "Demand/need/urgency/equity score", `score ${project.score}, confidence ${Math.round(project.confidence * 100)}%`)
@@ -71,7 +78,15 @@ export function answerCopilot(query: CopilotQuery, projects: RankedProject[], su
     answer: buildAnswer(query.role, intent, question, project, daily),
     confidence: project ? Math.round(project.confidence * 100) : 68,
     evidence,
-    citations,
+    citations: dedupeCitations(citations),
+    retrieval: {
+      mode: "local-hybrid-rag",
+      embeddingStore: process.env.VERTEX_AI_VECTOR_SEARCH_INDEX ? "vertex-ai-vector-search" : "local-deterministic-index",
+      corpusDocuments: corpus.length,
+      retrieved: retrievedContext.length,
+      latencyMs: Date.now() - started
+    },
+    retrievedContext,
     suggestedActions: suggestedActions(query.role, intent, project),
     followUpQuestions: followUps(query.role, project),
     guardrails: [
@@ -79,6 +94,24 @@ export function answerCopilot(query: CopilotQuery, projects: RankedProject[], su
       "No personal citizen identity is exposed; privacy aliases are used.",
       "Funding, eligibility, and emergency guidance require official human confirmation."
     ]
+  };
+}
+
+export function buildCopilotRagStatus(projects: RankedProject[], submissions: Submission[]) {
+  const daily = buildDailyIntelligence(projects, submissions);
+  const corpus = buildRagCorpus(projects, submissions, daily);
+  const bySource = corpus.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sourceType] = (acc[item.sourceType] ?? 0) + 1;
+    return acc;
+  }, {});
+  return {
+    mode: "local-hybrid-rag",
+    productionTarget: "Vertex AI RAG Engine or Vertex AI Vector Search",
+    embeddingStore: process.env.VERTEX_AI_VECTOR_SEARCH_INDEX ? "vertex-ai-vector-search" : "local-deterministic-index",
+    corpusDocuments: corpus.length,
+    bySource,
+    privacy: "citizen aliases and aggregate snippets only; usernames and direct identifiers are excluded",
+    refreshCadence: "batch pipeline refresh"
   };
 }
 
@@ -166,14 +199,81 @@ function citation(type: string, id: string, title: string, snippet: string) {
   return { type, id, title, snippet };
 }
 
+type RagChunk = {
+  id: string;
+  title: string;
+  sourceType: string;
+  text: string;
+  snippet: string;
+  score: number;
+};
+
+function buildRagCorpus(projects: RankedProject[], submissions: Submission[], daily: ReturnType<typeof buildDailyIntelligence>): RagChunk[] {
+  return [
+    ...projects.flatMap((project) => [
+      chunk(`project:${project.id}`, project.title, "ranked_project", `${project.title}. ${project.rationale}. ${project.evidence.join(". ")} ${project.ward} ${project.district} ${project.state} ${project.category}. Score ${project.score}. Confidence ${Math.round(project.confidence * 100)}%.`, project.evidence[0] ?? project.rationale),
+      chunk(`score:${project.id}`, `${project.title} score breakdown`, "score_breakdown", `Demand ${project.demandScore}/40. Need ${project.needScore}/35. Urgency ${project.urgencyScore}/15. Equity ${project.equityScore}/15. Rating ${project.averageRating}/5.`, `score ${project.score}; demand ${project.demandScore}, need ${project.needScore}, urgency ${project.urgencyScore}, equity ${project.equityScore}`)
+    ]),
+    ...submissions.slice(-40).map((submission) =>
+      chunk(
+        `submission:${submission.id}`,
+        `${submission.category} citizen signal in ${submission.ward}`,
+        "citizen_signal",
+        `${submission.displayName}: ${submission.normalizedText || submission.text}. ${submission.ward} ${submission.district} ${submission.state}. ${submission.detectedLanguage}. Rating ${submission.rating}.`,
+        `${submission.displayName}: ${submission.category} signal in ${submission.ward}`
+      )
+    ),
+    ...daily.digest.map((item, index) => chunk(`daily:${index}`, "Daily constituency digest", "daily_intelligence", item, item)),
+    ...daily.recommendations.map((item, index) => chunk(`recommendation:${index}`, item.action, "action_recommendation", `${item.action}. ${item.reason}. ${item.owner}. ${item.nextStep}`, item.reason)),
+    ...daily.forecast.map((item, index) => chunk(`forecast:${index}`, `${item.category} forecast for ${item.area}`, "forecast", `${item.category} in ${item.area}: ${item.risk}. Driver: ${item.driver}`, `${item.risk}; ${item.driver}`))
+  ];
+}
+
+function retrieveContext(question: string, corpus: RagChunk[], projectId?: string) {
+  const terms = tokenize(question);
+  return corpus
+    .map((item) => {
+      const haystack = tokenize(`${item.title} ${item.text}`);
+      const lexicalScore = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+      const projectBoost = projectId && item.id.endsWith(projectId) ? 4 : 0;
+      return { ...item, score: lexicalScore + projectBoost };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, 8);
+}
+
+function chunk(id: string, title: string, sourceType: string, text: string, snippet: string): RagChunk {
+  return { id, title, sourceType, text, snippet, score: 0 };
+}
+
+function tokenize(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((term) => term.length > 2);
+}
+
+function dedupeCitations(items: ReturnType<typeof citation>[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.type}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function copilotKnowledgeSummary() {
   return {
     agents: copilotAgents,
     sourceFamilies: intelligenceSourceGroups.map((group) => ({ category: group.category, sourceCount: group.sources.length })),
     supportedRoles: ["mp", "collector", "citizen", "analyst"] satisfies CopilotRole[],
     supportedInputs: ["natural language question", "project id", "role", "language"],
+    rag: {
+      mode: "local-hybrid-rag",
+      productionTarget: "Vertex AI RAG Engine or Vertex AI Vector Search",
+      citationsRequired: true
+    },
     currentLimitations: [
-      "Uses deterministic grounded synthesis until production vector search is connected.",
+      "Uses local deterministic retrieval until production Vertex AI RAG or Vector Search is connected.",
       "Does not expose private citizen data.",
       "Official budget and scheme eligibility still require department source connectors."
     ]

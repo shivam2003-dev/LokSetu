@@ -194,6 +194,7 @@ type CopilotCapabilitiesResponse = {
   sourceFamilies: Array<{ category: string; sourceCount: number }>;
   supportedRoles: Array<"mp" | "collector" | "citizen" | "analyst">;
   supportedInputs: string[];
+  rag?: { mode: string; productionTarget: string; citationsRequired: boolean };
   currentLimitations: string[];
 };
 
@@ -207,9 +208,21 @@ type CopilotAnswer = {
   confidence: number;
   evidence: Array<{ type: string; text: string }>;
   citations: Array<{ type: string; id: string; title: string; snippet: string }>;
+  retrieval: { mode: string; embeddingStore: string; corpusDocuments: number; retrieved: number; latencyMs: number };
+  retrievedContext: Array<{ id: string; title: string; sourceType: string; snippet: string; score: number }>;
   suggestedActions: string[];
   followUpQuestions: string[];
   guardrails: string[];
+};
+
+type RagStatusResponse = {
+  mode: string;
+  productionTarget: string;
+  embeddingStore: string;
+  corpusDocuments: number;
+  bySource: Record<string, number>;
+  privacy: string;
+  refreshCadence: string;
 };
 
 type EnterpriseSituationResponse = {
@@ -495,6 +508,7 @@ export default function App() {
   const [intelligenceSources, setIntelligenceSources] = useState<IntelligenceSourcesResponse | null>(null);
   const [dailyIntelligence, setDailyIntelligence] = useState<DailyIntelligenceResponse | null>(null);
   const [copilotCapabilities, setCopilotCapabilities] = useState<CopilotCapabilitiesResponse | null>(null);
+  const [ragStatus, setRagStatus] = useState<RagStatusResponse | null>(null);
   const [enterprise, setEnterprise] = useState<EnterpriseSituationResponse | null>(null);
   const [aiOps, setAiOps] = useState<AiOpsResponse | null>(null);
   const [moderation, setModeration] = useState<ModerationResponse | null>(null);
@@ -508,6 +522,7 @@ export default function App() {
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
   const effectiveCitizenAppUrl = clientConfig.citizenAppUrl?.trim() || citizenAppUrl;
+  const showControlStrip = page !== "copilot";
 
   useEffect(() => {
     refreshAll();
@@ -534,7 +549,7 @@ export default function App() {
 
   async function refreshAll() {
     try {
-      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextEnterprise, nextAiOps, nextModeration, nextIntegrations, nextAudit, nextBoundaries, nextClusters] = await Promise.all([
+      const [nextConfig, nextContext, nextDashboard, nextRegions, nextAnalytics, nextSources, nextDaily, nextCopilot, nextRagStatus, nextEnterprise, nextAiOps, nextModeration, nextIntegrations, nextAudit, nextBoundaries, nextClusters] = await Promise.all([
       requestJson<ClientConfig>("/api/client-config"),
       requestJson<ContextResponse>("/api/context"),
       fetchDashboard(filters),
@@ -546,6 +561,7 @@ export default function App() {
       getJson<IntelligenceSourcesResponse>("/api/intelligence/sources", { groups: [], coverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} }, governance: [] }),
       getJson<DailyIntelligenceResponse>("/api/intelligence/daily", { digest: [], topEmergingIssues: [], viralLocalTopics: [], alerts: [], indices: {}, recommendations: [], forecast: [], sourceCoverage: { totalSources: 0, liveOrReady: 0, restricted: 0, byReadiness: {}, byConnectorMode: {} } }),
       getJson<CopilotCapabilitiesResponse>("/api/copilot/capabilities", { agents: [], sourceFamilies: [], supportedRoles: ["mp"], supportedInputs: [], currentLimitations: [] }),
+      getJson<RagStatusResponse>("/api/copilot/rag-status", { mode: "local-hybrid-rag", productionTarget: "Vertex AI RAG Engine or Vertex AI Vector Search", embeddingStore: "local-deterministic-index", corpusDocuments: 0, bySource: {}, privacy: "privacy-safe aliases only", refreshCadence: "batch pipeline refresh" }),
       getJson<EnterpriseSituationResponse>("/api/enterprise/situation-room", { liveMonitoring: [], incidents: [], anomalies: [], healthScore: { score: 0, drivers: [] }, rootCause: [], eventTimeline: [], correlations: [], digitalTwin: { populationModel: "", assets: [], sourceCoverage: { totalSources: 0, liveOrReady: 0 } }, gisIntelligence: [], smartAlerts: [], predictiveIntelligence: [], observability: {} }),
       getJson<AiOpsResponse>("/api/ai-ops", { provider: "Vertex AI", mode: "fallback", tasks: [], guardrails: [] }),
       getJson<ModerationResponse>("/api/moderation", { queue: [], policies: [] }),
@@ -562,6 +578,7 @@ export default function App() {
     setIntelligenceSources(nextSources);
     setDailyIntelligence(nextDaily);
     setCopilotCapabilities(nextCopilot);
+    setRagStatus(nextRagStatus);
     setEnterprise(nextEnterprise);
     setAiOps(nextAiOps);
     setModeration(nextModeration);
@@ -684,22 +701,24 @@ export default function App() {
           </button>
         </header>
 
-        <ControlStrip
-          context={context}
-          scope={scope}
-          setScope={setScope}
-          state={state}
-          setState={updateState}
-          district={district}
-          setDistrict={updateDistrict}
-          ward={ward}
-          setWard={updateWard}
-          mpId={mpId}
-          setMpId={setMpId}
-          query={query}
-          setQuery={setQuery}
-          apply={applyFilters}
-        />
+        {showControlStrip ? (
+          <ControlStrip
+            context={context}
+            scope={scope}
+            setScope={setScope}
+            state={state}
+            setState={updateState}
+            district={district}
+            setDistrict={updateDistrict}
+            ward={ward}
+            setWard={updateWard}
+            mpId={mpId}
+            setMpId={setMpId}
+            query={query}
+            setQuery={setQuery}
+            apply={applyFilters}
+          />
+        ) : null}
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
@@ -709,7 +728,7 @@ export default function App() {
         {page === "projects" ? <ProjectPage project={activeProject} projects={dashboard.projects} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} /> : null}
         {page === "analytics" ? <AnalyticsPage dashboard={dashboard} analytics={analytics} sources={intelligenceSources} daily={dailyIntelligence} /> : null}
         {page === "enterprise" ? <EnterprisePage situation={enterprise} /> : null}
-        {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} projects={dashboard.projects} /> : null}
+        {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "simulation" ? <SimulationPage refreshAll={refreshAll} /> : null}
         {page === "ai" ? <AiPage aiOps={aiOps} /> : null}
         {page === "moderation" ? <ModerationPage moderation={moderation} audit={audit} /> : null}
@@ -1714,7 +1733,7 @@ function AnalyticsPage({
   );
 }
 
-function CopilotPage({ capabilities, projects }: { capabilities: CopilotCapabilitiesResponse | null; projects: RankedProject[] }) {
+function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[] }) {
   const prompts = [
     "What are the top 10 issues in my constituency this month?",
     "Why is the highest ranked project urgent? Show evidence.",
@@ -1725,28 +1744,45 @@ function CopilotPage({ capabilities, projects }: { capabilities: CopilotCapabili
   ];
   const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
   const [language, setLanguage] = useState("English");
-  const [question, setQuestion] = useState(prompts[0]);
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
-  const [answer, setAnswer] = useState<CopilotAnswer | null>(null);
+  const [question, setQuestion] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [messages, setMessages] = useState<Array<{ id: string; role: "assistant" | "user"; text: string; answer?: CopilotAnswer }>>([
+    {
+      id: "welcome",
+      role: "assistant",
+      text: "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current LokSetu intelligence corpus and cite the supporting records."
+    }
+  ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (!projectId && projects[0]?.id) setProjectId(projects[0].id);
-  }, [projectId, projects]);
+  const latestAnswer = [...messages].reverse().find((message) => message.answer)?.answer ?? null;
 
   async function askCopilot(nextQuestion = question) {
+    const cleanQuestion = nextQuestion.trim();
+    if (!cleanQuestion || busy) return;
     setBusy(true);
     setError("");
+    const userMessage = { id: `user-${Date.now()}`, role: "user" as const, text: cleanQuestion };
+    setMessages((current) => [...current, userMessage]);
     try {
       const response = await fetch(`${apiBase}/api/copilot/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, language, question: nextQuestion, projectId: projectId || undefined })
+        body: JSON.stringify({ role, language, question: cleanQuestion, projectId: projectId || undefined })
       });
       if (!response.ok) throw new Error("Copilot query failed");
-      setAnswer(await response.json());
-      setQuestion(nextQuestion);
+      const payload = await response.json() as CopilotAnswer;
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${payload.generatedAt}`,
+          role: "assistant",
+          text: payload.answer,
+          answer: payload
+        }
+      ]);
+      setQuestion("");
     } catch (queryError) {
       setError(queryError instanceof Error ? queryError.message : "Copilot query failed");
     } finally {
@@ -1755,10 +1791,23 @@ function CopilotPage({ capabilities, projects }: { capabilities: CopilotCapabili
   }
 
   return (
-    <section className="copilot-layout">
-      <section className="panel copilot-console">
-        <PanelTitle title="LokSetu AI Copilot" icon={MessageSquareText} detail="grounded constituency intelligence assistant" />
-        <div className="copilot-controls">
+    <section className="copilot-chat-page">
+      <section className="panel copilot-chat-shell">
+        <div className="copilot-chat-header">
+          <div className="assistant-identity">
+            <span><Bot size={20} /></span>
+            <div>
+              <h3>LokSetu AI</h3>
+              <p>Grounded RAG assistant for constituency intelligence</p>
+            </div>
+          </div>
+          <div className="rag-badge">
+            <DatabaseZap size={16} />
+            {ragStatus?.mode ?? capabilities?.rag?.mode ?? "local-hybrid-rag"}
+          </div>
+        </div>
+
+        <div className="copilot-context">
           <label>Role
             <select value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
               {(capabilities?.supportedRoles ?? ["mp", "collector", "citizen", "analyst"]).map((item) => <option key={item} value={item}>{item}</option>)}
@@ -1766,85 +1815,106 @@ function CopilotPage({ capabilities, projects }: { capabilities: CopilotCapabili
           </label>
           <label>Language
             <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-              {["English", "Hindi", "Tamil", "Bengali", "Marathi", "Kannada", "Telugu"].map((item) => <option key={item}>{item}</option>)}
+              {["English", "Hindi", "Tamil", "Bengali", "Marathi", "Kannada", "Telugu", "Gujarati", "Malayalam", "Odia", "Punjabi", "Urdu"].map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
-          <label>Ground project
+          <label>Grounding
             <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+              <option value="">Search full intelligence corpus</option>
               {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
             </select>
           </label>
         </div>
-        <label>Question
-          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
-        </label>
-        <div className="prompt-grid">
+
+        <div className="chat-thread" aria-label="Copilot conversation">
+          {messages.map((message) => (
+            <article className={`chat-message ${message.role}`} key={message.id}>
+              <div className="message-body">
+                <p>{message.text}</p>
+                {message.answer ? (
+                  <div className="message-meta">
+                    <span>{message.answer.agent.label}</span>
+                    <span>{message.answer.confidence}% confidence</span>
+                    <span>{message.answer.retrieval.retrieved} retrieved</span>
+                    <span>{message.answer.retrieval.latencyMs}ms</span>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          ))}
+          {busy ? (
+            <article className="chat-message assistant">
+              <div className="message-body"><p>Retrieving LokSetu records and preparing a grounded answer...</p></div>
+            </article>
+          ) : null}
+        </div>
+
+        <div className="prompt-strip">
           {prompts.map((prompt) => (
             <button key={prompt} onClick={() => askCopilot(prompt)} type="button">{prompt}</button>
           ))}
         </div>
-        <button className="primary full-width" disabled={busy} onClick={() => askCopilot()} type="button">{busy ? "Thinking..." : "Ask Copilot"}</button>
+
+        <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); askCopilot(); }}>
+          <textarea
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ask anything about priorities, schemes, evidence, maps, documents, public feedback, or next actions..."
+            rows={3}
+          />
+          <button className="primary" disabled={busy || !question.trim()} type="submit">
+            <Send size={16} />
+            Send
+          </button>
+        </form>
         {error ? <div className="error-state">{error}</div> : null}
       </section>
 
-      <section className="panel copilot-answer">
-        <PanelTitle title="Grounded answer" icon={Bot} detail={answer ? `${answer.agent.label} · ${answer.confidence}% confidence` : "waiting for a question"} />
-        {answer ? (
-          <>
-            <div className="answer-bubble">
-              <span>{answer.intent} · {answer.language}</span>
-              <p>{answer.answer}</p>
-            </div>
-            <section className="copilot-section">
-              <strong>Suggested actions</strong>
-              <div className="action-chip-list">
-                {answer.suggestedActions.map((item) => <span key={item}>{item}</span>)}
-              </div>
-            </section>
-            <section className="copilot-section">
-              <strong>Evidence</strong>
-              <div className="evidence-timeline compact">
-                {answer.evidence.map((item, index) => (
-                  <article key={`${item.type}-${index}`}>
-                    <span>{item.type}</span>
-                    <p>{item.text}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
-            <section className="copilot-section">
-              <strong>Citations</strong>
-              <div className="citation-list">
-                {answer.citations.map((item) => (
-                  <article key={`${item.type}-${item.id}`}>
-                    <span>{item.type}</span>
-                    <strong>{item.title}</strong>
-                    <p>{item.snippet}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </>
-        ) : (
-          <div className="empty-state">Ask about priorities, evidence, schemes, briefings, maps, documents, or citizen-facing status.</div>
-        )}
-      </section>
-
-      <section className="panel copilot-side">
-        <PanelTitle title="Agent routing" icon={Network} detail={`${capabilities?.agents.length ?? 0} agents`} />
-        <div className="agent-list">
-          {(capabilities?.agents ?? []).map((agent) => (
-            <article key={agent.id}>
-              <strong>{agent.label}</strong>
-              <p>{agent.purpose}</p>
-            </article>
-          ))}
+      <aside className="panel rag-side-panel">
+        <PanelTitle title="RAG status" icon={Database} detail={ragStatus?.embeddingStore ?? "local-deterministic-index"} />
+        <div className="rag-status-grid">
+          <Metric label="Corpus records" value={String(ragStatus?.corpusDocuments ?? 0)} detail={ragStatus?.refreshCadence ?? "batch refresh"} />
+          <Metric label="Retrieved" value={String(latestAnswer?.retrieval.retrieved ?? 0)} detail={latestAnswer?.intent ?? "waiting"} />
         </div>
-        <PanelTitle title="Knowledge coverage" icon={Database} detail={`${capabilities?.sourceFamilies.length ?? 0} source families`} />
-        <div className="source-family-list">
-          {(capabilities?.sourceFamilies ?? []).map((family) => <span key={family.category}>{family.category} · {family.sourceCount}</span>)}
-        </div>
-      </section>
+        <section className="copilot-section">
+          <strong>Retrieved context</strong>
+          <div className="retrieved-list">
+            {(latestAnswer?.retrievedContext ?? []).map((item) => (
+              <article key={item.id}>
+                <span>{item.sourceType} · score {item.score}</span>
+                <strong>{item.title}</strong>
+                <p>{item.snippet}</p>
+              </article>
+            ))}
+            {!latestAnswer ? <p className="side-muted">Ask a question to see retrieved chunks from projects, citizen signals, digest, forecasts, and recommendations.</p> : null}
+          </div>
+        </section>
+        <section className="copilot-section">
+          <strong>Citations</strong>
+          <div className="citation-list">
+            {(latestAnswer?.citations ?? []).map((item) => (
+              <article key={`${item.type}-${item.id}`}>
+                <span>{item.type}</span>
+                <strong>{item.title}</strong>
+                <p>{item.snippet}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="copilot-section">
+          <strong>Source coverage</strong>
+          <div className="source-family-list">
+            {Object.entries(ragStatus?.bySource ?? {}).map(([source, count]) => <span key={source}>{source} · {count}</span>)}
+          </div>
+        </section>
+        <section className="copilot-section">
+          <strong>Guardrails</strong>
+          <div className="guardrail-list">
+            {(latestAnswer?.guardrails ?? capabilities?.currentLimitations ?? []).map((item) => <p key={item}>{item}</p>)}
+            <p>{ragStatus?.privacy ?? "Personal citizen identifiers are not shown in answers."}</p>
+          </div>
+        </section>
+      </aside>
     </section>
   );
 }

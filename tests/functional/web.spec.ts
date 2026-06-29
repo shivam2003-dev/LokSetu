@@ -83,11 +83,15 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Enterprise observability")).toBeVisible();
 
     await page.getByRole("button", { name: "AI Copilot" }).click();
-    await expect(page.getByRole("heading", { name: "LokSetu AI Copilot" })).toBeVisible();
-    await page.getByRole("button", { name: "Ask Copilot" }).click();
-    await expect(page.getByRole("heading", { name: "Grounded answer" })).toBeVisible();
-    await expect(page.getByText("Suggested actions")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "LokSetu AI" })).toBeVisible();
+    await expect(page.getByText("RAG status")).toBeVisible();
+    await expect(page.getByLabel("India search and locality controls")).toHaveCount(0);
+    await page.getByPlaceholder(/Ask anything about priorities/).fill("What are the top 10 issues in my constituency this month?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.getByText("Retrieved context")).toBeVisible();
     await expect(page.getByText("Citations")).toBeVisible();
+    await expect(page.getByText("local-hybrid-rag").first()).toBeVisible();
+    await expect(page.getByText(/retrieved/i).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Simulation" }).click();
     await expect(page.getByRole("heading", { name: "Simulation workbench" })).toBeVisible();
