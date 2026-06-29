@@ -1,0 +1,69 @@
+{{- if .Values.components.ragApi }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "people-priority.name" . }}-rag-api
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      app.kubernetes.io/component: rag-api
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "people-priority.name" . }}-rag-api
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      app.kubernetes.io/component: rag-api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.rag.api.service.port }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "people-priority.name" . }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 443
+---
+{{- if .Values.components.serviceMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "people-priority.name" . }}-rag-api
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      app.kubernetes.io/component: rag-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+{{- end }}
+{{- end }}

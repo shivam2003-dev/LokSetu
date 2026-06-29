@@ -1,0 +1,28 @@
+{{- if or .Values.components.ragApi .Values.components.embeddingWorker .Values.components.ingestionWorker }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "people-priority.name" . }}-rag-config
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rag-config
+data:
+  {{- range $name, $value := .Values.rag.api.env }}
+  {{- if ne $name "RAG_DATABASE_URL" }}
+  {{ $name }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}
+{{- if and .Values.rag.api.database.createSecret .Values.rag.api.env.RAG_DATABASE_URL }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "people-priority.name" . }}-rag-secret
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rag-secret
+type: Opaque
+stringData:
+  {{ .Values.rag.api.database.secretKey }}: {{ .Values.rag.api.env.RAG_DATABASE_URL | quote }}
+{{- end }}
+{{- end }}

@@ -6,16 +6,17 @@
   "workspaces": [
     "apps/web",
     "apps/citizen",
-    "services/api"
+    "services/api",
+    "services/rag-api"
   ],
   "scripts": {
     "dev": "concurrently \"PORT=18080 npm run dev -w services/api\" \"npm run dev -w apps/web\" \"VITE_API_BASE_URL=http://127.0.0.1:18080 npm run dev -w apps/citizen\"",
     "local": "bash scripts/start-local.sh",
     "local:k8s": "bash scripts/start-local-k8s-argocd.sh",
-    "build": "npm run build -w services/api && npm run build -w apps/web && npm run build -w apps/citizen",
-    "lint": "npm run lint -w services/api && npm run lint -w apps/web && npm run lint -w apps/citizen",
-    "typecheck": "npm run typecheck -w services/api && npm run typecheck -w apps/web && npm run typecheck -w apps/citizen",
-    "test": "npm run typecheck && npm run test:unit -w services/api && npm run build && npm run test:functional",
+    "build": "npm run build -w services/api && npm run build -w services/rag-api && npm run build -w apps/web && npm run build -w apps/citizen",
+    "lint": "npm run lint -w services/api && npm run lint -w services/rag-api && npm run lint -w apps/web && npm run lint -w apps/citizen",
+    "typecheck": "npm run typecheck -w services/api && npm run typecheck -w services/rag-api && npm run typecheck -w apps/web && npm run typecheck -w apps/citizen",
+    "test": "npm run typecheck && npm run test:unit -w services/api && npm run test:unit -w services/rag-api && npm run build && npm run test:functional",
     "test:functional": "playwright test",
     "batch": "npm run batch -w services/api"
   },

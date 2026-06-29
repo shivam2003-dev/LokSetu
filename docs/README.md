@@ -8,6 +8,11 @@ Architecture and operating notes for LokSetu.
 - `diagrams.md`: Mermaid architecture diagrams.
 - `ai-pipeline.md`: Vertex/OpenAI-compatible AI flow and guardrails.
 - `batch-data-pipeline.md`: batch-first intake and scoring.
+- `rag/README.md`: standalone pgvector/Vertex-ready RAG platform.
+- `rag/architecture.md`: RAG services, vector index, and retrieval pipeline diagram.
+- `rag/deployment-guide.md`: local Argo and production GKE deployment.
+- `rag/testing-guide.md`: RAG validation and no-unrelated-document regression tests.
+- `rag/monitoring-runbook.md`: metrics, alerts, and operational troubleshooting.
 - `maps-boundaries.md`: Google Maps runtime behavior, official boundary procurement path, and hotspot clustering.
 - `whatsapp-setup.md`: WhatsApp simulator and webhook setup.
 

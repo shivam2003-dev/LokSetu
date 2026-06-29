@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 CLUSTER_NAME="${CLUSTER_NAME:-loksetu}"
 NAMESPACE="${NAMESPACE:-people-priority}"
-LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629-rag-greeting}"
+LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-20260629-production-rag}"
 GOOGLE_MAPS_SECRET_NAME="${GOOGLE_MAPS_SECRET_NAME:-people-priority-google-maps}"
 OPENAI_COMPATIBLE_SECRET_NAME="${OPENAI_COMPATIBLE_SECRET_NAME:-people-priority-openai-compatible}"
 
@@ -23,6 +23,7 @@ fi
 kubectl config use-context "kind-${CLUSTER_NAME}"
 
 docker build -f services/api/Dockerfile -t "people-priority-api:${LOCAL_IMAGE_TAG}" .
+docker build -f services/rag-api/Dockerfile -t "people-priority-rag-api:${LOCAL_IMAGE_TAG}" .
 web_build_args=()
 if [[ -n "${VITE_CITIZEN_APP_URL:-}" ]]; then
   web_build_args+=(--build-arg "VITE_CITIZEN_APP_URL=${VITE_CITIZEN_APP_URL}")
@@ -30,6 +31,7 @@ fi
 docker build -f apps/web/Dockerfile "${web_build_args[@]}" -t "people-priority-web:${LOCAL_IMAGE_TAG}" .
 docker build -f apps/citizen/Dockerfile -t "people-priority-citizen:${LOCAL_IMAGE_TAG}" .
 kind load docker-image "people-priority-api:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
+kind load docker-image "people-priority-rag-api:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
 kind load docker-image "people-priority-web:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
 kind load docker-image "people-priority-citizen:${LOCAL_IMAGE_TAG}" --name "$CLUSTER_NAME"
 

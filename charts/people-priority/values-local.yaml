@@ -1,10 +1,13 @@
 global:
   imagePullPolicy: IfNotPresent
 
+components:
+  serviceMonitor: false
+
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-rag-greeting
+    tag: local-20260629-production-rag
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -14,6 +17,7 @@ api:
     OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
     OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
     BATCH_SCHEDULE: "*/5 * * * *"
+    RAG_API_URL: http://people-priority-rag-api:8090
   openAiCompatible:
     existingSecret: people-priority-openai-compatible
     secretKey: api-key
@@ -31,19 +35,36 @@ batch:
   enabled: true
   schedule: "*/5 * * * *"
 
+rag:
+  api:
+    image:
+      repository: people-priority-rag-api
+      tag: local-20260629-production-rag
+    database:
+      createSecret: true
+    env:
+      RAG_DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
+      RAG_EMBEDDING_PROVIDER: hash
+      RAG_EMBEDDING_MODEL: hashing-vectorizer-768
+      RAG_LLM_PROVIDER: extractive
+      RAG_SIMILARITY_THRESHOLD: "0.08"
+      RAG_MINIMUM_CONFIDENCE: "0.08"
+  ingestionWorker:
+    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md
+
 web:
   image:
     repository: people-priority-web
-    tag: local-20260629-rag-greeting
+    tag: local-20260629-production-rag
 
 citizen:
   image:
     repository: people-priority-citizen
-    tag: local-20260629-rag-greeting
+    tag: local-20260629-production-rag
 
 postgres:
   enabled: true
-  image: postgres:16-alpine
+  image: pgvector/pgvector:pg16
   database: loksetu
   username: loksetu
   password: loksetu

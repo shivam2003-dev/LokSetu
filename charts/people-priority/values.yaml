@@ -6,11 +6,15 @@ components:
   api: true
   web: true
   citizen: true
+  ragApi: true
+  embeddingWorker: true
+  ingestionWorker: true
   batch: true
   postgres: true
   ingress: true
   managedCertificate: true
   hpa: true
+  serviceMonitor: true
 
 serviceAccount:
   annotations: {}
@@ -70,6 +74,7 @@ api:
     OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
     OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
     BATCH_SCHEDULE: "*/15 * * * *"
+    RAG_API_URL: http://people-priority-rag-api:8090
   openAiCompatible:
     existingSecret: ""
     secretKey: api-key
@@ -98,6 +103,62 @@ batch:
       cpu: 1000m
       memory: 1Gi
 
+rag:
+  api:
+    replicaCount: 2
+    image:
+      repository: us-central1-docker.pkg.dev/PROJECT_ID/people-priority/rag-api
+      tag: latest
+    service:
+      port: 8090
+    database:
+      existingSecret: ""
+      secretKey: RAG_DATABASE_URL
+      createSecret: false
+    env:
+      RAG_DATABASE_URL: ""
+      RAG_TENANT_ID: loksetu
+      RAG_NAMESPACE: india
+      RAG_EMBEDDING_PROVIDER: gemini
+      RAG_EMBEDDING_MODEL: gemini-embedding-001
+      RAG_EMBEDDING_DIMENSIONS: "768"
+      RAG_TOP_K: "8"
+      RAG_SIMILARITY_THRESHOLD: "0.24"
+      RAG_MINIMUM_CONFIDENCE: "0.28"
+      RAG_REQUIRE_CITATIONS: "true"
+      RAG_LLM_PROVIDER: gemini
+      RAG_CHUNK_SIZE: "900"
+      RAG_CHUNK_OVERLAP: "140"
+      RAG_SEMANTIC_CHUNKING: "true"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 384Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  embeddingWorker:
+    replicaCount: 1
+    intervalMs: "60000"
+    batchSize: "500"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 384Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  ingestionWorker:
+    replicaCount: 1
+    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md
+    resources:
+      requests:
+        cpu: 200m
+        memory: 384Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
 ingress:
   enabled: true
   className: gce
@@ -121,7 +182,7 @@ autoscaling:
 
 postgres:
   enabled: false
-  image: postgres:16-alpine
+  image: pgvector/pgvector:pg16
   database: loksetu
   username: loksetu
   password: loksetu

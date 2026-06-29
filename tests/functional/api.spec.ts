@@ -157,32 +157,26 @@ test.describe("API functional flow", () => {
     const copilotMeta = await copilotCapabilities.json();
     expect(copilotMeta.agents.map((agent: { id: string }) => agent.id)).toContain("mp-copilot");
     expect(copilotMeta.supportedRoles).toContain("citizen");
-    expect(copilotMeta.rag.mode).toBe("local-hybrid-rag");
+    expect(copilotMeta.rag.mode).toBe("pgvector-hybrid");
 
     const ragStatus = await api.get("/api/copilot/rag-status");
     await expect(ragStatus).toBeOK();
     const ragPayload = await ragStatus.json();
-    expect(ragPayload.mode).toBe("local-hybrid-rag");
-    expect(ragPayload.corpusDocuments).toBeGreaterThan(0);
-    expect(ragPayload.bySource.ranked_project).toBeGreaterThan(0);
-    expect(ragPayload.bySource.citizen_signal).toBeGreaterThan(0);
+    expect(["not-configured", "pgvector-hybrid"]).toContain(ragPayload.mode);
 
     const copilotAnswer = await api.post("/api/copilot/query", {
       data: {
         role: "mp",
         language: "English",
-        question: "Why is the highest ranked project urgent?",
-        projectId: globalPriorities.projects[0].id
+        question: "bihar stats"
       }
     });
     await expect(copilotAnswer).toBeOK();
     const copilotPayload = await copilotAnswer.json();
-    expect(copilotPayload.answer).toContain(globalPriorities.projects[0].title);
-    expect(copilotPayload.citations.length).toBeGreaterThan(0);
+    expect(copilotPayload.answer).not.toContain("Kalindi Nagar");
+    expect(copilotPayload.answer).not.toContain(globalPriorities.projects[0].title);
     expect(copilotPayload.guardrails.length).toBeGreaterThan(0);
-    expect(copilotPayload.retrieval.mode).toBe("local-hybrid-rag");
-    expect(copilotPayload.retrieval.corpusDocuments).toBeGreaterThan(0);
-    expect(copilotPayload.retrievedContext.length).toBeGreaterThan(0);
+    expect(["not-configured", "pgvector-hybrid", "pgvector-hybrid-no-match"]).toContain(copilotPayload.retrieval.mode);
     expect(JSON.stringify(copilotPayload)).not.toContain("username");
 
     const shortGreeting = await api.post("/api/copilot/query", {

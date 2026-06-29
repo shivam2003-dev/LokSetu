@@ -1,6 +1,106 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: loksetu-vector-index-local
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
+    targetRevision: main
+    path: charts/people-priority
+    helm:
+      valueFiles:
+        - values-local.yaml
+        - values-local-vector-index.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: people-priority
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loksetu-rag-api-local
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
+    targetRevision: main
+    path: charts/people-priority
+    helm:
+      valueFiles:
+        - values-local.yaml
+        - values-local-rag-api.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: people-priority
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loksetu-embedding-worker-local
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
+    targetRevision: main
+    path: charts/people-priority
+    helm:
+      valueFiles:
+        - values-local.yaml
+        - values-local-embedding-worker.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: people-priority
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loksetu-ingestion-worker-local
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shivam2003-dev/LokSetu.git
+    targetRevision: main
+    path: charts/people-priority
+    helm:
+      valueFiles:
+        - values-local.yaml
+        - values-local-ingestion-worker.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: people-priority
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: loksetu-platform-local
   namespace: argocd
 spec:

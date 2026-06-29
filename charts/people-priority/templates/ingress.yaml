@@ -29,6 +29,15 @@ spec:
                 name: {{ include "people-priority.name" . }}-api
                 port:
                   number: {{ .Values.api.service.port }}
+          {{- if .Values.components.ragApi }}
+          - path: /rag
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "people-priority.name" . }}-rag-api
+                port:
+                  number: {{ .Values.rag.api.service.port }}
+          {{- end }}
     - host: {{ .Values.ingress.citizenHost }}
       http:
         paths:

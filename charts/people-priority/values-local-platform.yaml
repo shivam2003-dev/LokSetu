@@ -4,7 +4,7 @@ components:
   web: false
   citizen: false
   batch: true
-  postgres: true
+  postgres: false
   ingress: false
   managedCertificate: false
   hpa: true

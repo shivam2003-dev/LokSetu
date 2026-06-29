@@ -1,0 +1,93 @@
+{{- if .Values.components.embeddingWorker }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "people-priority.name" . }}-embedding-worker
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embedding-worker
+spec:
+  replicas: {{ .Values.rag.embeddingWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      app.kubernetes.io/component: embedding-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "people-priority.name" . }}
+        app.kubernetes.io/component: embedding-worker
+    spec:
+      serviceAccountName: {{ include "people-priority.name" . }}
+      containers:
+        - name: embedding-worker
+          image: "{{ .Values.rag.api.image.repository }}:{{ .Values.rag.api.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["node", "services/rag-api/dist/embeddingWorker.js"]
+          env:
+            {{- if or .Values.rag.api.database.existingSecret .Values.rag.api.database.createSecret }}
+            - name: RAG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-rag-secret" (include "people-priority.name" .)) .Values.rag.api.database.existingSecret }}
+                  key: {{ .Values.rag.api.database.secretKey }}
+            {{- else if .Values.rag.api.env.RAG_DATABASE_URL }}
+            - name: RAG_DATABASE_URL
+              value: {{ .Values.rag.api.env.RAG_DATABASE_URL | quote }}
+            {{- end }}
+            - name: RAG_EMBEDDING_INTERVAL_MS
+              value: {{ .Values.rag.embeddingWorker.intervalMs | quote }}
+            - name: RAG_EMBEDDING_BATCH_SIZE
+              value: {{ .Values.rag.embeddingWorker.batchSize | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "people-priority.name" . }}-rag-config
+          resources:
+            {{- toYaml .Values.rag.embeddingWorker.resources | nindent 12 }}
+{{- end }}
+---
+{{- if .Values.components.ingestionWorker }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "people-priority.name" . }}-ingestion-worker
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingestion-worker
+spec:
+  replicas: {{ .Values.rag.ingestionWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "people-priority.name" . }}
+      app.kubernetes.io/component: ingestion-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "people-priority.name" . }}
+        app.kubernetes.io/component: ingestion-worker
+    spec:
+      serviceAccountName: {{ include "people-priority.name" . }}
+      containers:
+        - name: ingestion-worker
+          image: "{{ .Values.rag.api.image.repository }}:{{ .Values.rag.api.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["node", "services/rag-api/dist/ingestionWorker.js"]
+          env:
+            {{- if or .Values.rag.api.database.existingSecret .Values.rag.api.database.createSecret }}
+            - name: RAG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-rag-secret" (include "people-priority.name" .)) .Values.rag.api.database.existingSecret }}
+                  key: {{ .Values.rag.api.database.secretKey }}
+            {{- else if .Values.rag.api.env.RAG_DATABASE_URL }}
+            - name: RAG_DATABASE_URL
+              value: {{ .Values.rag.api.env.RAG_DATABASE_URL | quote }}
+            {{- end }}
+            - name: RAG_INGEST_PATHS
+              value: {{ .Values.rag.ingestionWorker.ingestPaths | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "people-priority.name" . }}-rag-config
+          resources:
+            {{- toYaml .Values.rag.ingestionWorker.resources | nindent 12 }}
+{{- end }}

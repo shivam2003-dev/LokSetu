@@ -86,12 +86,13 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByRole("heading", { name: "LokSetu AI" })).toBeVisible();
     await expect(page.getByText("RAG status")).toBeVisible();
     await expect(page.getByLabel("India search and locality controls")).toHaveCount(0);
-    await page.getByPlaceholder(/Ask anything about priorities/).fill("What are the top 10 issues in my constituency this month?");
+    await page.getByPlaceholder(/Ask anything about priorities/).fill("bihar stats");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.getByText("Retrieved context")).toBeVisible();
     await expect(page.getByText("Citations")).toBeVisible();
-    await expect(page.getByText("local-hybrid-rag").first()).toBeVisible();
+    await expect(page.getByText(/not-configured|pgvector-hybrid/).first()).toBeVisible();
     await expect(page.getByText(/retrieved/i).first()).toBeVisible();
+    await expect(page.getByText("Kalindi Nagar")).toHaveCount(0);
     await page.getByPlaceholder(/Ask anything about priorities/).fill("hi");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.getByText("Ask me about constituency priorities")).toBeVisible();

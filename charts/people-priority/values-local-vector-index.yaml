@@ -1,0 +1,14 @@
+components:
+  serviceAccount: false
+  api: false
+  web: false
+  citizen: false
+  ragApi: false
+  embeddingWorker: false
+  ingestionWorker: false
+  batch: false
+  postgres: true
+  ingress: false
+  managedCertificate: false
+  hpa: false
+  serviceMonitor: false

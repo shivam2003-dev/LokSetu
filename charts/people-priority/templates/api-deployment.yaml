@@ -79,6 +79,8 @@ spec:
             {{- end }}
             - name: BATCH_SCHEDULE
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
+            - name: RAG_API_URL
+              value: {{ .Values.api.env.RAG_API_URL | quote }}
           {{- if .Values.api.boundaries.configMapName }}
           volumeMounts:
             - name: boundary-geojson
