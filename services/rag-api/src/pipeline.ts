@@ -52,6 +52,9 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
     .filter((item) => item.vectorScore >= similarityThreshold || item.keywordScore > 0)
     .filter((item) => item.confidence >= minimumConfidence)
     .slice(0, topK);
+  const stats = await indexStats(tenantId, namespace);
+  indexedDocuments.set(stats.documents);
+  indexedChunks.set(stats.chunks);
 
   if (retrieved.length === 0 || (requireCitations && retrieved.every((item) => !item.sourceUrl && !item.sourceUri))) {
     retrievalMisses.inc();
@@ -65,6 +68,7 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
         llmLatencyMs: 0,
         totalLatencyMs: Date.now() - started
       },
+      index: stats,
       retrievalMode: "pgvector-hybrid-no-match"
     };
   }
@@ -72,9 +76,6 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
   const llmStarted = Date.now();
   const answer = await timeStage("llm", () => groundedAnswer(input.question, retrieved));
   const llmLatencyMs = Date.now() - llmStarted;
-  const stats = await indexStats(tenantId, namespace);
-  indexedDocuments.set(stats.documents);
-  indexedChunks.set(stats.chunks);
 
   return {
     answer,
@@ -94,6 +95,7 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
       llmLatencyMs,
       totalLatencyMs: Date.now() - started
     },
+    index: stats,
     retrievalMode: "pgvector-hybrid"
   };
 }

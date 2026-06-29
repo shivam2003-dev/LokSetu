@@ -25,6 +25,11 @@ export type RagQueryResponse = {
     llmLatencyMs: number;
     totalLatencyMs: number;
   };
+  index?: {
+    documents: number;
+    chunks: number;
+    embeddings: number;
+  };
   retrievalMode: string;
 };
 

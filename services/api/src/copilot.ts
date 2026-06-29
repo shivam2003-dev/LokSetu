@@ -87,7 +87,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     retrieval: {
       mode: ragResponse?.retrievalMode ?? (ragUnavailable ? "not-configured" : "greeting"),
       embeddingStore: ragResponse ? "postgres-pgvector-hnsw" : "none",
-      corpusDocuments: 0,
+      corpusDocuments: ragResponse?.index?.chunks ?? 0,
       retrieved: retrievedContext.length,
       latencyMs: ragResponse?.metrics.totalLatencyMs ?? Date.now() - started
     },

@@ -7,7 +7,7 @@ components:
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-production-rag
+    tag: local-20260629-rag-index-stats
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -39,7 +39,7 @@ rag:
   api:
     image:
       repository: people-priority-rag-api
-      tag: local-20260629-production-rag
+      tag: local-20260629-rag-index-stats
     database:
       createSecret: true
     env:
