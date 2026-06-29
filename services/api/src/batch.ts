@@ -10,6 +10,7 @@ import {
   markRawIntakeProcessing
 } from "./db.js";
 import { processIntake } from "./intake.js";
+import { indexSubmissionInRag } from "./ragIndexer.js";
 import { BatchRun } from "./types.js";
 
 const logger = pino({ name: "people-priority-batch" });
@@ -33,6 +34,7 @@ export async function runBatch(limit = Number(process.env.BATCH_LIMIT ?? 100)): 
         await markRawIntakeProcessing(record.id);
         const { submission } = await processIntake(record.payload, { rawIntakeId: record.id, batchId: run.id });
         await markRawIntakeProcessed(record.id, submission);
+        await indexSubmissionInRag(submission);
         run.processed += 1;
       } catch (error) {
         run.failed += 1;

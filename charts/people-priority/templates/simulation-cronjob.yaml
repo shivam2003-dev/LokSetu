@@ -1,0 +1,52 @@
+{{- if and .Values.components.simulationTraffic .Values.simulation.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "people-priority.name" . }}-simulation-traffic
+  labels:
+    {{- include "people-priority.labels" . | nindent 4 }}
+    app.kubernetes.io/component: simulation-traffic
+spec:
+  schedule: {{ .Values.simulation.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.simulation.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.simulation.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.simulation.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "people-priority.name" . }}
+            app.kubernetes.io/component: simulation-traffic
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "people-priority.name" . }}
+          containers:
+            - name: simulation-traffic
+              image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+              imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+              env:
+                - name: SIMULATION_API_URL
+                  value: {{ .Values.simulation.apiUrl | quote }}
+                - name: SIMULATION_PAYLOADS
+                  value: {{ .Values.simulation.payloads | toJson | quote }}
+              command:
+                - node
+                - -e
+                - |
+                  const payloads = JSON.parse(process.env.SIMULATION_PAYLOADS || "[]");
+                  const index = Math.floor(Date.now() / 60000) % Math.max(payloads.length, 1);
+                  const payload = payloads[index] || {};
+                  payload.text = `${payload.text || "Simulated civic signal."} [simulated_at=${new Date().toISOString()}]`;
+                  const res = await fetch(`${process.env.SIMULATION_API_URL}/api/simulation/submit`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                  });
+                  const body = await res.text();
+                  console.log(JSON.stringify({ status: res.status, body }));
+                  if (!res.ok) process.exit(1);
+              resources:
+                {{- toYaml .Values.simulation.resources | nindent 16 }}
+{{- end }}

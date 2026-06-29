@@ -110,6 +110,8 @@ jobs:
           helm template loksetu-rag-api-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-rag-api.yaml > /tmp/loksetu-rag-api-local.yaml
           helm template loksetu-embedding-worker-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-embedding-worker.yaml > /tmp/loksetu-embedding-worker-local.yaml
           helm template loksetu-ingestion-worker-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-ingestion-worker.yaml > /tmp/loksetu-ingestion-worker-local.yaml
+          helm template loksetu-data-pipeline-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-data-pipeline.yaml > /tmp/loksetu-data-pipeline-local.yaml
+          helm template loksetu-simulation-traffic-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-simulation-traffic.yaml > /tmp/loksetu-simulation-traffic-local.yaml
           helm template loksetu-platform-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-platform.yaml > /tmp/loksetu-platform-local.yaml
           helm template loksetu-web-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-web.yaml > /tmp/loksetu-web-local.yaml
           helm template apni-awaaz-local charts/people-priority -f charts/people-priority/values-local.yaml -f charts/people-priority/values-local-apni-awaaz.yaml > /tmp/apni-awaaz-local.yaml

@@ -7,7 +7,7 @@ components:
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-rag-operating-corpus
+    tag: local-20260629-rag-pipeline-traffic
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -33,7 +33,11 @@ api:
 
 batch:
   enabled: true
-  schedule: "*/5 * * * *"
+  schedule: "* * * * *"
+
+simulation:
+  enabled: true
+  schedule: "* * * * *"
 
 rag:
   api:

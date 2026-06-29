@@ -1,15 +1,15 @@
 components:
-  serviceAccount: true
-  api: true
+  serviceAccount: false
+  api: false
   web: false
   citizen: false
   ragApi: false
   embeddingWorker: false
   ingestionWorker: false
-  batch: false
+  batch: true
   postgres: false
   ingress: false
   managedCertificate: false
-  hpa: true
+  hpa: false
   serviceMonitor: false
   simulationTraffic: false
