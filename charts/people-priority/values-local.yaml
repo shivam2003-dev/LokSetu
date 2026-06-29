@@ -7,7 +7,7 @@ components:
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-rag-index-stats
+    tag: local-20260629-rag-operating-corpus
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -39,7 +39,7 @@ rag:
   api:
     image:
       repository: people-priority-rag-api
-      tag: local-20260629-rag-index-stats
+      tag: local-20260629-rag-operating-corpus
     database:
       createSecret: true
     env:
@@ -50,7 +50,7 @@ rag:
       RAG_SIMILARITY_THRESHOLD: "0.08"
       RAG_MINIMUM_CONFIDENCE: "0.08"
   ingestionWorker:
-    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md
+    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md,services/rag-api/fixtures/loksetu/delhi-constituency-intelligence.md,services/rag-api/fixtures/loksetu/citizen-feedback-digest.md
 
 web:
   image:

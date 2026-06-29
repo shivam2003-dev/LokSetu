@@ -150,7 +150,7 @@ rag:
         memory: 1Gi
   ingestionWorker:
     replicaCount: 1
-    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md
+    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md,services/rag-api/fixtures/loksetu/delhi-constituency-intelligence.md,services/rag-api/fixtures/loksetu/citizen-feedback-digest.md
     resources:
       requests:
         cpu: 200m

@@ -81,7 +81,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     agent,
     intent,
     answer,
-    confidence: ragResponse?.citations[0]?.confidence ? Math.round(ragResponse.citations[0].confidence * 100) : project ? Math.round(project.confidence * 100) : 0,
+    confidence: ragResponse ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : project ? Math.round(project.confidence * 100) : 0,
     evidence,
     citations: dedupeCitations(citations),
     retrieval: {
