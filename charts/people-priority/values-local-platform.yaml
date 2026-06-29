@@ -3,8 +3,12 @@ components:
   api: true
   web: false
   citizen: false
+  ragApi: false
+  embeddingWorker: false
+  ingestionWorker: false
   batch: true
   postgres: false
   ingress: false
   managedCertificate: false
   hpa: true
+  serviceMonitor: false

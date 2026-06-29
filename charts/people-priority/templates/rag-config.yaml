@@ -1,4 +1,4 @@
-{{- if or .Values.components.ragApi .Values.components.embeddingWorker .Values.components.ingestionWorker }}
+{{- if .Values.components.ragApi }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
