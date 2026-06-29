@@ -119,11 +119,10 @@ export function rerank(semantic: RetrievalResult[], keyword: RetrievalResult[]) 
 export function isRelevantToQuery(question: string, item: RetrievalResult, similarityThreshold: number) {
   const queryTokens = meaningfulTokens(question);
   if (queryTokens.length === 0) return item.vectorScore >= similarityThreshold || item.keywordScore > 0;
-  if (item.vectorScore >= Math.max(0.32, similarityThreshold * 3)) return true;
-
   const contentTokens = new Set(meaningfulTokens(`${item.title} ${item.section ?? ""} ${item.content} ${JSON.stringify(item.metadata ?? {})}`));
   const overlap = queryTokens.filter((token) => contentTokens.has(token));
-  return overlap.length > 0 || item.keywordScore > 0.05;
+  if (overlap.length > 0 || item.keywordScore > 0.05) return true;
+  return item.vectorScore >= Math.max(0.62, similarityThreshold * 6);
 }
 
 function meaningfulTokens(value: string) {
@@ -187,7 +186,7 @@ function extractSentences(content: string) {
   if (!normalized) return [];
   const sentences = normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [normalized];
   return sentences
-    .map((sentence) => sentence.trim())
+    .map((sentence) => sentence.replace(/^#+\s*/, "").trim())
     .filter(Boolean)
     .map((sentence) => sentence.length > 360 ? sentence.slice(0, 357).trimEnd() : sentence);
 }

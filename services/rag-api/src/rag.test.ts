@@ -52,6 +52,7 @@ const ranked = rerank([delhiResult, biharResult], [biharResult]);
 assert.equal(ranked[0]?.id, biharResult.id);
 assert.equal(isRelevantToQuery("what should district officer do next river market", delhiResult, 0.08), false);
 assert.equal(isRelevantToQuery("bihar stats population districts census", biharResult, 0.08), true);
+assert.equal(isRelevantToQuery("river market ambulance potholes", { ...biharResult, vectorScore: 0.5, keywordScore: 0, confidence: 0.5 }, 0.08), false);
 
 const evalResult = evaluateCases([
   {
