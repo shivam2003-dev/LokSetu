@@ -5,6 +5,7 @@ Architecture and operating notes for LokSetu.
 ## Key Documents
 - `architecture.md`: system overview and component responsibilities.
 - `gcp-cloud-architecture.md`: production GCP/GKE architecture.
+- `gcp-local-safety.md`: local `gcloud` profile, cost guardrails, and project-access checks.
 - `diagrams.md`: Mermaid architecture diagrams.
 - `ai-pipeline.md`: Vertex/OpenAI-compatible AI flow and guardrails.
 - `batch-data-pipeline.md`: batch-first intake and scoring.

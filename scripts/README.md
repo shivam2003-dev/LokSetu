@@ -5,6 +5,8 @@ Local startup and bootstrap scripts for development and Argo CD verification.
 ## Commands
 - `npm run local`: starts local Docker Compose services.
 - `npm run local:k8s`: builds images, creates kind cluster if needed, applies Argo CD, and deploys local apps.
+- `./scripts/gcp-configure-safe.sh`: configures the local `loksetu-qwiklabs` gcloud profile without creating cloud resources.
+- `./scripts/gcp-safety-check.sh`: verifies active account/project access before any cloud deployment command.
 
 ## Environment
 - `LOCAL_IMAGE_TAG`: override local image tag.
@@ -14,3 +16,4 @@ Local startup and bootstrap scripts for development and Argo CD verification.
 
 ## Safety
 Scripts create Kubernetes Secrets from environment variables. They do not write secrets to Git.
+The GCP safety scripts only read or update local Cloud SDK config. They do not enable APIs, create resources, or run Terraform.
