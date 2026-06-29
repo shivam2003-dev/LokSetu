@@ -43,7 +43,7 @@ rag:
   api:
     image:
       repository: people-priority-rag-api
-      tag: local-20260629-rag-operating-corpus
+      tag: local-20260629-rag-relevance-gate
     database:
       createSecret: true
     env:
@@ -59,7 +59,7 @@ rag:
 web:
   image:
     repository: people-priority-web
-    tag: local-20260629-production-rag
+    tag: local-20260629-rag-answer-format
 
 citizen:
   image:

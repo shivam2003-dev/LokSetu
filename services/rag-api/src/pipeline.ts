@@ -51,6 +51,7 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
   const retrieved = rerank(semantic, keyword)
     .filter((item) => item.vectorScore >= similarityThreshold || item.keywordScore > 0)
     .filter((item) => item.confidence >= minimumConfidence)
+    .filter((item) => isRelevantToQuery(input.question, item, similarityThreshold))
     .slice(0, topK);
   const stats = await indexStats(tenantId, namespace);
   indexedDocuments.set(stats.documents);
@@ -115,6 +116,30 @@ export function rerank(semantic: RetrievalResult[], keyword: RetrievalResult[]) 
     .sort((a, b) => b.confidence - a.confidence || b.vectorScore - a.vectorScore || b.keywordScore - a.keywordScore);
 }
 
+export function isRelevantToQuery(question: string, item: RetrievalResult, similarityThreshold: number) {
+  const queryTokens = meaningfulTokens(question);
+  if (queryTokens.length === 0) return item.vectorScore >= similarityThreshold || item.keywordScore > 0;
+  if (item.vectorScore >= Math.max(0.32, similarityThreshold * 3)) return true;
+
+  const contentTokens = new Set(meaningfulTokens(`${item.title} ${item.section ?? ""} ${item.content} ${JSON.stringify(item.metadata ?? {})}`));
+  const overlap = queryTokens.filter((token) => contentTokens.has(token));
+  return overlap.length > 0 || item.keywordScore > 0.05;
+}
+
+function meaningfulTokens(value: string) {
+  const stopwords = new Set([
+    "about", "after", "again", "also", "and", "are", "can", "could", "data", "did", "district", "do",
+    "does", "for", "from", "give", "has", "have", "how", "into", "next", "officer", "please", "show",
+    "should", "stat", "stats", "tell", "than", "that", "the", "then", "there", "this", "today", "what",
+    "when", "where", "which", "why", "with", "would", "yesterday"
+  ]);
+  return [...new Set(value.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.replace(/s$/, ""))
+    .filter((token) => token.length > 2 && !stopwords.has(token)))];
+}
+
 async function groundedAnswer(question: string, retrieved: RetrievalResult[]) {
   const cfg = config();
   if (cfg.llmProvider === "gemini" && cfg.vertexProject) {
@@ -139,10 +164,32 @@ async function groundedAnswer(question: string, retrieved: RetrievalResult[]) {
 }
 
 function extractiveAnswer(retrieved: RetrievalResult[]) {
-  return retrieved
-    .slice(0, 4)
-    .map((item, index) => `[${index + 1}] ${item.content.slice(0, 500)}${item.content.length > 500 ? "..." : ""}`)
-    .join("\n\n");
+  const facts = retrieved.slice(0, 5).flatMap((item, index) =>
+    extractSentences(item.content)
+      .slice(0, index === 0 ? 4 : 2)
+      .map((sentence) => `- [${index + 1}] ${sentence}`)
+  );
+  if (facts.length === 0) return noResultAnswer;
+  const sourceLines = retrieved.slice(0, 5).map((item, index) =>
+    `- [${index + 1}] ${item.title}${item.page ? `, page ${item.page}` : ""}`
+  );
+  return [
+    "## Grounded answer",
+    ...facts,
+    "",
+    "## Sources",
+    ...sourceLines
+  ].join("\n");
+}
+
+function extractSentences(content: string) {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  const sentences = normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [normalized];
+  return sentences
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .map((sentence) => sentence.length > 360 ? sentence.slice(0, 357).trimEnd() : sentence);
 }
 
 async function timeStage<T>(stage: string, fn: () => Promise<T>): Promise<T> {

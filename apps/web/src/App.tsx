@@ -1838,8 +1838,15 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
         <div className="chat-thread" aria-label="Copilot conversation">
           {messages.map((message) => (
             <article className={`chat-message ${message.role}`} key={message.id}>
-              <div className="message-body">
-                <p>{message.text}</p>
+              <div className={`message-body ${message.answer ? "assistant-answer" : ""}`}>
+                {message.answer ? <AnswerContent text={message.text} /> : <p>{message.text}</p>}
+                {message.answer?.citations.length ? (
+                  <div className="message-citations" aria-label="Answer citations">
+                    {message.answer.citations.slice(0, 5).map((citation, index) => (
+                      <span key={`${citation.id}-${index}`}>[{index + 1}] {citation.title}</span>
+                    ))}
+                  </div>
+                ) : null}
                 {message.answer ? (
                   <div className="message-meta">
                     <span>{message.answer.agent.label}</span>
@@ -1925,6 +1932,20 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
         </section>
       </aside>
     </section>
+  );
+}
+
+function AnswerContent({ text }: { text: string }) {
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  return (
+    <div className="answer-content">
+      {lines.map((line, index) => {
+        if (line.startsWith("## ")) return <h4 key={`${line}-${index}`}>{line.replace(/^##\s+/, "")}</h4>;
+        if (/^[-*]\s+/.test(line)) return <p className="answer-bullet" key={`${line}-${index}`}>{line.replace(/^[-*]\s+/, "")}</p>;
+        if (/^\[\d+\]/.test(line)) return <p className="answer-cited-line" key={`${line}-${index}`}>{line}</p>;
+        return <p key={`${line}-${index}`}>{line}</p>;
+      })}
+    </div>
   );
 }
 

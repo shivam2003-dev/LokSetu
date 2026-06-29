@@ -2863,7 +2863,7 @@ meter::-moz-meter-bar {
 
 .copilot-chat-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.42fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
   gap: 16px;
   align-items: stretch;
   min-height: calc(100vh - 174px);
@@ -2952,7 +2952,8 @@ meter::-moz-meter-bar {
   flex-direction: column;
   gap: 12px;
   min-height: 360px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background:
@@ -2975,6 +2976,7 @@ meter::-moz-meter-bar {
   border-radius: 16px;
   background: #fff;
   padding: 14px 16px;
+  overflow-wrap: anywhere;
 }
 
 .chat-message.user .message-body {
@@ -2984,6 +2986,8 @@ meter::-moz-meter-bar {
 
 .chat-message.assistant .message-body {
   border-color: rgba(232, 111, 47, 0.18);
+  width: min(100%, 960px);
+  max-width: 100%;
 }
 
 .message-body p {
@@ -2991,6 +2995,64 @@ meter::-moz-meter-bar {
   color: var(--ink);
   font-size: 15px;
   line-height: 1.6;
+}
+
+.assistant-answer {
+  display: grid;
+  gap: 12px;
+}
+
+.answer-content {
+  display: grid;
+  gap: 8px;
+}
+
+.answer-content h4 {
+  margin: 2px 0 4px;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.answer-content p {
+  max-width: 82ch;
+}
+
+.answer-bullet,
+.answer-cited-line {
+  position: relative;
+  padding-left: 18px;
+}
+
+.answer-bullet::before,
+.answer-cited-line::before {
+  position: absolute;
+  left: 0;
+  color: var(--saffron);
+  content: "•";
+  font-weight: 900;
+}
+
+.message-citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 4px;
+}
+
+.message-citations span {
+  border: 1px solid rgba(47, 107, 240, 0.14);
+  border-radius: 999px;
+  background: #f5f8ff;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 850;
+  max-width: min(100%, 360px);
+  overflow: hidden;
+  padding: 6px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-meta {

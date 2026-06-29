@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { evaluateCases } from "./evaluation.js";
 import { chunkDocument, sha256 } from "./ingestion.js";
-import { rerank } from "./pipeline.js";
+import { isRelevantToQuery, rerank } from "./pipeline.js";
 import { RagDocument, RetrievalResult } from "./types.js";
 
 const document: RagDocument = {
@@ -50,6 +50,8 @@ const delhiResult: RetrievalResult = {
 
 const ranked = rerank([delhiResult, biharResult], [biharResult]);
 assert.equal(ranked[0]?.id, biharResult.id);
+assert.equal(isRelevantToQuery("what should district officer do next river market", delhiResult, 0.08), false);
+assert.equal(isRelevantToQuery("bihar stats population districts census", biharResult, 0.08), true);
 
 const evalResult = evaluateCases([
   {
