@@ -92,6 +92,10 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Citations")).toBeVisible();
     await expect(page.getByText("local-hybrid-rag").first()).toBeVisible();
     await expect(page.getByText(/retrieved/i).first()).toBeVisible();
+    await page.getByPlaceholder(/Ask anything about priorities/).fill("hi");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.getByText("Ask me about constituency priorities")).toBeVisible();
+    await expect(page.getByText("Copilot query failed")).toHaveCount(0);
 
     await page.getByRole("button", { name: "Simulation" }).click();
     await expect(page.getByRole("heading", { name: "Simulation workbench" })).toBeVisible();

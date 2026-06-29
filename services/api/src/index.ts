@@ -60,7 +60,7 @@ const projectStatusSchema = z.object({
 
 const copilotQuerySchema = z.object({
   role: z.enum(["mp", "collector", "citizen", "analyst"]).default("mp"),
-  question: z.string().trim().min(3).max(1_000),
+  question: z.string().trim().min(1).max(1_000),
   language: z.string().trim().min(2).max(40).optional(),
   projectId: z.string().trim().optional()
 });

@@ -127,6 +127,7 @@ function routeAgent(role: CopilotRole, question: string) {
 
 function classifyIntent(question: string) {
   const lower = question.toLowerCase();
+  if (/^(hi|hello|hey|namaste|namaskar|hola)$/i.test(lower)) return "greeting";
   if (lower.includes("why")) return "explain_priority";
   if (lower.includes("top") || lower.includes("rank")) return "ranked_priorities";
   if (lower.includes("budget") || lower.includes("fund")) return "funding_path";
@@ -145,6 +146,10 @@ function pickProject(question: string, projects: RankedProject[]) {
 }
 
 function buildAnswer(role: CopilotRole, intent: string, question: string, project: RankedProject | undefined, daily: ReturnType<typeof buildDailyIntelligence>) {
+  if (intent === "greeting") {
+    return "Hi. Ask me about constituency priorities, ranked issues, supporting evidence, maps, budget paths, public meeting briefs, or what changed today. I will answer with retrieved LokSetu context and citations.";
+  }
+
   if (!project) {
     return `I could not find a matching project for "${question}". The daily digest currently has ${daily.topEmergingIssues.length} emerging issues and ${daily.sourceCoverage.liveOrReady} live or ready source connectors.`;
   }

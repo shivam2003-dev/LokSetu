@@ -185,6 +185,14 @@ test.describe("API functional flow", () => {
     expect(copilotPayload.retrievedContext.length).toBeGreaterThan(0);
     expect(JSON.stringify(copilotPayload)).not.toContain("username");
 
+    const shortGreeting = await api.post("/api/copilot/query", {
+      data: { role: "mp", language: "English", question: "hi" }
+    });
+    await expect(shortGreeting).toBeOK();
+    const greetingPayload = await shortGreeting.json();
+    expect(greetingPayload.intent).toBe("greeting");
+    expect(greetingPayload.answer).toContain("Ask me about constituency priorities");
+
     const enterprise = await api.get("/api/enterprise/situation-room");
     await expect(enterprise).toBeOK();
     const enterprisePayload = await enterprise.json();

@@ -1771,7 +1771,16 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role, language, question: cleanQuestion, projectId: projectId || undefined })
       });
-      if (!response.ok) throw new Error("Copilot query failed");
+      if (!response.ok) {
+        let message = "Copilot query failed";
+        try {
+          const errorPayload = await response.json() as { error?: string };
+          message = errorPayload.error ?? message;
+        } catch {
+          message = response.statusText || message;
+        }
+        throw new Error(message);
+      }
       const payload = await response.json() as CopilotAnswer;
       setMessages((current) => [
         ...current,

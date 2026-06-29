@@ -4,7 +4,7 @@ global:
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-rag-copilot
+    tag: local-20260629-rag-greeting
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -34,12 +34,12 @@ batch:
 web:
   image:
     repository: people-priority-web
-    tag: local-20260629-rag-copilot
+    tag: local-20260629-rag-greeting
 
 citizen:
   image:
     repository: people-priority-citizen
-    tag: local-20260629-rag-copilot
+    tag: local-20260629-rag-greeting
 
 postgres:
   enabled: true
