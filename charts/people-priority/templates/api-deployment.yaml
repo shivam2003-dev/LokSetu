@@ -63,6 +63,16 @@ spec:
                   name: {{ .Values.api.googleMaps.existingSecret | quote }}
                   key: {{ .Values.api.googleMaps.secretKey | quote }}
             {{- end }}
+            {{- if .Values.api.googleMaps.mapIdExistingSecret }}
+            - name: GOOGLE_MAPS_MAP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.googleMaps.mapIdExistingSecret | quote }}
+                  key: {{ .Values.api.googleMaps.mapIdSecretKey | quote }}
+            {{- else if .Values.api.googleMaps.mapId }}
+            - name: GOOGLE_MAPS_MAP_ID
+              value: {{ .Values.api.googleMaps.mapId | quote }}
+            {{- end }}
             {{- if .Values.api.boundaries.configMapName }}
             - name: BOUNDARY_GEOJSON_DIR
               value: {{ .Values.api.boundaries.mountPath | quote }}

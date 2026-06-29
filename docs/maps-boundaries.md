@@ -9,6 +9,17 @@ LokSetu separates map rendering from geospatial intelligence so the platform can
 - Advanced markers are used only when a production Map ID is configured and the marker library is available.
 - If Maps fails, quota is exhausted, or no key exists, the Explorer falls back to the local signal map using the same backend coordinates and selected-project interactions.
 
+Configure a production Map ID through Helm without committing the value:
+
+```yaml
+api:
+  googleMaps:
+    existingSecret: people-priority-google-maps
+    secretKey: api-key
+    mapIdExistingSecret: people-priority-google-maps-map-id
+    mapIdSecretKey: map-id
+```
+
 ## Boundary API
 
 `GET /api/maps/boundaries` returns state, district, constituency, and ward features with:

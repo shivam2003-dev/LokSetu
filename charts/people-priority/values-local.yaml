@@ -4,7 +4,7 @@ global:
 api:
   image:
     repository: people-priority-api
-    tag: local-20260629-boundary-ingest
+    tag: local-20260629-map-acceptance
   env:
     NODE_ENV: production
     DATABASE_URL: postgres://loksetu:loksetu@people-priority-postgres:5432/loksetu
@@ -20,6 +20,9 @@ api:
   googleMaps:
     existingSecret: people-priority-google-maps
     secretKey: api-key
+    mapId: ""
+    mapIdExistingSecret: ""
+    mapIdSecretKey: map-id
   boundaries:
     configMapName: ""
     mountPath: /app/services/api/boundaries
@@ -31,12 +34,12 @@ batch:
 web:
   image:
     repository: people-priority-web
-    tag: local-20260629-boundary-ingest
+    tag: local-20260629-map-acceptance
 
 citizen:
   image:
     repository: people-priority-citizen
-    tag: local-20260629-boundary-ingest
+    tag: local-20260629-map-acceptance
 
 postgres:
   enabled: true

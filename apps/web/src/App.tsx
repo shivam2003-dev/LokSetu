@@ -29,7 +29,8 @@ import {
   Send,
   ShieldCheck,
   Star,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -644,7 +645,7 @@ export default function App() {
             <p>India-scale constituency intelligence</p>
           </div>
         </div>
-        <nav>
+        <nav className="nav-scroll">
           {navSections.map((section) => (
             <div className="nav-section" key={section.title}>
               <span>{section.title}</span>
@@ -660,13 +661,15 @@ export default function App() {
             </div>
           ))}
         </nav>
-        <a className="citizen-link" href={effectiveCitizenAppUrl}>
-          <Send size={16} />
-          Open Apni Awaaz
-        </a>
-        <div className={`status-pill ${apiConnected ? "connected" : "disconnected"}`}>
-          <CheckCircle2 size={16} />
-          <span>{notice} · {clientConfig.dataMode} · Vertex-ready</span>
+        <div className="sidebar-footer">
+          <a className="citizen-link" href={effectiveCitizenAppUrl}>
+            <Send size={16} />
+            Open Apni Awaaz
+          </a>
+          <div className={`status-pill ${apiConnected ? "connected" : "disconnected"}`}>
+            <CheckCircle2 size={16} />
+            <span>{notice} · {clientConfig.dataMode} · Vertex-ready</span>
+          </div>
         </div>
       </aside>
 
@@ -1014,6 +1017,7 @@ function ExplorePage({
 }) {
   const [selectedProjectId, setSelectedProjectId] = useState(dashboard.projects[0]?.id ?? fallbackProject.id);
   const [boundaryLevel, setBoundaryLevel] = useState<BoundaryLevel>("ward");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
 
   useEffect(() => {
@@ -1027,8 +1031,13 @@ function ExplorePage({
     setPage("projects");
   }
 
+  function selectAndOpen(projectId: string) {
+    setSelectedProjectId(projectId);
+    setDrawerOpen(true);
+  }
+
   return (
-    <section className="two-grid wide-left">
+    <section className="explore-workspace">
       <section className="panel">
         <PanelTitle title="All-India issue atlas" icon={Globe2} />
         <IssueMap
@@ -1039,24 +1048,31 @@ function ExplorePage({
           boundaryLevel={boundaryLevel}
           setBoundaryLevel={setBoundaryLevel}
           selectedProjectId={selectedProject.id}
-          selectProject={setSelectedProjectId}
+          selectProject={selectAndOpen}
         />
       </section>
-      <section className="explore-side">
-        <HotspotDrilldown project={selectedProject} relatedProjects={dashboard.projects} boundaries={boundaries} clusters={clusters} openProjectRoom={openProjectRoom} />
-        <section className="panel">
-          <PanelTitle title="State onboarding" icon={Flag} />
-          <div className="table-list compact-list">
-            {(regions?.onboardingStates ?? []).map((item) => (
-              <div className="table-row" key={item.state}>
-                <span>{item.state}</span>
-                <strong>{item.readiness}%</strong>
-                <small>{item.constituencies} constituencies · {item.districts} districts</small>
-              </div>
-            ))}
-          </div>
-        </section>
+      <section className="panel state-onboarding-panel">
+        <PanelTitle title="State onboarding" icon={Flag} detail="rollout readiness by state" />
+        <div className="state-onboarding-list">
+          {(regions?.onboardingStates ?? []).map((item) => (
+            <button key={item.state} type="button">
+              <span>{item.state}</span>
+              <strong>{item.readiness}%</strong>
+              <small>{item.constituencies} constituencies · {item.districts} districts</small>
+            </button>
+          ))}
+        </div>
       </section>
+      {drawerOpen ? (
+        <div className="drawer-backdrop" role="presentation" onClick={() => setDrawerOpen(false)}>
+          <aside className="issue-drawer" aria-label="Issue detail drawer" onClick={(event) => event.stopPropagation()}>
+            <button className="drawer-close" type="button" onClick={() => setDrawerOpen(false)} aria-label="Close issue detail">
+              <X size={18} />
+            </button>
+            <HotspotDrilldown project={selectedProject} relatedProjects={dashboard.projects} boundaries={boundaries} clusters={clusters} openProjectRoom={openProjectRoom} />
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1502,6 +1518,7 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
     content.type = "button";
     content.textContent = String(index + 1);
     content.title = title;
+    content.addEventListener("click", onClick);
 
     const marker = new AdvancedMarkerElement({
       map,
@@ -2230,11 +2247,77 @@ function AdminPage({
 }
 
 function IntegrationsPage({ integrations }: { integrations: IntegrationsResponse | null }) {
+  const enabled = integrations?.enabled ?? [];
+  const planned = integrations?.planned ?? [];
+  const localEntries = Object.entries(integrations?.local ?? {});
+  const connectorGroups = [
+    { title: "Citizen channels", status: "ready", items: ["WhatsApp Cloud API", "SMS/IVR gateway", "Apni Awaaz web", "Public meetings import"] },
+    { title: "AI processing", status: "configured", items: ["Vertex AI Gemini", "Speech-to-Text Chirp", "Cloud Vision OCR", "OpenAI-compatible fallback"] },
+    { title: "Geospatial", status: "partial", items: ["Google Maps runtime key", "Boundary GeoJSON mount", "BigQuery GIS", "Hotspot clustering"] },
+    { title: "Government data", status: "planned", items: ["data.gov.in", "NDAP", "MPLADS", "District dashboards"] }
+  ];
+  const readiness = [
+    { label: "Runtime", value: enabled.includes("Kubernetes") ? "Kubernetes" : "Local", detail: enabled.join(" · ") || "waiting for API" },
+    { label: "Database", value: localEntries.find(([key]) => key === "database")?.[1] ?? "unknown", detail: "Postgres locally, Cloud SQL in GCP production" },
+    { label: "Processing", value: localEntries.find(([key]) => key === "processing")?.[1] ?? "batch", detail: "scheduled batch workers, not realtime-only" },
+    { label: "GIS readiness", value: planned.includes("BigQuery GIS") ? "staged" : "pending", detail: "official boundary mount supported through Helm" }
+  ];
+
   return (
-    <section className="three-grid">
-      <Feature title="Enabled now" icon={CheckCircle2} points={integrations?.enabled ?? []} />
-      <Feature title="Production connectors" icon={Network} points={integrations?.planned ?? []} />
-      <Feature title="Local runtime" icon={Database} points={Object.entries(integrations?.local ?? {}).map(([key, value]) => `${key}: ${value}`)} />
+    <section className="integrations-page">
+      <section className="integration-overview">
+        {readiness.map((item) => (
+          <Metric key={item.label} label={item.label} value={item.value} detail={item.detail} />
+        ))}
+      </section>
+
+      <section className="two-grid wide-left">
+        <section className="panel">
+          <PanelTitle title="Production connector matrix" icon={Network} detail="owned connectors and rollout state" />
+          <div className="connector-grid">
+            {connectorGroups.map((group) => (
+              <article className={`connector-card ${group.status}`} key={group.title}>
+                <div>
+                  <strong>{group.title}</strong>
+                  <span>{group.status}</span>
+                </div>
+                <ul>{group.items.map((item) => <li key={item}>{item}</li>)}</ul>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel">
+          <PanelTitle title="Runtime contract" icon={Database} detail="what this local cluster is serving now" />
+          <div className="runtime-list">
+            {localEntries.map(([key, value]) => (
+              <article key={key}>
+                <span>{key}</span>
+                <strong>{value}</strong>
+              </article>
+            ))}
+            <article>
+              <span>maps</span>
+              <strong>runtime secret + fallback</strong>
+            </article>
+            <article>
+              <span>boundaries</span>
+              <strong>ConfigMap GeoJSON mount supported</strong>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section className="two-grid">
+        <section className="panel">
+          <PanelTitle title="Enabled now" icon={CheckCircle2} detail="active in this deployment" />
+          <ul className="check-list">{enabled.map((point) => <li key={point}>{point}</li>)}</ul>
+        </section>
+        <section className="panel">
+          <PanelTitle title="Next production connectors" icon={GitBranch} detail="requires credentials, data sharing, or cloud setup" />
+          <ul className="check-list muted">{planned.map((point) => <li key={point}>{point}</li>)}</ul>
+        </section>
+      </section>
     </section>
   );
 }

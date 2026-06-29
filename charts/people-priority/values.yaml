@@ -76,6 +76,9 @@ api:
   googleMaps:
     existingSecret: ""
     secretKey: api-key
+    mapId: ""
+    mapIdExistingSecret: ""
+    mapIdSecretKey: map-id
   boundaries:
     configMapName: ""
     mountPath: /app/services/api/boundaries

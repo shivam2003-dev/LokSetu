@@ -13,21 +13,23 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Geospatial demand hotspots")).toBeVisible();
     await expect(page.locator(".map-state")).toContainText(/Google Maps live|Local map fallback|Loading map/);
     await expect(page.locator(".hotspot-row").first()).toBeVisible();
-    await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
-    await expect(page.getByText("Issue drilldown")).toBeVisible();
     await expect(page.getByText("Boundary layers")).toBeVisible();
     await expect(page.getByText("Hotspot clusters")).toBeVisible();
-    await expect(page.getByText("Boundary provenance")).toBeVisible();
     await page.getByRole("button", { name: "district", exact: true }).click();
     await expect(page.locator(".boundary-list button").first()).toContainText(/production boundary connector|local-simplified-boundary/);
     await page.getByRole("button", { name: "All India" }).click();
     await expect(page.locator(".hotspot-row")).toHaveCount(8);
     await page.locator(".hotspot-row").nth(1).click();
+    await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
+    await expect(page.getByText("Issue drilldown")).toBeVisible();
+    await expect(page.getByText("Boundary provenance")).toBeVisible();
     await expect(page.getByLabel("Applied signal filters")).toContainText("rank=2");
     await expect(page.getByText("Related complaints")).toBeVisible();
     await expect(page.getByText("Evidence timeline")).toBeVisible();
+    await page.getByLabel("Close issue detail").click();
     await page.locator(".cluster-list button").first().click();
     await expect(page.getByText("Cluster context")).toBeVisible();
+    await page.getByLabel("Close issue detail").click();
 
     await page.getByRole("button", { name: "My area" }).click();
     await page.getByLabel("State").selectOption("Uttar Pradesh");
@@ -93,4 +95,115 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByRole("button", { name: "Submit simulation" }).click();
     await expect(page.getByText("pending_batch")).toBeVisible();
   });
+
+  test("maps fallback works without a browser key", async ({ page }) => {
+    await page.route("**/api/client-config", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          dataMode: "memory",
+          maps: { enabled: false, apiKey: "", mapId: "", source: "not-configured" },
+          citizenAppUrl: "http://localhost:5174",
+          generatedAt: new Date().toISOString()
+        })
+      });
+    });
+    await page.goto("/#explore");
+    await expect(page.locator(".map-state")).toContainText("Local map fallback");
+    await expect(page.locator(".fallback-map .hotspot").first()).toBeVisible();
+  });
+
+  test("maps key without Map ID uses legacy markers and no marker library", async ({ page }) => {
+    await installGoogleMapsMock(page);
+    await page.route("**/api/client-config", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          dataMode: "memory",
+          maps: { enabled: true, apiKey: "test-browser-key", mapId: "", source: "runtime-api" },
+          citizenAppUrl: "http://localhost:5174",
+          generatedAt: new Date().toISOString()
+        })
+      });
+    });
+    await page.goto("/#explore");
+    await expect(page.locator(".map-state")).toContainText("Google Maps live");
+    const markerStats = await page.evaluate(() => (window as any).__loksetuMapMock);
+    expect(markerStats.legacyMarkers).toBeGreaterThan(0);
+    expect(markerStats.advancedMarkers).toBe(0);
+    expect(markerStats.scripts[0]).not.toContain("libraries=marker");
+  });
+
+  test("Map ID enables advanced markers and cluster click detail", async ({ page }) => {
+    await installGoogleMapsMock(page);
+    await page.route("**/api/client-config", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          dataMode: "memory",
+          maps: { enabled: true, apiKey: "test-browser-key", mapId: "test-map-id", source: "runtime-api" },
+          citizenAppUrl: "http://localhost:5174",
+          generatedAt: new Date().toISOString()
+        })
+      });
+    });
+    await page.goto("/#explore");
+    await expect(page.locator(".map-state")).toContainText("Google Maps live");
+    await expect(page.locator(".google-hotspot-marker").first()).toBeVisible();
+    await page.locator(".cluster-list button").first().click();
+    await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
+    await expect(page.getByText("Cluster context")).toBeVisible();
+    const markerStats = await page.evaluate(() => (window as any).__loksetuMapMock);
+    expect(markerStats.advancedMarkers).toBeGreaterThan(0);
+    expect(markerStats.legacyMarkers).toBe(0);
+    expect(markerStats.scripts[0]).toContain("libraries=marker");
+  });
 });
+
+async function installGoogleMapsMock(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    (window as any).__loksetuMapMock = { scripts: [], legacyMarkers: 0, advancedMarkers: 0 };
+    const originalAppendChild = HTMLHeadElement.prototype.appendChild;
+    HTMLHeadElement.prototype.appendChild = function appendChildPatched<T extends Node>(node: T): T {
+      if (node instanceof HTMLScriptElement && node.src.includes("maps.googleapis.com/maps/api/js")) {
+        (window as any).__loksetuMapMock.scripts.push(node.src);
+        const makeMapApi = () => {
+          class LatLngBounds {
+            extend() {}
+          }
+          class Map {
+            element: HTMLElement;
+            constructor(element: HTMLElement) {
+              this.element = element;
+            }
+            fitBounds() {}
+          }
+          class Marker {
+            constructor() {
+              (window as any).__loksetuMapMock.legacyMarkers += 1;
+            }
+            addListener() {}
+          }
+          class AdvancedMarkerElement {
+            content: HTMLElement;
+            constructor(options: { map: Map; content: HTMLElement }) {
+              (window as any).__loksetuMapMock.advancedMarkers += 1;
+              this.content = options.content;
+              options.map.element.appendChild(options.content);
+            }
+            addEventListener(_event: string, handler: EventListener) {
+              this.content.addEventListener("click", handler);
+            }
+          }
+          (window as any).google = { maps: { LatLngBounds, Map, Marker, marker: { AdvancedMarkerElement } } };
+        };
+        window.setTimeout(() => {
+          makeMapApi();
+          (window as any).__loksetuGoogleMapsLoaded?.();
+        }, 0);
+        return node;
+      }
+      return originalAppendChild.call(this, node) as T;
+    };
+  });
+}
