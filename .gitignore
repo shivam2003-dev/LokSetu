@@ -8,6 +8,7 @@ coverage/
 *.tsbuildinfo
 .playwright-cli/
 output/playwright/
+output/
 test-results/
 terraform.tfstate
 terraform.tfstate.*

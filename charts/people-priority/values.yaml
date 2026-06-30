@@ -25,6 +25,7 @@ web:
   image:
     repository: us-central1-docker.pkg.dev/PROJECT_ID/people-priority/web
     tag: latest
+  serviceAnnotations: {}
   service:
     port: 80
     targetPort: 8080
@@ -41,6 +42,7 @@ citizen:
   image:
     repository: us-central1-docker.pkg.dev/PROJECT_ID/people-priority/citizen
     tag: latest
+  serviceAnnotations: {}
   service:
     port: 80
     targetPort: 80
@@ -57,8 +59,12 @@ api:
   image:
     repository: us-central1-docker.pkg.dev/PROJECT_ID/people-priority/api
     tag: latest
+  serviceAnnotations: {}
   service:
     port: 8080
+  database:
+    existingSecret: ""
+    secretKey: DATABASE_URL
   resources:
     requests:
       cpu: 150m
@@ -82,6 +88,8 @@ api:
   googleMaps:
     existingSecret: ""
     secretKey: api-key
+    browserExistingSecret: ""
+    browserSecretKey: api-key
     mapId: ""
     mapIdExistingSecret: ""
     mapIdSecretKey: map-id
@@ -150,6 +158,7 @@ rag:
     image:
       repository: us-central1-docker.pkg.dev/PROJECT_ID/people-priority/rag-api
       tag: latest
+    serviceAnnotations: {}
     service:
       port: 8090
     database:

@@ -22,6 +22,14 @@ output "ingress_static_ip_address" {
   value = google_compute_global_address.ingress_ip.address
 }
 
+output "argocd_ingress_static_ip_name" {
+  value = google_compute_global_address.argocd_ingress_ip.name
+}
+
+output "argocd_ingress_static_ip_address" {
+  value = google_compute_global_address.argocd_ingress_ip.address
+}
+
 output "cloud_sql_connection_name" {
   value = google_sql_database_instance.postgres.connection_name
 }
@@ -32,4 +40,30 @@ output "app_service_account_email" {
 
 output "database_url_secret_id" {
   value = google_secret_manager_secret.database_url.secret_id
+}
+
+output "cloudbuild_service_account_email" {
+  value = "${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+}
+
+output "compute_default_service_account_email" {
+  value = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+output "manual_lb_app_url_map" {
+  value = var.manual_lb_enabled ? google_compute_url_map.manual_lb_app[0].name : null
+}
+
+output "manual_lb_argocd_url_map" {
+  value = var.manual_lb_enabled ? google_compute_url_map.manual_lb_argocd[0].name : null
+}
+
+output "maps_browser_api_key" {
+  value     = google_apikeys_key.maps_browser.key_string
+  sensitive = true
+}
+
+output "maps_server_api_key" {
+  value     = google_apikeys_key.maps_server.key_string
+  sensitive = true
 }

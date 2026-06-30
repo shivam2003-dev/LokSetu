@@ -30,7 +30,21 @@ spec:
               value: {{ .Values.api.env.NODE_ENV | quote }}
             - name: PORT
               value: {{ .Values.api.service.port | quote }}
-            {{- if .Values.api.env.DATABASE_URL }}
+            {{- if .Values.api.env.VERTEX_AI_PROJECT_ID }}
+            - name: VERTEX_AI_PROJECT_ID
+              value: {{ .Values.api.env.VERTEX_AI_PROJECT_ID | quote }}
+            {{- end }}
+            {{- if .Values.api.env.GOOGLE_CLOUD_PROJECT }}
+            - name: GOOGLE_CLOUD_PROJECT
+              value: {{ .Values.api.env.GOOGLE_CLOUD_PROJECT | quote }}
+            {{- end }}
+            {{- if .Values.api.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.database.existingSecret | quote }}
+                  key: {{ .Values.api.database.secretKey | quote }}
+            {{- else if .Values.api.env.DATABASE_URL }}
             - name: DATABASE_URL
               value: {{ .Values.api.env.DATABASE_URL | quote }}
             {{- end }}
@@ -57,6 +71,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.api.googleMaps.existingSecret | quote }}
                   key: {{ .Values.api.googleMaps.secretKey | quote }}
+            {{- end }}
+            {{- if .Values.api.googleMaps.browserExistingSecret }}
+            - name: PUBLIC_GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.googleMaps.browserExistingSecret | quote }}
+                  key: {{ .Values.api.googleMaps.browserSecretKey | quote }}
+            {{- else if .Values.api.googleMaps.existingSecret }}
             - name: PUBLIC_GOOGLE_MAPS_API_KEY
               valueFrom:
                 secretKeyRef:

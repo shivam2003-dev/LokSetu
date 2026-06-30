@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "people-priority.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
+  {{- with .Values.api.serviceAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

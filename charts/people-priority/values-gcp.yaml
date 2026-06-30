@@ -1,0 +1,79 @@
+global:
+  imagePullPolicy: IfNotPresent
+
+components:
+  serviceMonitor: false
+  ingress: false
+  managedCertificate: false
+
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: loksetu-app@project-72558650-faf6-4529-a05.iam.gserviceaccount.com
+
+web:
+  serviceAnnotations:
+    cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-web-80-4ac9cbb6"}}}'
+  image:
+    repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/web
+    tag: gcp-20260630222434
+
+citizen:
+  serviceAnnotations:
+    cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-citize-8-e0ef404d"}}}'
+  image:
+    repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/citizen
+    tag: gcp-20260630222434
+
+api:
+  serviceAnnotations:
+    cloud.google.com/neg: '{"exposed_ports":{"8080":{"name":"k8s1-33b19180-people-priority-people-priority-api-8080-d3b4a98a"}}}'
+  image:
+    repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/api
+    tag: gcp-20260630222434
+  database:
+    existingSecret: loksetu-db
+    secretKey: DATABASE_URL
+  env:
+    NODE_ENV: production
+    DATABASE_URL: ""
+    VERTEX_AI_PROJECT_ID: project-72558650-faf6-4529-a05
+    GOOGLE_CLOUD_PROJECT: project-72558650-faf6-4529-a05
+    VERTEX_AI_LOCATION: us-east4
+    VERTEX_AI_MODEL: gemini-2.0-flash
+    VERTEX_AI_DISABLED: "true"
+    OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
+    OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
+    BATCH_SCHEDULE: "*/15 * * * *"
+    RAG_API_URL: http://people-priority-rag-api:8090
+  googleMaps:
+    existingSecret: loksetu-google-maps-server
+    secretKey: api-key
+    browserExistingSecret: loksetu-google-maps-browser
+    browserSecretKey: api-key
+
+rag:
+  api:
+    serviceAnnotations:
+      cloud.google.com/neg: '{"exposed_ports":{"8090":{"name":"k8s1-33b19180-people-priorit-people-priority-rag-a-809-13500a77"}}}'
+    image:
+      repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/rag-api
+      tag: gcp-20260630222434
+    database:
+      existingSecret: loksetu-db
+      secretKey: RAG_DATABASE_URL
+      createSecret: false
+    env:
+      RAG_DATABASE_URL: ""
+      RAG_TENANT_ID: loksetu
+      RAG_NAMESPACE: india
+      RAG_EMBEDDING_PROVIDER: hash
+      RAG_EMBEDDING_MODEL: hashing-vectorizer-768
+      RAG_EMBEDDING_DIMENSIONS: "768"
+      RAG_TOP_K: "8"
+      RAG_SIMILARITY_THRESHOLD: "0.24"
+      RAG_MINIMUM_CONFIDENCE: "0.28"
+      RAG_REQUIRE_CITATIONS: "true"
+      RAG_LLM_PROVIDER: extractive
+      RAG_CHUNK_SIZE: "900"
+      RAG_CHUNK_OVERLAP: "140"
+      RAG_SEMANTIC_CHUNKING: "true"
