@@ -12,6 +12,8 @@ grafana:
     passwordKey: admin-password
   service:
     type: ClusterIP
+    annotations:
+      cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"loksetu-observability-grafana-80"}}}'
   sidecar:
     dashboards:
       enabled: true

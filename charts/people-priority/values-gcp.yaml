@@ -41,8 +41,8 @@ api:
     VERTEX_AI_LOCATION: us-east4
     VERTEX_AI_MODEL: gemini-2.0-flash
     VERTEX_AI_DISABLED: "false"
-    OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
-    OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
+    OPENAI_COMPATIBLE_BASE_URL: ""
+    OPENAI_COMPATIBLE_MODEL: ""
     BATCH_SCHEDULE: "*/15 * * * *"
     RAG_API_URL: http://people-priority-rag-api:8090
   googleMaps:
@@ -64,16 +64,20 @@ rag:
       createSecret: false
     env:
       RAG_DATABASE_URL: ""
+      VERTEX_AI_PROJECT_ID: project-72558650-faf6-4529-a05
+      GOOGLE_CLOUD_PROJECT: project-72558650-faf6-4529-a05
+      VERTEX_AI_LOCATION: us-east4
+      VERTEX_AI_MODEL: gemini-2.0-flash
       RAG_TENANT_ID: loksetu
       RAG_NAMESPACE: india
-      RAG_EMBEDDING_PROVIDER: hash
-      RAG_EMBEDDING_MODEL: hashing-vectorizer-768
+      RAG_EMBEDDING_PROVIDER: gemini
+      RAG_EMBEDDING_MODEL: gemini-embedding-001
       RAG_EMBEDDING_DIMENSIONS: "768"
       RAG_TOP_K: "8"
       RAG_SIMILARITY_THRESHOLD: "0.24"
       RAG_MINIMUM_CONFIDENCE: "0.28"
       RAG_REQUIRE_CITATIONS: "true"
-      RAG_LLM_PROVIDER: extractive
+      RAG_LLM_PROVIDER: gemini
       RAG_CHUNK_SIZE: "900"
       RAG_CHUNK_OVERLAP: "140"
       RAG_SEMANTIC_CHUNKING: "true"
