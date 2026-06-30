@@ -7,7 +7,7 @@ REGION="${REGION:-us-east4}"
 CLUSTER_NAME="${CLUSTER_NAME:-loksetu}"
 NODE_POOL="${NODE_POOL:-primary}"
 START_NODES="${START_NODES:-1}"
-MAX_NODES="${MAX_NODES:-3}"
+MAX_NODES="${MAX_NODES:-2}"
 SQL_INSTANCE="${SQL_INSTANCE:-loksetu-postgres}"
 
 case "$ACTION" in

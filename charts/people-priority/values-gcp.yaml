@@ -11,6 +11,7 @@ serviceAccount:
     iam.gke.io/gcp-service-account: loksetu-app@project-72558650-faf6-4529-a05.iam.gserviceaccount.com
 
 web:
+  replicaCount: 1
   serviceAnnotations:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-web-80-4ac9cbb6"}}}'
   image:
@@ -18,6 +19,7 @@ web:
     tag: gcp-20260630195449
 
 citizen:
+  replicaCount: 1
   serviceAnnotations:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-citize-8-e0ef404d"}}}'
   image:
@@ -25,6 +27,7 @@ citizen:
     tag: gcp-20260630200104
 
 api:
+  replicaCount: 1
   serviceAnnotations:
     cloud.google.com/neg: '{"exposed_ports":{"8080":{"name":"k8s1-33b19180-people-priority-people-priority-api-8080-d3b4a98a"}}}'
   image:
@@ -57,6 +60,7 @@ api:
 
 rag:
   api:
+    replicaCount: 1
     serviceAnnotations:
       cloud.google.com/neg: '{"exposed_ports":{"8090":{"name":"k8s1-33b19180-people-priorit-people-priority-rag-a-809-13500a77"}}}'
     image:
@@ -85,3 +89,7 @@ rag:
       RAG_CHUNK_SIZE: "900"
       RAG_CHUNK_OVERLAP: "140"
       RAG_SEMANTIC_CHUNKING: "true"
+  embeddingWorker:
+    replicaCount: 1
+  ingestionWorker:
+    replicaCount: 0
