@@ -39,7 +39,7 @@ api:
     VERTEX_AI_PROJECT_ID: project-72558650-faf6-4529-a05
     GOOGLE_CLOUD_PROJECT: project-72558650-faf6-4529-a05
     VERTEX_AI_LOCATION: us-east4
-    VERTEX_AI_MODEL: gemini-2.0-flash
+    VERTEX_AI_MODEL: gemini-2.5-flash-lite
     VERTEX_AI_DISABLED: "false"
     OPENAI_COMPATIBLE_BASE_URL: ""
     OPENAI_COMPATIBLE_MODEL: ""
@@ -67,7 +67,7 @@ rag:
       VERTEX_AI_PROJECT_ID: project-72558650-faf6-4529-a05
       GOOGLE_CLOUD_PROJECT: project-72558650-faf6-4529-a05
       VERTEX_AI_LOCATION: us-east4
-      VERTEX_AI_MODEL: gemini-2.0-flash
+      VERTEX_AI_MODEL: gemini-2.5-flash-lite
       RAG_TENANT_ID: loksetu
       RAG_NAMESPACE: india
       RAG_EMBEDDING_PROVIDER: gemini
