@@ -73,6 +73,16 @@ button {
   cursor: pointer;
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 :focus-visible {
   outline: none;
   box-shadow: var(--ring);
@@ -88,6 +98,94 @@ button {
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
+}
+
+/* ---------------------------------------------------------
+   Login
+   --------------------------------------------------------- */
+
+.login-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(80% 70% at 50% 0%, rgba(245, 121, 33, 0.12), transparent 60%),
+    var(--base);
+}
+.login-panel {
+  width: min(100%, 440px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: #fff;
+  box-shadow: var(--shadow-lg);
+  padding: 28px;
+}
+.brand-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 26px;
+}
+.brand-lock span {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: linear-gradient(150deg, #ff9a3d, #ffc46f);
+  color: #1a1205;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+.brand-lock svg {
+  color: var(--indigo);
+}
+.login-panel h1 {
+  margin: 0 0 10px;
+  font-size: 34px;
+  letter-spacing: 0;
+}
+.login-panel p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+.login-panel form {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+.login-panel label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+.login-panel input {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 13px 14px;
+  background: #fff;
+}
+.login-error {
+  border: 1px solid #fda29b;
+  border-radius: var(--r-sm);
+  background: #fef3f2;
+  color: #b42318;
+  padding: 11px 13px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.logout-button {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: #fff;
+  color: var(--muted);
+  min-height: 44px;
+  padding: 0 14px;
+  font-weight: 800;
 }
 
 /* ---------------------------------------------------------

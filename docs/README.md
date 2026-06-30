@@ -3,6 +3,7 @@
 Architecture and operating notes for LokSetu.
 
 ## Key Documents
+- `loksetu/README.md`: developer wiki for product context, features, implementation logic, RAG/Copilot, and contribution flow.
 - `architecture.md`: system overview and component responsibilities.
 - `gcp-cloud-architecture.md`: production GCP/GKE architecture.
 - `gcp-local-safety.md`: local `gcloud` profile, cost guardrails, and project-access checks.

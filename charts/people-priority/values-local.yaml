@@ -18,6 +18,10 @@ api:
     OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
     BATCH_SCHEDULE: "*/5 * * * *"
     RAG_API_URL: http://people-priority-rag-api:8090
+  auth:
+    existingSecret: ""
+    passwordKey: password
+    secretKey: token-secret
   openAiCompatible:
     existingSecret: people-priority-openai-compatible
     secretKey: api-key
@@ -54,7 +58,7 @@ rag:
       RAG_SIMILARITY_THRESHOLD: "0.08"
       RAG_MINIMUM_CONFIDENCE: "0.08"
   ingestionWorker:
-    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md,services/rag-api/fixtures/loksetu/delhi-constituency-intelligence.md,services/rag-api/fixtures/loksetu/citizen-feedback-digest.md
+    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md,services/rag-api/fixtures/loksetu/delhi-constituency-intelligence.md,services/rag-api/fixtures/loksetu/citizen-feedback-digest.md,services/rag-api/fixtures/loksetu/rag-architecture.md
 
 web:
   image:

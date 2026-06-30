@@ -65,6 +65,10 @@ api:
   database:
     existingSecret: ""
     secretKey: DATABASE_URL
+  auth:
+    existingSecret: ""
+    passwordKey: password
+    secretKey: token-secret
   resources:
     requests:
       cpu: 150m
@@ -200,7 +204,7 @@ rag:
         memory: 1Gi
   ingestionWorker:
     replicaCount: 1
-    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md,services/rag-api/fixtures/loksetu/delhi-constituency-intelligence.md,services/rag-api/fixtures/loksetu/citizen-feedback-digest.md
+    ingestPaths: services/rag-api/fixtures/bihar/census-bihar-2011.md,services/rag-api/fixtures/loksetu/delhi-constituency-intelligence.md,services/rag-api/fixtures/loksetu/citizen-feedback-digest.md,services/rag-api/fixtures/loksetu/rag-architecture.md
     resources:
       requests:
         cpu: 200m

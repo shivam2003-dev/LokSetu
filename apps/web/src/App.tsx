@@ -298,6 +298,7 @@ declare global {
 }
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const accessTokenKey = "loksetuAccessToken";
 const envGoogleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
 const envGoogleMapsMapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "").trim();
 const configuredCitizenAppUrl = (import.meta.env.VITE_CITIZEN_APP_URL ?? "").trim();
@@ -464,7 +465,7 @@ function pageFromHash(): Page {
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
-    const response = await fetch(`${apiBase}${path}`);
+    const response = await apiFetch(path);
     if (!response.ok) throw new Error(path);
     return response.json();
   } catch {
@@ -473,7 +474,7 @@ async function getJson<T>(path: string, fallback: T): Promise<T> {
 }
 
 async function requestJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`);
+  const response = await apiFetch(path);
   if (!response.ok) throw new Error(path);
   return response.json();
 }
@@ -491,6 +492,22 @@ async function fetchDashboard(filters: { scope: Scope; state: string; district: 
 }
 
 export default function App() {
+  const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenKey) ?? "");
+
+  function handleLogin(token: string) {
+    localStorage.setItem(accessTokenKey, token);
+    setAccessToken(token);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem(accessTokenKey);
+    setAccessToken("");
+  }
+
+  return accessToken ? <AuthenticatedApp onLogout={handleLogout} /> : <LoginPage onLogin={handleLogin} />;
+}
+
+function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPageState] = useState<Page>(() => pageFromHash());
   const [scope, setScope] = useState<Scope>("local");
   const [state, setState] = useState("Delhi");
@@ -699,6 +716,7 @@ export default function App() {
           <button className="icon-button" title="Refresh" onClick={refreshAll}>
             <RefreshCw size={18} />
           </button>
+          <button className="logout-button" onClick={onLogout} type="button">Logout</button>
         </header>
 
         {showControlStrip ? (
@@ -735,6 +753,68 @@ export default function App() {
         {page === "admin" ? <AdminPage regions={regions} context={context} audit={audit} refreshAll={refreshAll} /> : null}
         {page === "integrations" ? <IntegrationsPage integrations={integrations} /> : null}
         {page === "public" ? <PublicPage filters={filters} /> : null}
+      </section>
+    </main>
+  );
+}
+
+async function apiFetch(path: string, init: RequestInit = {}) {
+  const token = localStorage.getItem(accessTokenKey) ?? "";
+  const headers = new Headers(init.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(`${apiBase}${path}`, {
+    ...init,
+    headers
+  });
+}
+
+function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function login(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+      const payload = await response.json() as { token?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Login failed");
+      onLogin(payload.token || "auth-disabled");
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-panel">
+        <div className="brand-lock">
+          <span>LS</span>
+          <LockKeyhole size={22} />
+        </div>
+        <p className="eyebrow">Access Required</p>
+        <h1>LokSetu Login</h1>
+        <p>Enter the deployment password before using AI, submission, map, or dashboard APIs.</p>
+        <form onSubmit={login}>
+          <label>
+            Password
+            <input autoFocus onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
+          </label>
+          {error ? <div className="login-error">{error}</div> : null}
+          <button className="primary" disabled={busy || !password.trim()} type="submit">
+            {busy ? <RefreshCw className="spin" size={16} /> : <Lock size={16} />}
+            Login
+          </button>
+        </form>
       </section>
     </main>
   );
@@ -1766,9 +1846,8 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
     const userMessage = { id: `user-${Date.now()}`, role: "user" as const, text: cleanQuestion };
     setMessages((current) => [...current, userMessage]);
     try {
-      const response = await fetch(`${apiBase}/api/copilot/query`, {
+      const response = await apiFetch("/api/copilot/query", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role, language, question: cleanQuestion, projectId: projectId || undefined })
       });
       if (!response.ok) {
@@ -2121,9 +2200,8 @@ function SimulationPage({ refreshAll }: { refreshAll: () => Promise<void> }) {
   async function submitSimulation() {
     setBusy(true);
     try {
-      const response = await fetch(`${apiBase}/api/simulation/submit`, {
+      const response = await apiFetch("/api/simulation/submit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channel,
           state: stateName,
@@ -2268,9 +2346,8 @@ function AdminPage({
     setBusy(true);
     setReceipt("");
     try {
-      const response = await fetch(`${apiBase}/api/admin/area-mappings`, {
+      const response = await apiFetch("/api/admin/area-mappings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           actorId: "state-admin-india",
           ward: selectedWard,
@@ -2445,7 +2522,7 @@ function PublicPage({ filters }: { filters: { scope: Scope; state: string; distr
 
     setLoading(true);
     setError("");
-    fetch(`${apiBase}/api/public/projects?${params.toString()}`)
+    apiFetch(`/api/public/projects?${params.toString()}`)
       .then((response) => {
         if (!response.ok) throw new Error("Public board API failed");
         return response.json() as Promise<PublicProjectsResponse>;
@@ -2545,9 +2622,8 @@ function PublicRatingControl({ project }: { project: PublicProject }) {
   async function submitRating(nextRating = rating) {
     setBusy(true);
     try {
-      const response = await fetch(`${apiBase}/api/projects/${project.id}/ratings`, {
+      const response = await apiFetch(`/api/projects/${project.id}/ratings`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rating: nextRating })
       });
       if (!response.ok) throw new Error("Rating failed");
@@ -2609,9 +2685,8 @@ function ProjectBrief({ project, full, refreshAll }: { project: RankedProject; f
     setBusyStatus(status);
     setMessage("");
     try {
-      const response = await fetch(`${apiBase}/api/projects/${project.id}/status`, {
+      const response = await apiFetch(`/api/projects/${project.id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ actorId: "state-admin-india", status })
       });
       if (!response.ok) throw new Error("Project status update failed");

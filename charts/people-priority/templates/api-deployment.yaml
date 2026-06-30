@@ -107,6 +107,18 @@ spec:
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
             - name: RAG_API_URL
               value: {{ .Values.api.env.RAG_API_URL | quote }}
+            {{- if .Values.api.auth.existingSecret }}
+            - name: APP_ACCESS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.auth.existingSecret | quote }}
+                  key: {{ .Values.api.auth.passwordKey | quote }}
+            - name: APP_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.auth.existingSecret | quote }}
+                  key: {{ .Values.api.auth.secretKey | quote }}
+            {{- end }}
           {{- if .Values.api.boundaries.configMapName }}
           volumeMounts:
             - name: boundary-geojson

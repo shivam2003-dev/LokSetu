@@ -52,15 +52,19 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
   const daily = buildDailyIntelligence(projects, submissions);
   const agent = routeAgent(query.role, question);
   const intent = classifyIntent(question);
+  const retrievalQuestion = buildRetrievalQuestion(question, intent, project, projects, submissions);
   const ragResponse = intent === "greeting"
     ? null
     : await queryRagService({
-        question
+        question: retrievalQuestion
       });
   const ragUnavailable = !ragResponse && intent !== "greeting";
+  const directAnswer = buildDirectAnswer(query.role, intent, question, project, daily, submissions, projects);
   const answer = intent === "greeting"
     ? buildAnswer(query.role, intent, question, project, daily)
-    : ragResponse?.answer ?? "RAG service is not configured. No production retrieval was executed.";
+    : ragResponse && ragResponse.retrieved.length > 0
+      ? ragResponse.answer
+      : directAnswer ?? "RAG service is not configured. No production retrieval was executed.";
   const retrievedContext = ragResponse?.retrieved.map((item) => ({
     id: item.id,
     title: item.title,
@@ -80,7 +84,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     agent,
     intent,
     answer,
-    confidence: ragResponse ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : project ? Math.round(project.confidence * 100) : 0,
+    confidence: ragResponse?.retrieved.length ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : directAnswer ? 72 : project ? Math.round(project.confidence * 100) : 0,
     evidence,
     citations: dedupeCitations(citations),
     retrieval: {
@@ -111,13 +115,15 @@ function routeAgent(role: CopilotRole, question: string) {
   if (lower.includes("budget") || lower.includes("fund") || lower.includes("cost")) return copilotAgents.find((agent) => agent.id === "budget-agent")!;
   if (lower.includes("map") || lower.includes("where") || lower.includes("village") || lower.includes("ward")) return copilotAgents.find((agent) => agent.id === "gis-agent")!;
   if (lower.includes("forecast") || lower.includes("predict") || lower.includes("what if")) return copilotAgents.find((agent) => agent.id === "forecast-agent")!;
-  if (lower.includes("pdf") || lower.includes("dpr") || lower.includes("minutes") || lower.includes("document")) return copilotAgents.find((agent) => agent.id === "document-agent")!;
+  if (lower.includes("pdf") || lower.includes("dpr") || lower.includes("minutes") || lower.includes("document") || lower.includes("architecture") || lower.includes("technical") || lower.includes("rag")) return copilotAgents.find((agent) => agent.id === "document-agent")!;
   return copilotAgents.find((agent) => agent.id === "mp-copilot")!;
 }
 
 function classifyIntent(question: string) {
   const lower = question.toLowerCase();
   if (/^(hi|hello|hey|namaste|namaskar|hola)$/i.test(lower)) return "greeting";
+  if (/(last|latest|recent|newest).*(submitted|submission|problem|complaint|issue)|submitted problem|recent problem/.test(lower)) return "latest_submission";
+  if (/(architecture|technical|how.*built|how.*build|rag|retrieval|embedding|pgvector|vertex)/.test(lower)) return "technical_rag";
   if (lower.includes("why")) return "explain_priority";
   if (lower.includes("top") || lower.includes("rank")) return "ranked_priorities";
   if (lower.includes("budget") || lower.includes("fund")) return "funding_path";
@@ -125,6 +131,63 @@ function classifyIntent(question: string) {
   if (lower.includes("what if") || lower.includes("predict")) return "simulation";
   if (lower.includes("status") || lower.includes("my complaint")) return "citizen_status";
   return "constituency_question";
+}
+
+function buildRetrievalQuestion(question: string, intent: string, project: RankedProject | undefined, projects: RankedProject[], submissions: Submission[]) {
+  const latestSubmissions = [...submissions]
+    .sort((a, b) => Date.parse(b.processedAt ?? b.createdAt) - Date.parse(a.processedAt ?? a.createdAt))
+    .slice(0, 5)
+    .map((submission, index) => `Recent submission ${index + 1}: ${submission.category} in ${submission.ward}, ${submission.district}. Text: ${submission.normalizedText || submission.text}. Processed: ${submission.processedAt ?? submission.createdAt}. Receipt: ${submission.rawIntakeId?.slice(0, 8) ?? "n/a"}.`)
+    .join("\n");
+  const topProjects = projects
+    .slice(0, 5)
+    .map((item, index) => `Rank ${index + 1}: ${item.title}; ${item.category}; ${item.ward}; evidence ${item.evidence.join(", ")}.`)
+    .join("\n");
+  const selectedProject = project ? `Selected project context: ${project.title}; ${project.category}; ${project.ward}; ${project.rationale}; evidence ${project.evidence.join(", ")}.` : "";
+
+  if (intent === "latest_submission") {
+    return [
+      question,
+      "Find the newest recent latest citizen submission problem complaint issue in the indexed LokSetu citizen signal documents.",
+      latestSubmissions
+    ].filter(Boolean).join("\n\n");
+  }
+  if (intent === "ranked_priorities" || intent === "briefing") {
+    return [question, "Use ranked priorities, top issues, citizen feedback summary, current queue, and latest processed submissions.", topProjects, latestSubmissions].join("\n\n");
+  }
+  if (intent === "technical_rag") {
+    return `${question}\n\nUse LokSetu RAG architecture, pgvector, Gemini embeddings, Vertex AI, ingestion worker, embedding worker, RAG API, Copilot adapter, GitOps, observability, and deployment details.`;
+  }
+  return [question, selectedProject].filter(Boolean).join("\n\n");
+}
+
+function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string, project: RankedProject | undefined, daily: ReturnType<typeof buildDailyIntelligence>, submissions: Submission[], projects: RankedProject[]) {
+  if (intent === "latest_submission") {
+    const latest = [...submissions].sort((a, b) => Date.parse(b.processedAt ?? b.createdAt) - Date.parse(a.processedAt ?? a.createdAt))[0];
+    if (!latest) return "No processed citizen submissions are available yet. If a report was just submitted, it may still be in the next batch queue.";
+    return [
+      "Latest processed submission:",
+      `- Category: ${latest.category}`,
+      `- Area: ${latest.ward}, ${latest.district}, ${latest.state}`,
+      `- Text: ${latest.normalizedText || latest.text}`,
+      `- Receipt: ${latest.rawIntakeId?.slice(0, 8) ?? latest.id.slice(0, 8)}`,
+      `- Processed: ${latest.processedAt ?? latest.createdAt}`
+    ].join("\n");
+  }
+  if (intent === "ranked_priorities" && projects.length) {
+    return [
+      "Top current priorities:",
+      ...projects.slice(0, 5).map((item, index) => `${index + 1}. ${item.title} (${item.category}, ${item.ward}) - score ${item.score}; ${item.rationale}`)
+    ].join("\n");
+  }
+  if (intent === "briefing") {
+    return [
+      "Current constituency briefing:",
+      ...daily.digest.slice(0, 4).map((item) => `- ${item}`)
+    ].join("\n");
+  }
+  if (project) return `${project.title} is currently ${project.status} with score ${project.score}. ${project.rationale}`;
+  return null;
 }
 
 function pickProject(question: string, projects: RankedProject[]) {

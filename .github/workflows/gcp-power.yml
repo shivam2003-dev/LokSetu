@@ -1,0 +1,60 @@
+name: GCP Power Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Choose status, start, or stop"
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - start
+          - stop
+      confirm:
+        description: "Type START for start or STOP for stop. Leave empty for status."
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  power:
+    name: ${{ inputs.action }} LokSetu GCP
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'project-72558650-faf6-4529-a05' }}
+      REGION: ${{ vars.GCP_REGION || 'us-east4' }}
+      CLUSTER_NAME: ${{ vars.GKE_CLUSTER_NAME || 'loksetu' }}
+      NODE_POOL: ${{ vars.GKE_NODE_POOL || 'primary' }}
+      START_NODES: ${{ vars.GKE_START_NODES || '1' }}
+      MAX_NODES: ${{ vars.GKE_MAX_NODES || '3' }}
+      SQL_INSTANCE: ${{ vars.CLOUD_SQL_INSTANCE || 'loksetu-postgres' }}
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.action }}" = "start" ] && [ "${{ inputs.confirm }}" != "START" ]; then
+            echo "Type START in confirm to start infra."
+            exit 1
+          fi
+          if [ "${{ inputs.action }}" = "stop" ] && [ "${{ inputs.confirm }}" != "STOP" ]; then
+            echo "Type STOP in confirm to stop infra."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run power action
+        run: scripts/gcp-power.sh "${{ inputs.action }}"

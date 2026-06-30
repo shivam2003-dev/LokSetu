@@ -125,10 +125,64 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.logout-chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+}
 
 .stage {
   flex: 1;
   padding: 8px 16px 28px;
+}
+
+/* ---- Auth ---- */
+.auth-screen {
+  justify-content: center;
+  padding: 20px 16px;
+}
+.auth-card {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+.auth-card h1 {
+  margin: 18px 0 8px;
+  font-size: 28px;
+  letter-spacing: -0.4px;
+}
+.auth-card p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+.auth-card form,
+.track-form {
+  display: grid;
+  gap: 12px;
+}
+.auth-card label,
+.track-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+.auth-card input,
+.track-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fff;
+  padding: 13px 14px;
+  font-size: 16px;
 }
 
 /* ---- Choose ---- */
@@ -233,6 +287,69 @@ button {
   flex-shrink: 0;
   margin-top: 1px;
 }
+.track-card {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 14px;
+}
+.track-form {
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+.track-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--indigo);
+  color: #fff;
+  padding: 0 15px;
+  font-weight: 800;
+}
+.track-form button:disabled {
+  opacity: 0.55;
+}
+.lookup-error {
+  color: #b42318;
+  background: #fef3f2;
+  border: 1px solid #fda29b;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 12px 0 0;
+}
+.track-result {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.track-result div {
+  display: grid;
+  gap: 3px;
+}
+.track-result span,
+.track-result small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.track-result strong {
+  font-size: 16px;
+}
+.track-result p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+  font-size: 13px;
+}
 
 /* ---- Capture ---- */
 .back {
@@ -299,7 +416,25 @@ button {
   gap: 7px;
   color: var(--green);
   font-weight: 700;
+  margin: 0;
+}
+.voice-preview {
+  display: grid;
+  gap: 10px;
   margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+.voice-preview audio {
+  width: 100%;
+}
+.voice-preview small {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
 }
 
 .preview {
@@ -473,6 +608,10 @@ textarea {
 .receipt-grid .score {
   color: var(--saffron-dark);
   font-size: 24px;
+}
+.done-track {
+  margin-top: 14px;
+  text-align: left;
 }
 
 @media (min-width: 521px) {

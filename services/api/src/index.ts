@@ -1,10 +1,19 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import pino from "pino";
 import { z } from "zod";
 import { areaMappings, mpProfiles, seedSubmissions, seedUsers, sourceSnapshots } from "./data.js";
-import { countRawIntakesByStatus, initDatabase, insertRawIntake, isDatabaseEnabled, listRecentBatchRuns, listSubmissions } from "./db.js";
+import {
+  countRawIntakesByStatus,
+  findRawIntakesByReceiptPrefix,
+  initDatabase,
+  insertRawIntake,
+  isDatabaseEnabled,
+  listRecentBatchRuns,
+  listSubmissions
+} from "./db.js";
 import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
 import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
@@ -19,6 +28,8 @@ const logger = pino({ name: "people-priority-api" });
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
+const accessPassword = process.env.APP_ACCESS_PASSWORD ?? "";
+const authSecret = process.env.APP_AUTH_SECRET ?? accessPassword;
 let memorySubmissions = [...seedSubmissions];
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
 const memoryAreaMappings = [...areaMappings];
@@ -63,6 +74,11 @@ const copilotQuerySchema = z.object({
   question: z.string().trim().min(1).max(1_000),
   language: z.string().trim().min(2).max(40).optional(),
   projectId: z.string().trim().optional()
+});
+
+const receiptIdSchema = z.string().trim().toLowerCase().regex(/^[a-f0-9-]{8,36}$/);
+const loginSchema = z.object({
+  password: z.string().min(1)
 });
 
 const mapBoundaryQuerySchema = z.object({
@@ -135,6 +151,33 @@ app.get("/healthz", (_request, response) => {
     database: isDatabaseEnabled() ? "postgres" : "memory",
     processing: "batch"
   });
+});
+
+app.post("/api/auth/login", (request, response) => {
+  if (!accessPassword) {
+    response.json({ token: "", expiresAt: "", disabled: true });
+    return;
+  }
+  const parsed = loginSchema.safeParse(request.body);
+  if (!parsed.success || !constantTimeEqual(parsed.data.password, accessPassword)) {
+    response.status(401).json({ error: "Invalid password" });
+    return;
+  }
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  response.json({ token: signAccessToken(expiresAt), expiresAt });
+});
+
+app.use("/api", (request, response, next) => {
+  if (!accessPassword) {
+    next();
+    return;
+  }
+  const token = authTokenFromRequest(request);
+  if (!token || !verifyAccessToken(token)) {
+    response.status(401).json({ error: "Login required" });
+    return;
+  }
+  next();
 });
 
 app.get("/api/client-config", (_request, response) => {
@@ -557,6 +600,24 @@ app.post("/api/citizen/submit", async (request, response) => {
   await handleIntake(request.body, response, { friendly: true });
 });
 
+app.get("/api/citizen/receipts/:receiptId", async (request, response) => {
+  const parsed = receiptIdSchema.safeParse(request.params.receiptId);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Enter at least the 8-character receipt ID shown after submission." });
+    return;
+  }
+  const status = await findReceiptStatus(parsed.data);
+  if (status === "ambiguous") {
+    response.status(409).json({ error: "Receipt prefix matched more than one submission. Enter the full receipt ID." });
+    return;
+  }
+  if (!status) {
+    response.status(404).json({ error: "Receipt not found. Check the ID and try again." });
+    return;
+  }
+  response.json(status);
+});
+
 app.get("/api/simulation/scenarios", (_request, response) => {
   response.json({ scenarios: simulationScenarios });
 });
@@ -774,6 +835,46 @@ async function enqueueRaw(payload: ReturnType<typeof toRawIntakePayload>) {
   return raw;
 }
 
+async function findReceiptStatus(receiptId: string) {
+  const prefix = receiptId.replace(/-/g, "").length === receiptId.length ? receiptId : receiptId;
+  const submissions = await getSubmissions();
+  const records = isDatabaseEnabled()
+    ? await findRawIntakesByReceiptPrefix(prefix)
+    : memoryRawQueue
+        .filter((item) => item.id.startsWith(prefix))
+        .slice(0, 2)
+        .map((item) => ({
+          id: item.id,
+          payload: item.payload as ReturnType<typeof toRawIntakePayload>,
+          status: "pending" as const,
+          attempts: 0,
+          createdAt: item.createdAt,
+          processedAt: undefined
+        }));
+  if (records.length > 1) return "ambiguous";
+  const record = records[0];
+  if (!record) return null;
+  const submission = submissions.find((item) => item.rawIntakeId === record.id);
+  const payload = record.payload;
+  return {
+    receiptId: record.id.slice(0, 8),
+    status: submission ? "processed" : record.status === "pending" ? "pending_batch" : record.status,
+    nextStep: submission
+      ? "Processed by the AI batch and routed to the constituency dashboard."
+      : "Queued for the next scheduled AI batch.",
+    submittedAt: record.createdAt,
+    processedAt: submission?.processedAt ?? record.processedAt,
+    area: submission?.locationLabel ?? ([payload.ward, payload.district, payload.state].filter(Boolean).join(", ") || "Area pending batch"),
+    category: submission?.category,
+    ward: submission?.ward ?? payload.ward,
+    district: submission?.district ?? payload.district,
+    state: submission?.state ?? payload.state,
+    mpId: submission?.mpId,
+    batchId: submission?.batchId,
+    privacy: "Public-safe status only. Citizen identity and raw personal details are not shown."
+  };
+}
+
 function getActor(userId: string): UserProfile | undefined {
   return seedUsers.find((user) => user.id === userId);
 }
@@ -788,6 +889,38 @@ function publicUser(user: UserProfile) {
     location: user.location,
     contributionScore: user.contributionScore
   };
+}
+
+function signAccessToken(expiresAt: string) {
+  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", exp: expiresAt })).toString("base64url");
+  const signature = createHmac("sha256", authSecret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyAccessToken(token: string) {
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return false;
+  const expected = createHmac("sha256", authSecret).update(payload).digest("base64url");
+  if (!constantTimeEqual(signature, expected)) return false;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; exp?: string };
+    return parsed.sub === "loksetu-access" && Boolean(parsed.exp) && Date.parse(parsed.exp!) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function authTokenFromRequest(request: express.Request) {
+  const header = request.header("authorization");
+  if (header?.toLowerCase().startsWith("bearer ")) return header.slice(7).trim();
+  return request.header("x-loksetu-access-token")?.trim();
+}
+
+function constantTimeEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function canAccessMp(actor: UserProfile, targetMpId: string): boolean {
