@@ -1,0 +1,25 @@
+tempo:
+  reportingEnabled: false
+  retention: 24h
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+persistence:
+  enabled: false
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack

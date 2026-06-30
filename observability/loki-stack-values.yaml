@@ -1,0 +1,28 @@
+loki:
+  enabled: true
+  isDefault: false
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+
+promtail:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+grafana:
+  enabled: false
+
+prometheus:
+  enabled: false

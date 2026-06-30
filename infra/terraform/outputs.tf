@@ -67,3 +67,19 @@ output "maps_server_api_key" {
   value     = google_apikeys_key.maps_server.key_string
   sensitive = true
 }
+
+output "certificate_manager_dns_authorization_records" {
+  value = var.manual_lb_enabled ? {
+    loksetu = google_certificate_manager_dns_authorization.loksetu[0].dns_resource_record
+    awaaz   = google_certificate_manager_dns_authorization.awaaz[0].dns_resource_record
+    argocd  = google_certificate_manager_dns_authorization.argocd[0].dns_resource_record
+  } : null
+}
+
+output "certificate_manager_app_certificate_state" {
+  value = var.manual_lb_enabled ? google_certificate_manager_certificate.manual_lb_app[0].managed[0].state : null
+}
+
+output "certificate_manager_argocd_certificate_state" {
+  value = var.manual_lb_enabled ? google_certificate_manager_certificate.manual_lb_argocd[0].managed[0].state : null
+}

@@ -40,7 +40,7 @@ api:
     GOOGLE_CLOUD_PROJECT: project-72558650-faf6-4529-a05
     VERTEX_AI_LOCATION: us-east4
     VERTEX_AI_MODEL: gemini-2.0-flash
-    VERTEX_AI_DISABLED: "true"
+    VERTEX_AI_DISABLED: "false"
     OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
     OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
     BATCH_SCHEDULE: "*/15 * * * *"

@@ -1,0 +1,45 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: loksetu-rag-api
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - people-priority
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: people-priority
+      app.kubernetes.io/component: rag-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: loksetu-rag-alerts
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: loksetu.rag
+      rules:
+        - alert: LokSetuRagApiDown
+          expr: up{namespace="people-priority", service="people-priority-rag-api"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: LokSetu RAG API metrics endpoint is down
+        - alert: LokSetuRagHighLatency
+          expr: histogram_quantile(0.95, sum(rate(loksetu_rag_request_latency_ms_bucket[5m])) by (le)) > 2500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: LokSetu RAG p95 latency is above 2.5 seconds

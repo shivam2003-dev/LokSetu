@@ -1,0 +1,77 @@
+mode: deployment
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+presets:
+  kubernetesAttributes:
+    enabled: true
+  clusterMetrics:
+    enabled: true
+  kubernetesEvents:
+    enabled: true
+
+ports:
+  otlp:
+    enabled: true
+  otlp-http:
+    enabled: true
+  metrics:
+    enabled: true
+
+serviceMonitor:
+  enabled: true
+  extraLabels:
+    release: kube-prometheus-stack
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: opentelemetry-collector
+            scrape_interval: 30s
+            static_configs:
+              - targets:
+                  - ${env:MY_POD_IP}:8888
+  exporters:
+    debug: {}
+    otlp/tempo:
+      endpoint: tempo:4317
+      tls:
+        insecure: true
+    prometheus:
+      endpoint: ${env:MY_POD_IP}:8889
+  processors:
+    batch: {}
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+  service:
+    pipelines:
+      traces:
+        receivers:
+          - otlp
+        processors:
+          - memory_limiter
+          - k8sattributes
+          - batch
+        exporters:
+          - otlp/tempo
+      metrics:
+        receivers:
+          - otlp
+          - prometheus
+        processors:
+          - memory_limiter
+          - k8sattributes
+          - batch
+        exporters:
+          - prometheus

@@ -7,6 +7,7 @@ locals {
   services = toset([
     "apikeys.googleapis.com",
     "artifactregistry.googleapis.com",
+    "certificatemanager.googleapis.com",
     "cloudbuild.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
@@ -287,6 +288,87 @@ resource "google_compute_managed_ssl_certificate" "manual_lb_argocd" {
   }
 }
 
+resource "google_certificate_manager_dns_authorization" "loksetu" {
+  count  = var.manual_lb_enabled ? 1 : 0
+  name   = "${var.cluster_name}-loksetu-dns-auth"
+  domain = "loksetu.shivam2003.com"
+
+  depends_on = [google_project_service.required["certificatemanager.googleapis.com"]]
+}
+
+resource "google_certificate_manager_dns_authorization" "awaaz" {
+  count  = var.manual_lb_enabled ? 1 : 0
+  name   = "${var.cluster_name}-awaaz-dns-auth"
+  domain = "awaaz.shivam2003.com"
+
+  depends_on = [google_project_service.required["certificatemanager.googleapis.com"]]
+}
+
+resource "google_certificate_manager_dns_authorization" "argocd" {
+  count  = var.manual_lb_enabled ? 1 : 0
+  name   = "${var.cluster_name}-argocd-dns-auth"
+  domain = "argocd.shivam2003.com"
+
+  depends_on = [google_project_service.required["certificatemanager.googleapis.com"]]
+}
+
+resource "google_certificate_manager_certificate" "manual_lb_app" {
+  count = var.manual_lb_enabled ? 1 : 0
+  name  = "${var.cluster_name}-cm-app-cert"
+
+  managed {
+    domains = ["loksetu.shivam2003.com", "awaaz.shivam2003.com"]
+    dns_authorizations = [
+      google_certificate_manager_dns_authorization.loksetu[0].id,
+      google_certificate_manager_dns_authorization.awaaz[0].id
+    ]
+  }
+}
+
+resource "google_certificate_manager_certificate" "manual_lb_argocd" {
+  count = var.manual_lb_enabled ? 1 : 0
+  name  = "${var.cluster_name}-cm-argocd-cert"
+
+  managed {
+    domains            = ["argocd.shivam2003.com"]
+    dns_authorizations = [google_certificate_manager_dns_authorization.argocd[0].id]
+  }
+}
+
+resource "google_certificate_manager_certificate_map" "manual_lb_app" {
+  count = var.manual_lb_enabled ? 1 : 0
+  name  = "${var.cluster_name}-app-cert-map"
+}
+
+resource "google_certificate_manager_certificate_map" "manual_lb_argocd" {
+  count = var.manual_lb_enabled ? 1 : 0
+  name  = "${var.cluster_name}-argocd-cert-map"
+}
+
+resource "google_certificate_manager_certificate_map_entry" "manual_lb_loksetu" {
+  count        = var.manual_lb_enabled ? 1 : 0
+  name         = "${var.cluster_name}-loksetu-entry"
+  map          = google_certificate_manager_certificate_map.manual_lb_app[0].name
+  hostname     = "loksetu.shivam2003.com"
+  certificates = [google_certificate_manager_certificate.manual_lb_app[0].id]
+}
+
+resource "google_certificate_manager_certificate_map_entry" "manual_lb_awaaz" {
+  count        = var.manual_lb_enabled ? 1 : 0
+  name         = "${var.cluster_name}-awaaz-entry"
+  map          = google_certificate_manager_certificate_map.manual_lb_app[0].name
+  hostname     = "awaaz.shivam2003.com"
+  certificates = [google_certificate_manager_certificate.manual_lb_app[0].id]
+}
+
+resource "google_certificate_manager_certificate_map_entry" "manual_lb_argocd" {
+  count        = var.manual_lb_enabled ? 1 : 0
+  name         = "${var.cluster_name}-argocd-entry"
+  map          = google_certificate_manager_certificate_map.manual_lb_argocd[0].name
+  hostname     = "argocd.shivam2003.com"
+  certificates = [google_certificate_manager_certificate.manual_lb_argocd[0].id]
+}
+
 resource "google_compute_url_map" "manual_lb_app" {
   count           = var.manual_lb_enabled ? 1 : 0
   name            = "${var.cluster_name}-manual-app-url-map"
@@ -336,10 +418,14 @@ resource "google_compute_target_http_proxy" "manual_lb_app" {
 }
 
 resource "google_compute_target_https_proxy" "manual_lb_app" {
-  count            = var.manual_lb_enabled ? 1 : 0
-  name             = "${var.cluster_name}-manual-app-https-proxy"
-  url_map          = google_compute_url_map.manual_lb_app[0].id
-  ssl_certificates = [google_compute_managed_ssl_certificate.manual_lb_app[0].id]
+  count           = var.manual_lb_enabled ? 1 : 0
+  name            = "${var.cluster_name}-manual-app-cm-https-proxy"
+  url_map         = google_compute_url_map.manual_lb_app[0].id
+  certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.manual_lb_app[0].id}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_compute_target_http_proxy" "manual_lb_argocd" {
@@ -349,10 +435,14 @@ resource "google_compute_target_http_proxy" "manual_lb_argocd" {
 }
 
 resource "google_compute_target_https_proxy" "manual_lb_argocd" {
-  count            = var.manual_lb_enabled ? 1 : 0
-  name             = "${var.cluster_name}-manual-argocd-https-proxy"
-  url_map          = google_compute_url_map.manual_lb_argocd[0].id
-  ssl_certificates = [google_compute_managed_ssl_certificate.manual_lb_argocd[0].id]
+  count           = var.manual_lb_enabled ? 1 : 0
+  name            = "${var.cluster_name}-manual-argocd-cm-https-proxy"
+  url_map         = google_compute_url_map.manual_lb_argocd[0].id
+  certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.manual_lb_argocd[0].id}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_compute_global_forwarding_rule" "manual_lb_app_http" {
