@@ -124,7 +124,7 @@ resource "google_compute_firewall" "allow_gfe_health_checks" {
 
   allow {
     protocol = "tcp"
-    ports    = ["80", "8080", "8090"]
+    ports    = ["80", "3000", "8080", "8090"]
   }
 
   source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]

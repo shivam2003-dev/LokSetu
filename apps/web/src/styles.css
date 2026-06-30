@@ -1894,10 +1894,13 @@ meter::-moz-meter-bar {
   inset: 0;
   width: 100%;
   height: 100%;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.map-canvas:not(.google-ready) .google-map {
-  display: none;
+.map-canvas.google-ready .google-map {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .google-hotspot-marker {
