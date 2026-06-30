@@ -55,8 +55,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
   const ragResponse = intent === "greeting"
     ? null
     : await queryRagService({
-        question,
-        metadata: project ? { projectId: project.id } : undefined
+        question
       });
   const ragUnavailable = !ragResponse && intent !== "greeting";
   const answer = intent === "greeting"
