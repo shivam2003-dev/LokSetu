@@ -59,6 +59,7 @@ body {
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow-x: hidden;
 }
 
 button,
@@ -3815,6 +3816,87 @@ meter::-moz-meter-bar {
 }
 
 @media (max-width: 640px) {
+  .app-shell {
+    display: block;
+    width: 100%;
+    overflow-x: hidden;
+  }
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: grid;
+    gap: 10px;
+    width: 100%;
+    height: auto;
+    max-height: none;
+    padding: 12px;
+    overflow: hidden;
+  }
+  .brand {
+    gap: 10px;
+    padding: 0 2px 10px;
+  }
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    font-size: 15px;
+  }
+  .brand h1 {
+    font-size: 17px;
+  }
+  .brand p {
+    font-size: 11.5px;
+    max-width: 250px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .nav-scroll {
+    display: flex;
+    gap: 8px;
+    margin: 0 -12px;
+    padding: 0 12px 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-section {
+    display: contents;
+  }
+  .nav-section > span {
+    display: none;
+  }
+  .nav-item {
+    flex: 0 0 auto;
+    justify-content: center;
+    width: auto;
+    min-width: max-content;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.03);
+    scroll-snap-align: start;
+    white-space: nowrap;
+  }
+  .nav-item svg {
+    width: 17px;
+    height: 17px;
+  }
+  .sidebar-footer {
+    display: block;
+    padding-top: 8px;
+  }
+  .citizen-link {
+    min-height: 40px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+  .status-pill {
+    display: none;
+  }
   .home-actions,
   .trust-row,
   .priority-card header,
@@ -3835,25 +3917,96 @@ meter::-moz-meter-bar {
     padding: 22px;
   }
   .workspace {
-    padding: 16px 14px 80px;
-  }
-  .sidebar {
-    padding: 14px;
-  }
-  nav,
-  .channel-row,
-  .form-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .metrics,
-  .project-grid {
-    grid-template-columns: 1fr;
+    width: 100%;
+    padding: 18px 14px 80px;
+    overflow-x: hidden;
   }
   .topbar {
     align-items: flex-start;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+  }
+  .topbar h2 {
+    font-size: 26px;
+    line-height: 1.14;
+  }
+  .icon-button,
+  .logout-button {
+    min-height: 44px;
+  }
+  .logout-button {
+    padding: 0 12px;
+  }
+  .control-strip {
+    padding: 12px;
+  }
+  .control-strip,
+  .channel-row,
+  .form-grid,
+  .metrics,
+  .project-grid,
+  .admin-stat-grid,
+  .drilldown-metrics,
+  .intelligence-kpis,
+  .index-grid,
+  .copilot-controls,
+  .prompt-grid,
+  .twin-grid,
+  .observability-grid,
+  .area-drilldown,
+  .form-grid.two {
+    grid-template-columns: 1fr;
+  }
+  .control-strip select,
+  .control-strip input,
+  .control-strip button {
+    width: 100%;
+    min-width: 0;
+  }
+  .home-hero,
+  .home-section,
+  .panel,
+  .priority-card,
+  .map-card {
+    border-radius: 14px;
+  }
+  .hero-copy h1 {
+    font-size: 36px;
+    line-height: 1.08;
+  }
+  .priority-card header,
+  .priority-card footer,
+  .ops-row,
+  .filter-row,
+  .panel-header,
+  .card-header {
+    gap: 10px;
+  }
+  .receipt-grid,
+  .rag-status-grid {
+    grid-template-columns: 1fr;
   }
   .receipt strong {
     font-size: 48px;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand p {
+    max-width: 190px;
+  }
+  .topbar {
+    grid-template-columns: 1fr auto;
+  }
+  .logout-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .icon-button {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
   }
 }
 
