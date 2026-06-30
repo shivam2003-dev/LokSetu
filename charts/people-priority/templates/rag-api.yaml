@@ -35,6 +35,8 @@ spec:
       app.kubernetes.io/component: rag-api
   template:
     metadata:
+      annotations:
+        checksum/rag-config: {{ include (print $.Template.BasePath "/rag-config.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: {{ include "people-priority.name" . }}
         app.kubernetes.io/component: rag-api

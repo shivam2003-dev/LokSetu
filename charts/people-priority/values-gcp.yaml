@@ -22,7 +22,7 @@ citizen:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-citize-8-e0ef404d"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/citizen
-    tag: gcp-20260630222434
+    tag: gcp-20260630191000
 
 api:
   serviceAnnotations:
