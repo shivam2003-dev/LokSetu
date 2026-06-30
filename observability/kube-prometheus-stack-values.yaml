@@ -6,6 +6,10 @@ alertmanager:
 grafana:
   enabled: true
   adminUser: admin
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
   service:
     type: ClusterIP
   sidecar:
@@ -55,3 +59,8 @@ kubeControllerManager:
 
 kubeScheduler:
   enabled: false
+
+prometheusOperator:
+  admissionWebhooks:
+    patch:
+      enabled: false
