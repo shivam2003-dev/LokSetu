@@ -116,3 +116,9 @@ variable "manual_lb_argocd_neg_name" {
   type        = string
   default     = ""
 }
+
+variable "manual_lb_grafana_neg_name" {
+  description = "NEG name for Grafana service"
+  type        = string
+  default     = ""
+}

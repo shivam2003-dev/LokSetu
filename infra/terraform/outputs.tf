@@ -70,9 +70,10 @@ output "maps_server_api_key" {
 
 output "certificate_manager_dns_authorization_records" {
   value = var.manual_lb_enabled ? {
-    loksetu = google_certificate_manager_dns_authorization.loksetu[0].dns_resource_record
-    awaaz   = google_certificate_manager_dns_authorization.awaaz[0].dns_resource_record
-    argocd  = google_certificate_manager_dns_authorization.argocd[0].dns_resource_record
+    loksetu       = google_certificate_manager_dns_authorization.loksetu[0].dns_resource_record
+    awaaz         = google_certificate_manager_dns_authorization.awaaz[0].dns_resource_record
+    argocd        = google_certificate_manager_dns_authorization.argocd[0].dns_resource_record
+    observability = var.manual_lb_grafana_neg_name != "" ? google_certificate_manager_dns_authorization.observability[0].dns_resource_record : []
   } : null
 }
 
@@ -82,4 +83,8 @@ output "certificate_manager_app_certificate_state" {
 
 output "certificate_manager_argocd_certificate_state" {
   value = var.manual_lb_enabled ? google_certificate_manager_certificate.manual_lb_argocd[0].managed[0].state : null
+}
+
+output "certificate_manager_observability_certificate_state" {
+  value = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? google_certificate_manager_certificate.manual_lb_observability[0].managed[0].state : null
 }

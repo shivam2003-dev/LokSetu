@@ -160,6 +160,12 @@ data "google_compute_network_endpoint_group" "argocd" {
   zone  = local.manual_lb_zone
 }
 
+data "google_compute_network_endpoint_group" "grafana" {
+  count = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? 1 : 0
+  name  = var.manual_lb_grafana_neg_name
+  zone  = local.manual_lb_zone
+}
+
 resource "google_compute_health_check" "manual_lb_web" {
   count = var.manual_lb_enabled ? 1 : 0
   name  = "${var.cluster_name}-manual-web-hc"
@@ -197,6 +203,16 @@ resource "google_compute_health_check" "manual_lb_argocd" {
   http_health_check {
     port_specification = "USE_SERVING_PORT"
     request_path       = "/healthz"
+  }
+}
+
+resource "google_compute_health_check" "manual_lb_grafana" {
+  count = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? 1 : 0
+  name  = "${var.cluster_name}-manual-grafana-hc"
+
+  http_health_check {
+    port_specification = "USE_SERVING_PORT"
+    request_path       = "/api/health"
   }
 }
 
@@ -270,6 +286,20 @@ resource "google_compute_backend_service" "manual_lb_argocd" {
   }
 }
 
+resource "google_compute_backend_service" "manual_lb_grafana" {
+  count                 = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? 1 : 0
+  name                  = "${var.cluster_name}-manual-grafana"
+  protocol              = "HTTP"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  health_checks         = [google_compute_health_check.manual_lb_grafana[0].id]
+
+  backend {
+    group                 = data.google_compute_network_endpoint_group.grafana[0].id
+    balancing_mode        = "RATE"
+    max_rate_per_endpoint = 100
+  }
+}
+
 resource "google_compute_managed_ssl_certificate" "manual_lb_app" {
   count = var.manual_lb_enabled ? 1 : 0
   name  = "${var.cluster_name}-manual-app-cert"
@@ -312,6 +342,14 @@ resource "google_certificate_manager_dns_authorization" "argocd" {
   depends_on = [google_project_service.required["certificatemanager.googleapis.com"]]
 }
 
+resource "google_certificate_manager_dns_authorization" "observability" {
+  count  = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? 1 : 0
+  name   = "${var.cluster_name}-observability-dns-auth"
+  domain = "observability.shivam2003.com"
+
+  depends_on = [google_project_service.required["certificatemanager.googleapis.com"]]
+}
+
 resource "google_certificate_manager_certificate" "manual_lb_app" {
   count = var.manual_lb_enabled ? 1 : 0
   name  = "${var.cluster_name}-cm-app-cert"
@@ -332,6 +370,16 @@ resource "google_certificate_manager_certificate" "manual_lb_argocd" {
   managed {
     domains            = ["argocd.shivam2003.com"]
     dns_authorizations = [google_certificate_manager_dns_authorization.argocd[0].id]
+  }
+}
+
+resource "google_certificate_manager_certificate" "manual_lb_observability" {
+  count = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? 1 : 0
+  name  = "${var.cluster_name}-cm-observability-cert"
+
+  managed {
+    domains            = ["observability.shivam2003.com"]
+    dns_authorizations = [google_certificate_manager_dns_authorization.observability[0].id]
   }
 }
 
@@ -369,6 +417,14 @@ resource "google_certificate_manager_certificate_map_entry" "manual_lb_argocd" {
   certificates = [google_certificate_manager_certificate.manual_lb_argocd[0].id]
 }
 
+resource "google_certificate_manager_certificate_map_entry" "manual_lb_observability" {
+  count        = var.manual_lb_enabled && var.manual_lb_grafana_neg_name != "" ? 1 : 0
+  name         = "${var.cluster_name}-observability-entry"
+  map          = google_certificate_manager_certificate_map.manual_lb_app[0].name
+  hostname     = "observability.shivam2003.com"
+  certificates = [google_certificate_manager_certificate.manual_lb_observability[0].id]
+}
+
 resource "google_compute_url_map" "manual_lb_app" {
   count           = var.manual_lb_enabled ? 1 : 0
   name            = "${var.cluster_name}-manual-app-url-map"
@@ -382,6 +438,14 @@ resource "google_compute_url_map" "manual_lb_app" {
   host_rule {
     hosts        = ["awaaz.shivam2003.com"]
     path_matcher = "awaaz"
+  }
+
+  dynamic "host_rule" {
+    for_each = var.manual_lb_grafana_neg_name != "" ? [1] : []
+    content {
+      hosts        = ["observability.shivam2003.com"]
+      path_matcher = "observability"
+    }
   }
 
   path_matcher {
@@ -402,6 +466,14 @@ resource "google_compute_url_map" "manual_lb_app" {
   path_matcher {
     name            = "awaaz"
     default_service = google_compute_backend_service.manual_lb_citizen[0].id
+  }
+
+  dynamic "path_matcher" {
+    for_each = var.manual_lb_grafana_neg_name != "" ? [1] : []
+    content {
+      name            = "observability"
+      default_service = google_compute_backend_service.manual_lb_grafana[0].id
+    }
   }
 }
 
