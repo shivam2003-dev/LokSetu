@@ -9,6 +9,19 @@ NODE_POOL="${NODE_POOL:-primary}"
 START_NODES="${START_NODES:-1}"
 MAX_NODES="${MAX_NODES:-2}"
 SQL_INSTANCE="${SQL_INSTANCE:-loksetu-postgres}"
+WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE:-people-priority}"
+
+configure_kubectl() {
+  if ! command -v kubectl >/dev/null 2>&1; then
+    echo "kubectl is required for $ACTION but is not installed" >&2
+    exit 1
+  fi
+
+  gcloud container clusters get-credentials "$CLUSTER_NAME" \
+    --region="$REGION" \
+    --project="$PROJECT_ID" \
+    --quiet
+}
 
 case "$ACTION" in
   start)
@@ -30,8 +43,13 @@ case "$ACTION" in
       --region="$REGION" \
       --project="$PROJECT_ID" \
       --quiet
+    configure_kubectl
+    kubectl -n argocd annotate application loksetu-gcp argocd.argoproj.io/refresh=hard --overwrite || true
+    kubectl -n argocd patch application loksetu-gcp --type merge -p '{}' || true
     ;;
   stop)
+    configure_kubectl
+    kubectl -n "$WORKLOAD_NAMESPACE" delete pdb --all --ignore-not-found=true
     gcloud container node-pools update "$NODE_POOL" \
       --cluster="$CLUSTER_NAME" \
       --region="$REGION" \
