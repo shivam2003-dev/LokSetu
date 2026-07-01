@@ -74,6 +74,8 @@ case "$ACTION" in
   stop)
     configure_kubectl
     scale_argocd_controller 0
+    kubectl -n "$WORKLOAD_NAMESPACE" delete cronjob --all --ignore-not-found=true
+    kubectl -n "$WORKLOAD_NAMESPACE" delete job --all --ignore-not-found=true
     kubectl -n "$WORKLOAD_NAMESPACE" delete hpa --all --ignore-not-found=true
     kubectl -n "$WORKLOAD_NAMESPACE" delete pdb --all --ignore-not-found=true
     scale_namespace_workloads "$WORKLOAD_NAMESPACE" 0
