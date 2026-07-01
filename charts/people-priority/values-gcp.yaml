@@ -6,6 +6,12 @@ components:
   ingress: false
   managedCertificate: false
 
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 2
+  targetCPUUtilizationPercentage: 70
+
 serviceAccount:
   annotations:
     iam.gke.io/gcp-service-account: loksetu-app@project-72558650-faf6-4529-a05.iam.gserviceaccount.com
