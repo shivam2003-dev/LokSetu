@@ -44,12 +44,28 @@ scale_argocd() {
   scale_argocd_controller "$replicas"
 }
 
+set_sql_activation_policy() {
+  local policy="$1"
+  local current_policy
+
+  current_policy="$(gcloud sql instances describe "$SQL_INSTANCE" \
+    --project="$PROJECT_ID" \
+    --format="value(settings.activationPolicy)")"
+
+  if [[ "$current_policy" == "$policy" ]]; then
+    echo "Cloud SQL $SQL_INSTANCE already has activationPolicy=$policy"
+    return
+  fi
+
+  gcloud sql instances patch "$SQL_INSTANCE" \
+    --project="$PROJECT_ID" \
+    --activation-policy="$policy" \
+    --quiet
+}
+
 case "$ACTION" in
   start)
-    gcloud sql instances patch "$SQL_INSTANCE" \
-      --project="$PROJECT_ID" \
-      --activation-policy=ALWAYS \
-      --quiet
+    set_sql_activation_policy ALWAYS
     gcloud container node-pools update "$NODE_POOL" \
       --cluster="$CLUSTER_NAME" \
       --region="$REGION" \
@@ -96,10 +112,7 @@ case "$ACTION" in
       --region="$REGION" \
       --project="$PROJECT_ID" \
       --quiet
-    gcloud sql instances patch "$SQL_INSTANCE" \
-      --project="$PROJECT_ID" \
-      --activation-policy=NEVER \
-      --quiet
+    set_sql_activation_policy NEVER
     ;;
   status)
     gcloud container node-pools describe "$NODE_POOL" \
