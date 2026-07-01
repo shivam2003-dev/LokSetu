@@ -14,22 +14,31 @@ Production-oriented Digital Public Infrastructure for ranking constituency devel
 
 ## Local Run
 
+One-command full local stack:
+
 ```bash
 npm install
-npm run dev
-```
-
-Frontend: `http://localhost:5173`
-
-API: `http://localhost:8080`
-
-Postgres-backed local run:
-
-```bash
 npm run local
 ```
 
-This starts Postgres in Docker and runs the API with `DATABASE_URL=postgres://loksetu:loksetu@localhost:5432/loksetu`.
+This starts Docker Postgres with pgvector, seeds the local RAG corpus, and runs every development service:
+
+- LokSetu web dashboard: `http://localhost:5173`
+- Apni Awaaz citizen app: `http://localhost:5174`
+- API: `http://localhost:18080`
+- RAG API: `http://localhost:8090`
+- Postgres: `postgres://loksetu:loksetu@localhost:5432/loksetu`
+- Local login password: `local-dev`
+
+Prerequisites are Node.js 20+ or 24+, npm, and Docker.
+
+Lite memory-mode run without local Postgres/RAG:
+
+```bash
+npm run dev
+```
+
+This runs the API, LokSetu web app, and Apni Awaaz app with deterministic memory data. It is faster, but Copilot/RAG and Postgres persistence are not fully exercised.
 
 Local Kubernetes + Argo CD:
 

@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "tsx src/rag.test.ts",
     "start": "node dist/server.js",
+    "ingestion-worker:dev": "tsx src/ingestionWorker.ts",
+    "embedding-worker:dev": "tsx src/embeddingWorker.ts",
     "ingestion-worker": "node dist/ingestionWorker.js",
     "embedding-worker": "node dist/embeddingWorker.js"
   },
