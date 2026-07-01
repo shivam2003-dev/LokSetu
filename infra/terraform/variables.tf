@@ -30,7 +30,7 @@ variable "db_availability_type" {
 variable "db_disk_size_gb" {
   description = "Cloud SQL data disk size in GB"
   type        = number
-  default     = 10
+  default     = 50
 }
 
 variable "db_backup_enabled" {
