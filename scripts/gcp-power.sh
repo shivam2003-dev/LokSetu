@@ -10,6 +10,7 @@ START_NODES="${START_NODES:-1}"
 MAX_NODES="${MAX_NODES:-2}"
 SQL_INSTANCE="${SQL_INSTANCE:-loksetu-postgres}"
 WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE:-people-priority}"
+ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 
 configure_kubectl() {
   if ! command -v kubectl >/dev/null 2>&1; then
@@ -23,9 +24,24 @@ configure_kubectl() {
     --quiet
 }
 
+scale_namespace_workloads() {
+  local namespace="$1"
+  local replicas="$2"
+
+  kubectl -n "$namespace" scale deployment --all --replicas="$replicas" --timeout=180s || true
+  kubectl -n "$namespace" scale statefulset --all --replicas="$replicas" --timeout=180s || true
+}
+
 scale_argocd_controller() {
   local replicas="$1"
-  kubectl -n argocd scale statefulset/argocd-application-controller --replicas="$replicas" --timeout=120s || true
+  kubectl -n "$ARGOCD_NAMESPACE" scale statefulset/argocd-application-controller --replicas="$replicas" --timeout=120s || true
+}
+
+scale_argocd() {
+  local replicas="$1"
+
+  scale_namespace_workloads "$ARGOCD_NAMESPACE" "$replicas"
+  scale_argocd_controller "$replicas"
 }
 
 case "$ACTION" in
@@ -49,14 +65,21 @@ case "$ACTION" in
       --project="$PROJECT_ID" \
       --quiet
     configure_kubectl
-    scale_argocd_controller 1
-    kubectl -n argocd annotate application loksetu-gcp argocd.argoproj.io/refresh=hard --overwrite || true
-    kubectl -n argocd patch application loksetu-gcp --type merge -p '{}' || true
+    scale_argocd 1
+    kubectl -n "$ARGOCD_NAMESPACE" rollout status deployment --all --timeout=300s || true
+    kubectl -n "$ARGOCD_NAMESPACE" rollout status statefulset/argocd-application-controller --timeout=300s || true
+    kubectl -n "$ARGOCD_NAMESPACE" annotate application loksetu-gcp argocd.argoproj.io/refresh=hard --overwrite || true
+    kubectl -n "$ARGOCD_NAMESPACE" patch application loksetu-gcp --type merge -p '{}' || true
     ;;
   stop)
     configure_kubectl
     scale_argocd_controller 0
+    kubectl -n "$WORKLOAD_NAMESPACE" delete hpa --all --ignore-not-found=true
     kubectl -n "$WORKLOAD_NAMESPACE" delete pdb --all --ignore-not-found=true
+    scale_namespace_workloads "$WORKLOAD_NAMESPACE" 0
+    kubectl -n "$WORKLOAD_NAMESPACE" wait --for=delete pod --all --timeout=240s || true
+    scale_argocd 0
+    kubectl -n "$ARGOCD_NAMESPACE" wait --for=delete pod --all --timeout=240s || true
     gcloud container node-pools update "$NODE_POOL" \
       --cluster="$CLUSTER_NAME" \
       --region="$REGION" \
