@@ -18,13 +18,31 @@ variable "cluster_name" {
 variable "db_tier" {
   description = "Cloud SQL machine tier"
   type        = string
-  default     = "db-custom-2-7680"
+  default     = "db-g1-small"
 }
 
 variable "db_availability_type" {
   description = "Cloud SQL availability type"
   type        = string
-  default     = "REGIONAL"
+  default     = "ZONAL"
+}
+
+variable "db_disk_size_gb" {
+  description = "Cloud SQL data disk size in GB"
+  type        = number
+  default     = 10
+}
+
+variable "db_backup_enabled" {
+  description = "Enable Cloud SQL automated backups"
+  type        = bool
+  default     = false
+}
+
+variable "db_point_in_time_recovery_enabled" {
+  description = "Enable Cloud SQL point-in-time recovery"
+  type        = bool
+  default     = false
 }
 
 variable "db_password" {

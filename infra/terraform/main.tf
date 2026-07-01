@@ -388,11 +388,6 @@ resource "google_certificate_manager_certificate_map" "manual_lb_app" {
   name  = "${var.cluster_name}-app-cert-map"
 }
 
-resource "google_certificate_manager_certificate_map" "manual_lb_argocd" {
-  count = var.manual_lb_enabled ? 1 : 0
-  name  = "${var.cluster_name}-argocd-cert-map"
-}
-
 resource "google_certificate_manager_certificate_map_entry" "manual_lb_loksetu" {
   count        = var.manual_lb_enabled ? 1 : 0
   name         = "${var.cluster_name}-loksetu-entry"
@@ -412,7 +407,7 @@ resource "google_certificate_manager_certificate_map_entry" "manual_lb_awaaz" {
 resource "google_certificate_manager_certificate_map_entry" "manual_lb_argocd" {
   count        = var.manual_lb_enabled ? 1 : 0
   name         = "${var.cluster_name}-argocd-entry"
-  map          = google_certificate_manager_certificate_map.manual_lb_argocd[0].name
+  map          = google_certificate_manager_certificate_map.manual_lb_app[0].name
   hostname     = "argocd.shivam2003.com"
   certificates = [google_certificate_manager_certificate.manual_lb_argocd[0].id]
 }
@@ -438,6 +433,11 @@ resource "google_compute_url_map" "manual_lb_app" {
   host_rule {
     hosts        = ["awaaz.shivam2003.com"]
     path_matcher = "awaaz"
+  }
+
+  host_rule {
+    hosts        = ["argocd.shivam2003.com"]
+    path_matcher = "argocd"
   }
 
   dynamic "host_rule" {
@@ -468,6 +468,11 @@ resource "google_compute_url_map" "manual_lb_app" {
     default_service = google_compute_backend_service.manual_lb_citizen[0].id
   }
 
+  path_matcher {
+    name            = "argocd"
+    default_service = google_compute_backend_service.manual_lb_argocd[0].id
+  }
+
   dynamic "path_matcher" {
     for_each = var.manual_lb_grafana_neg_name != "" ? [1] : []
     content {
@@ -475,12 +480,6 @@ resource "google_compute_url_map" "manual_lb_app" {
       default_service = google_compute_backend_service.manual_lb_grafana[0].id
     }
   }
-}
-
-resource "google_compute_url_map" "manual_lb_argocd" {
-  count           = var.manual_lb_enabled ? 1 : 0
-  name            = "${var.cluster_name}-manual-argocd-url-map"
-  default_service = google_compute_backend_service.manual_lb_argocd[0].id
 }
 
 resource "google_compute_target_http_proxy" "manual_lb_app" {
@@ -494,23 +493,6 @@ resource "google_compute_target_https_proxy" "manual_lb_app" {
   name            = "${var.cluster_name}-manual-app-cm-https-proxy"
   url_map         = google_compute_url_map.manual_lb_app[0].id
   certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.manual_lb_app[0].id}"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "google_compute_target_http_proxy" "manual_lb_argocd" {
-  count   = var.manual_lb_enabled ? 1 : 0
-  name    = "${var.cluster_name}-manual-argocd-http-proxy"
-  url_map = google_compute_url_map.manual_lb_argocd[0].id
-}
-
-resource "google_compute_target_https_proxy" "manual_lb_argocd" {
-  count           = var.manual_lb_enabled ? 1 : 0
-  name            = "${var.cluster_name}-manual-argocd-cm-https-proxy"
-  url_map         = google_compute_url_map.manual_lb_argocd[0].id
-  certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.manual_lb_argocd[0].id}"
 
   lifecycle {
     create_before_destroy = true
@@ -535,24 +517,6 @@ resource "google_compute_global_forwarding_rule" "manual_lb_app_https" {
   target                = google_compute_target_https_proxy.manual_lb_app[0].id
 }
 
-resource "google_compute_global_forwarding_rule" "manual_lb_argocd_http" {
-  count                 = var.manual_lb_enabled ? 1 : 0
-  name                  = "${var.cluster_name}-manual-argocd-http"
-  ip_address            = google_compute_global_address.argocd_ingress_ip.address
-  port_range            = "80"
-  load_balancing_scheme = "EXTERNAL_MANAGED"
-  target                = google_compute_target_http_proxy.manual_lb_argocd[0].id
-}
-
-resource "google_compute_global_forwarding_rule" "manual_lb_argocd_https" {
-  count                 = var.manual_lb_enabled ? 1 : 0
-  name                  = "${var.cluster_name}-manual-argocd-https"
-  ip_address            = google_compute_global_address.argocd_ingress_ip.address
-  port_range            = "443"
-  load_balancing_scheme = "EXTERNAL_MANAGED"
-  target                = google_compute_target_https_proxy.manual_lb_argocd[0].id
-}
-
 resource "google_compute_global_address" "private_service_range" {
   name          = "${var.cluster_name}-private-service-range"
   purpose       = "VPC_PEERING"
@@ -569,11 +533,6 @@ resource "google_service_networking_connection" "private_vpc_connection" {
 
 resource "google_compute_global_address" "ingress_ip" {
   name       = "${var.cluster_name}-ingress-ip"
-  depends_on = [google_project_service.required["compute.googleapis.com"]]
-}
-
-resource "google_compute_global_address" "argocd_ingress_ip" {
-  name       = "${var.cluster_name}-argocd-ingress-ip"
   depends_on = [google_project_service.required["compute.googleapis.com"]]
 }
 
@@ -664,11 +623,11 @@ resource "google_sql_database_instance" "postgres" {
     edition           = "ENTERPRISE"
     availability_type = var.db_availability_type
     disk_autoresize   = true
-    disk_size         = 50
+    disk_size         = var.db_disk_size_gb
 
     backup_configuration {
-      enabled                        = true
-      point_in_time_recovery_enabled = true
+      enabled                        = var.db_backup_enabled
+      point_in_time_recovery_enabled = var.db_point_in_time_recovery_enabled
       start_time                     = "20:00"
     }
 
@@ -790,6 +749,18 @@ resource "google_container_cluster" "main" {
 
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  logging_config {
+    enable_components = ["SYSTEM_COMPONENTS"]
+  }
+
+  monitoring_config {
+    enable_components = ["SYSTEM_COMPONENTS"]
+
+    managed_prometheus {
+      enabled = false
+    }
   }
 
   private_cluster_config {
