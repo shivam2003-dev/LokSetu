@@ -11,6 +11,7 @@ MAX_NODES="${MAX_NODES:-2}"
 SQL_INSTANCE="${SQL_INSTANCE:-loksetu-postgres}"
 WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE:-people-priority}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
+ARGOCD_APPLICATION="${ARGOCD_APPLICATION:-loksetu-gcp}"
 
 configure_kubectl() {
   if ! command -v kubectl >/dev/null 2>&1; then
@@ -63,6 +64,28 @@ set_sql_activation_policy() {
     --quiet
 }
 
+refresh_argocd_application() {
+  for attempt in 1 2 3; do
+    kubectl -n "$ARGOCD_NAMESPACE" annotate application "$ARGOCD_APPLICATION" \
+      argocd.argoproj.io/refresh=hard \
+      --overwrite || true
+    kubectl -n "$ARGOCD_NAMESPACE" patch application "$ARGOCD_APPLICATION" --type merge -p '{}' || true
+    sleep 20
+
+    if [[ "$(kubectl -n "$ARGOCD_NAMESPACE" get application "$ARGOCD_APPLICATION" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)" != "Unknown" ]]; then
+      break
+    fi
+
+    echo "Argo CD application status is still Unknown after refresh attempt $attempt"
+  done
+
+  kubectl -n "$ARGOCD_NAMESPACE" wait \
+    --for=jsonpath='{.status.sync.status}'=Synced \
+    "application/$ARGOCD_APPLICATION" \
+    --timeout=300s || true
+  kubectl -n "$WORKLOAD_NAMESPACE" rollout status deployment --all --timeout=300s || true
+}
+
 case "$ACTION" in
   start)
     set_sql_activation_policy ALWAYS
@@ -84,8 +107,7 @@ case "$ACTION" in
     scale_argocd 1
     kubectl -n "$ARGOCD_NAMESPACE" rollout status deployment --all --timeout=300s || true
     kubectl -n "$ARGOCD_NAMESPACE" rollout status statefulset/argocd-application-controller --timeout=300s || true
-    kubectl -n "$ARGOCD_NAMESPACE" annotate application loksetu-gcp argocd.argoproj.io/refresh=hard --overwrite || true
-    kubectl -n "$ARGOCD_NAMESPACE" patch application loksetu-gcp --type merge -p '{}' || true
+    refresh_argocd_application
     ;;
   stop)
     configure_kubectl
@@ -104,7 +126,7 @@ case "$ACTION" in
       --project="$PROJECT_ID" \
       --enable-autoscaling \
       --min-nodes=0 \
-      --max-nodes="$MAX_NODES" \
+      --max-nodes=0 \
       --quiet
     gcloud container clusters resize "$CLUSTER_NAME" \
       --node-pool="$NODE_POOL" \
