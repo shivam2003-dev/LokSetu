@@ -18,6 +18,7 @@
     "typecheck": "npm run typecheck -w services/api && npm run typecheck -w services/rag-api && npm run typecheck -w apps/web && npm run typecheck -w apps/citizen",
     "test": "npm run typecheck && npm run test:unit -w services/api && npm run test:unit -w services/rag-api && npm run build && npm run test:functional",
     "test:functional": "playwright test",
+    "test:functional:local": "TEST_APP_ACCESS_PASSWORD=local-dev playwright test --project=web --project=citizen",
     "batch": "npm run batch -w services/api"
   },
   "devDependencies": {

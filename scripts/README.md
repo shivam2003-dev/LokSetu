@@ -27,6 +27,19 @@ Default local login password: `local-dev`.
 
 The script uses `pgvector/pgvector:pg16`, runs the RAG migrations, ingests the bundled LokSetu/Bihar fixture documents, creates hash embeddings, and then starts all long-running services with `concurrently`.
 
+With `npm run local` still running, verify the local browser flows in another terminal:
+
+```bash
+npm run test:functional:local
+```
+
+If an older local Postgres volume was created from plain `postgres:16-alpine`, reset it once so pgvector is available:
+
+```bash
+docker compose -f docker-compose.local.yml down -v
+npm run local
+```
+
 ## Environment
 - `LOCAL_IMAGE_TAG`: override local image tag.
 - `VITE_GOOGLE_MAPS_API_KEY`: build-time browser Maps key.

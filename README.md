@@ -32,6 +32,19 @@ This starts Docker Postgres with pgvector, seeds the local RAG corpus, and runs 
 
 Prerequisites are Node.js 20+ or 24+, npm, and Docker.
 
+In another terminal, run the local browser smoke tests:
+
+```bash
+npm run test:functional:local
+```
+
+If Docker has an old non-pgvector `loksetu-postgres` volume from before this setup, reset local data once:
+
+```bash
+docker compose -f docker-compose.local.yml down -v
+npm run local
+```
+
 Lite memory-mode run without local Postgres/RAG:
 
 ```bash

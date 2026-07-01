@@ -23,8 +23,12 @@ async function loginIfNeeded(page: import("@playwright/test").Page) {
   await page.goto("/");
   const password = page.getByLabel("Password");
   if (await password.isVisible()) {
-    await password.fill("functional-test");
+    await password.fill(testAccessPassword());
     await page.getByRole("button", { name: "Login" }).click();
     await expect(page.getByText("Apni Awaaz")).toBeVisible();
   }
+}
+
+function testAccessPassword() {
+  return process.env.TEST_APP_ACCESS_PASSWORD ?? process.env.APP_ACCESS_PASSWORD ?? "functional-test";
 }
