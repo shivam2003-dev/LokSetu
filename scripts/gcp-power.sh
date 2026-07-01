@@ -23,6 +23,11 @@ configure_kubectl() {
     --quiet
 }
 
+scale_argocd_controller() {
+  local replicas="$1"
+  kubectl -n argocd scale statefulset/argocd-application-controller --replicas="$replicas" --timeout=120s || true
+}
+
 case "$ACTION" in
   start)
     gcloud sql instances patch "$SQL_INSTANCE" \
@@ -44,11 +49,13 @@ case "$ACTION" in
       --project="$PROJECT_ID" \
       --quiet
     configure_kubectl
+    scale_argocd_controller 1
     kubectl -n argocd annotate application loksetu-gcp argocd.argoproj.io/refresh=hard --overwrite || true
     kubectl -n argocd patch application loksetu-gcp --type merge -p '{}' || true
     ;;
   stop)
     configure_kubectl
+    scale_argocd_controller 0
     kubectl -n "$WORKLOAD_NAMESPACE" delete pdb --all --ignore-not-found=true
     gcloud container node-pools update "$NODE_POOL" \
       --cluster="$CLUSTER_NAME" \

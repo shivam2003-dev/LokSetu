@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.describe("MP/admin web functional flow", () => {
   test("navigation, filtering, submission, and public transparency render", async ({ page }) => {
+    await loginIfNeeded(page);
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "LokSetu", exact: true })).toBeVisible();
     await expect(page.getByText(/Live · (memory|postgres) · Vertex-ready/)).toBeVisible();
@@ -117,6 +118,7 @@ test.describe("MP/admin web functional flow", () => {
         })
       });
     });
+    await loginIfNeeded(page);
     await page.goto("/#explore");
     await expect(page.locator(".map-state")).toContainText("Local map fallback");
     await expect(page.locator(".fallback-map .hotspot").first()).toBeVisible();
@@ -135,6 +137,7 @@ test.describe("MP/admin web functional flow", () => {
         })
       });
     });
+    await loginIfNeeded(page);
     await page.goto("/#explore");
     await expect(page.locator(".map-state")).toContainText("Google Maps live");
     const markerStats = await page.evaluate(() => (window as any).__loksetuMapMock);
@@ -156,6 +159,7 @@ test.describe("MP/admin web functional flow", () => {
         })
       });
     });
+    await loginIfNeeded(page);
     await page.goto("/#explore");
     await expect(page.locator(".map-state")).toContainText("Google Maps live");
     await expect(page.locator(".google-hotspot-marker").first()).toBeVisible();
@@ -215,4 +219,14 @@ async function installGoogleMapsMock(page: import("@playwright/test").Page) {
       return originalAppendChild.call(this, node) as T;
     };
   });
+}
+
+async function loginIfNeeded(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  const password = page.getByLabel("Password");
+  if (await password.isVisible()) {
+    await password.fill("functional-test");
+    await page.getByRole("button", { name: "Login" }).click();
+    await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
+  }
 }
