@@ -16,7 +16,10 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("Demo data controls").getByRole("button", { name: "Load local demo data" }).click();
     await expect(page.getByLabel("Demo data controls")).toContainText("Demo data on");
 
-    // Priority Desk is the default core workflow page.
+    // Overview is the post-login homepage; the priority desk remains the core workflow page.
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.getByText("Constituency Health")).toBeVisible();
+    await page.getByRole("button", { name: "People's Priorities" }).click();
     await expect(page.getByRole("heading", { name: "Ranked development priorities" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Ranked priority queue" })).toBeVisible();
     await expect(page.getByText("Submissions analyzed")).toBeVisible();

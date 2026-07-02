@@ -36,7 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DemandSignalsPage } from "./DemandSignals";
 
-type Page = "priorities" | "pulse" | "map" | "signals" | "copilot" | "knowledge" | "compare" | "settings";
+type Page = "overview" | "priorities" | "pulse" | "map" | "signals" | "copilot" | "knowledge" | "recommendations" | "projects" | "compare" | "settings";
 
 type Scope = "local" | "mp" | "global";
 
@@ -214,12 +214,12 @@ const citizenAppUrl =
     : `https://citizen.${window.location.host}`);
 
 const navItems: Array<{ id: string; page: Page; label: string; hint?: string; icon: typeof Home; badge?: string }> = [
-  { id: "overview", page: "priorities", label: "Overview", icon: Home },
+  { id: "overview", page: "overview", label: "Overview", icon: Home },
   { id: "priorities", page: "priorities", label: "People's Priorities", icon: Droplets },
   { id: "signals", page: "signals", label: "Demand Signals", icon: DatabaseZap },
   { id: "copilot", page: "copilot", label: "AI Assistant (RAG)", icon: MessageSquareText, badge: "New" },
-  { id: "recommendations", page: "priorities", label: "Recommendations", icon: Scale },
-  { id: "projects", page: "priorities", label: "Projects", icon: Briefcase },
+  { id: "recommendations", page: "recommendations", label: "Recommendations", icon: Scale },
+  { id: "projects", page: "projects", label: "Projects", icon: Briefcase },
   { id: "reports", page: "pulse", label: "Reports", icon: FileText },
   { id: "explorer", page: "signals", label: "Data Explorer", icon: Database },
   { id: "knowledge", page: "knowledge", label: "Knowledge Base", icon: Search },
@@ -229,12 +229,15 @@ const navItems: Array<{ id: string; page: Page; label: string; hint?: string; ic
 ];
 
 const activeNavIdByPage: Record<Page, string> = {
+  overview: "overview",
   priorities: "priorities",
   pulse: "compare",
   map: "map",
   signals: "signals",
   copilot: "copilot",
   knowledge: "knowledge",
+  recommendations: "recommendations",
+  projects: "projects",
   compare: "compare",
   settings: "settings"
 };
@@ -318,8 +321,9 @@ const fallbackMapClusters: MapClusterResponse = {
 };
 
 function pageFromHash(): Page {
-  const raw = window.location.hash.replace("#", "") || "priorities";
-  if (["home", "mp", "projects", "public", "analytics", "enterprise", "moderation", "admin", "integrations", "ai"].includes(raw)) return "priorities";
+  const raw = window.location.hash.replace("#", "") || "overview";
+  if (["home", "mp"].includes(raw)) return "overview";
+  if (["public", "analytics", "enterprise", "moderation", "admin", "integrations", "ai"].includes(raw)) return "priorities";
   if (["explore", "india"].includes(raw)) return "map";
   if (["simulation", "submit", "intake"].includes(raw)) return "priorities";
   return navItems.some((item) => item.page === raw) ? (raw as Page) : "priorities";
@@ -395,7 +399,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
   const effectiveCitizenAppUrl = clientConfig.citizenAppUrl?.trim() || citizenAppUrl;
-  const showControlStrip = page === "priorities" || page === "map";
+  const showControlStrip = page === "priorities" || page === "map" || page === "recommendations" || page === "projects";
 
   useEffect(() => {
     refreshAll();
@@ -614,12 +618,15 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
+        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} /> : null}
         {page === "priorities" ? <PriorityDeskPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} setPage={setPage} /> : null}
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
         {page === "signals" ? <DemandSignalsPage /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
+        {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} /> : null}
+        {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} /> : null}
         {page === "compare" ? <ComparePage /> : null}
         {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
@@ -772,6 +779,130 @@ function formatCount(value: number) {
 function average(values: number[]) {
   const clean = values.filter((value) => Number.isFinite(value));
   return clean.length ? clean.reduce((sum, value) => sum + value, 0) / clean.length : 0;
+}
+
+function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; setPage: (page: Page) => void }) {
+  const projects = buildManagedProjects(dashboard.projects);
+  const topPriorities = projects.slice(0, 5);
+  const totalDemand = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
+  const avgConfidence = Math.round(average(dashboard.projects.map((project) => project.confidence)) * 100) || 86;
+  const healthScore = Math.round(average([
+    avgConfidence,
+    100 - Math.min(42, dashboard.totals.botRisk === "high" ? 38 : dashboard.totals.botRisk === "medium" ? 18 : 6),
+    average(projects.map((project) => project.progress)),
+    Math.min(100, dashboard.totals.wards * 4 + 48)
+  ]));
+  const completed = projects.filter((project) => project.deliveryStatus === "completed").length;
+  const delayed = projects.filter((project) => project.deliveryStatus === "delayed").length;
+  const alertItems = [
+    { title: "Road complaints rising", detail: "Clustered citizen demand needs 48-hour review", tone: "high" },
+    { title: "PHC staffing risk", detail: "Health requests exceed district baseline by 22%", tone: "medium" },
+    { title: "Budget release pending", detail: `${delayed} delayed works require officer follow-up`, tone: "medium" }
+  ];
+  const insightCards = [
+    "AI recommends funding high-demand road and drainage works before monsoon acceleration.",
+    "Education and PHC projects show the strongest citizen satisfaction upside per crore.",
+    "Water and sanitation requests overlap in dense wards; bundle execution to reduce disruption."
+  ];
+
+  return (
+    <section className="overview-page">
+      <section className="overview-hero panel">
+        <div>
+          <p className="eyebrow">JanVaani AI Executive Overview</p>
+          <h3>Constituency intelligence command center</h3>
+          <p>A 360 degree view of citizen priorities, AI-ranked risks, development progress, and live alerts for Members of Parliament.</p>
+          <div className="overview-actions">
+            <button onClick={() => setPage("recommendations")} type="button">Open AI recommendations</button>
+            <button onClick={() => setPage("projects")} type="button">Review projects</button>
+            <button onClick={() => setPage("map")} type="button">View GIS map</button>
+          </div>
+        </div>
+        <div className="overview-score-orb">
+          <span>Constituency Health</span>
+          <strong>{healthScore}</strong>
+          <small>{avgConfidence}% AI confidence · {formatCount(totalDemand)} citizen signals</small>
+        </div>
+      </section>
+
+      <section className="overview-kpi-grid">
+        <article className="panel"><span>Citizen Priorities</span><strong>{dashboard.projects.length}</strong><small>{formatCount(totalDemand)} processed demand signals</small></article>
+        <article className="panel"><span>Development Progress</span><strong>{completed}/{projects.length}</strong><small>{delayed} delayed works need attention</small></article>
+        <article className="panel"><span>Active Wards</span><strong>{dashboard.totals.wards}</strong><small>{dashboard.totals.languages} languages normalized</small></article>
+        <article className="panel"><span>AI Risk</span><strong>{dashboard.totals.botRisk}</strong><small>bot and duplicate demand monitor</small></article>
+      </section>
+
+      <section className="overview-main-grid">
+        <section className="panel overview-priority-panel">
+          <PanelTitle title="Top Citizen Priorities" icon={Scale} detail="AI-ranked demand" />
+          {topPriorities.map((project, index) => (
+            <article key={project.id}>
+              <span>#{index + 1}</span>
+              <div>
+                <strong>{project.title}</strong>
+                <small>{project.category} · {project.ward} · {formatCount(project.demandCount)} signals</small>
+              </div>
+              <b>{project.score}</b>
+            </article>
+          ))}
+        </section>
+
+        <section className="panel overview-ai-panel">
+          <PanelTitle title="AI Insights" icon={Bot} detail="real-time constituency signals" />
+          {insightCards.map((item) => <p key={item}>{item}</p>)}
+          <button onClick={() => setPage("copilot")} type="button">Ask JanVaani AI</button>
+        </section>
+
+        <section className="panel overview-alert-panel">
+          <PanelTitle title="Real-Time Alerts" icon={Zap} detail="requires action" />
+          {alertItems.map((item) => (
+            <article className={item.tone} key={item.title}>
+              <strong>{item.title}</strong>
+              <span>{item.detail}</span>
+            </article>
+          ))}
+        </section>
+
+        <section className="panel overview-map-panel">
+          <PanelTitle title="Demand Hotspots" icon={MapPinned} detail="affected regions" />
+          <div className="overview-mini-map">
+            {topPriorities.slice(0, 8).map((project, index) => (
+              <i key={project.id} style={{ left: `${14 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 32}%` }}>{project.score}</i>
+            ))}
+            <span>Constituency boundary</span>
+          </div>
+        </section>
+      </section>
+
+      <section className="overview-bottom-grid">
+        <section className="panel overview-progress-panel">
+          <PanelTitle title="Development Progress" icon={Briefcase} detail="portfolio execution" />
+          {projects.slice(0, 5).map((project) => (
+            <article key={project.id}>
+              <div><strong>{project.ward}</strong><span>{project.deliveryStatus}</span></div>
+              <meter min="0" max="100" value={project.progress} />
+            </article>
+          ))}
+        </section>
+
+        <section className="panel overview-budget-panel">
+          <PanelTitle title="Budget and Impact" icon={Database} detail="expected beneficiaries" />
+          <div className="overview-budget-chart">
+            {projects.slice(0, 6).map((project) => (
+              <span key={project.id} style={{ height: `${Math.max(26, project.budgetCr * 11)}px` }}><b>₹{project.budgetCr.toFixed(1)}Cr</b></span>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel overview-compare-panel">
+          <PanelTitle title="District Snapshot" icon={TrendingUp} detail="health vs demand" />
+          {["Infrastructure", "Healthcare", "Education", "Water", "Employment"].map((item, index) => (
+            <article key={item}><span>{item}</span><i style={{ width: `${88 - index * 9}%` }} /><strong>{88 - index * 9}</strong></article>
+          ))}
+        </section>
+      </section>
+    </section>
+  );
 }
 
 function ExplorePage({
@@ -1867,6 +1998,406 @@ function KnowledgeBasePage() {
             ))}
           </svg>
         </section>
+      </section>
+    </section>
+  );
+}
+
+type ManagedProjectStatus = "ongoing" | "completed" | "delayed" | "proposed";
+type ManagedProject = RankedProject & {
+  department: string;
+  budgetCr: number;
+  spentCr: number;
+  progress: number;
+  contractor: string;
+  startDate: string;
+  completionDate: string;
+  citizenImpact: number;
+  aiRisk: number;
+  deliveryStatus: ManagedProjectStatus;
+};
+
+function ProjectsManagementPage({ dashboard }: { dashboard: DashboardResponse }) {
+  const managedProjects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
+  const [selectedProjectId, setSelectedProjectId] = useState(managedProjects[0]?.id ?? fallbackProject.id);
+  const selectedProject = managedProjects.find((project) => project.id === selectedProjectId) ?? managedProjects[0];
+  const statusCounts = {
+    ongoing: managedProjects.filter((project) => project.deliveryStatus === "ongoing").length,
+    completed: managedProjects.filter((project) => project.deliveryStatus === "completed").length,
+    delayed: managedProjects.filter((project) => project.deliveryStatus === "delayed").length,
+    proposed: managedProjects.filter((project) => project.deliveryStatus === "proposed").length
+  };
+  const totalBudget = managedProjects.reduce((sum, project) => sum + project.budgetCr, 0);
+  const totalSpent = managedProjects.reduce((sum, project) => sum + project.spentCr, 0);
+  const kanbanColumns: Array<{ status: ManagedProjectStatus; title: string }> = [
+    { status: "proposed", title: "Proposed" },
+    { status: "ongoing", title: "Ongoing" },
+    { status: "delayed", title: "Delayed" },
+    { status: "completed", title: "Completed" }
+  ];
+
+  return (
+    <section className="projects-page">
+      <section className="panel pm-hero">
+        <div>
+          <p className="eyebrow">MP Project Command Center</p>
+          <h3>Development projects management</h3>
+          <p>Track constituency works from proposal to completion with risk, expenditure, milestones, evidence, and citizen impact in one place.</p>
+        </div>
+        <div className="pm-kpis">
+          <article><span>Ongoing</span><strong>{statusCounts.ongoing}</strong></article>
+          <article><span>Completed</span><strong>{statusCounts.completed}</strong></article>
+          <article><span>Delayed</span><strong>{statusCounts.delayed}</strong></article>
+          <article><span>Proposed</span><strong>{statusCounts.proposed}</strong></article>
+        </div>
+      </section>
+
+      <section className="panel pm-toolbar">
+        <label className="pm-search"><Search size={17} /><input placeholder="Search projects, departments, contractors, wards..." /></label>
+        <select aria-label="Project status filter" defaultValue="All statuses">
+          <option>All statuses</option>
+          <option>Ongoing</option>
+          <option>Completed</option>
+          <option>Delayed</option>
+          <option>Proposed</option>
+        </select>
+        <select aria-label="Project department filter" defaultValue="All departments">
+          <option>All departments</option>
+          <option>Public Works</option>
+          <option>Health</option>
+          <option>Education</option>
+          <option>Water Board</option>
+        </select>
+      </section>
+
+      <section className="pm-card-grid">
+        {managedProjects.slice(0, 8).map((project) => (
+          <button className={`panel pm-project-card ${project.id === selectedProject?.id ? "active" : ""}`} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
+            <div className="pm-card-head">
+              <span className={`pm-status ${project.deliveryStatus}`}>{project.deliveryStatus}</span>
+              <b>Risk {project.aiRisk}/100</b>
+            </div>
+            <strong>{project.title}</strong>
+            <small>{project.department} · {project.ward}</small>
+            <div className="pm-progress-row"><span>{project.progress}% complete</span><meter min="0" max="100" value={project.progress} /></div>
+            <dl>
+              <div><dt>Budget</dt><dd>₹{project.budgetCr.toFixed(1)} Cr</dd></div>
+              <div><dt>Contractor</dt><dd>{project.contractor}</dd></div>
+              <div><dt>Start</dt><dd>{project.startDate}</dd></div>
+              <div><dt>Due</dt><dd>{project.completionDate}</dd></div>
+              <div><dt>Impact</dt><dd>{formatCount(project.citizenImpact)} citizens</dd></div>
+            </dl>
+          </button>
+        ))}
+      </section>
+
+      <section className="pm-workgrid">
+        <section className="panel pm-kanban">
+          <PanelTitle title="Kanban Board" icon={Briefcase} detail="Linear/Jira delivery flow" />
+          <div className="pm-kanban-grid">
+            {kanbanColumns.map((column) => (
+              <article key={column.status}>
+                <h4>{column.title}</h4>
+                {managedProjects.filter((project) => project.deliveryStatus === column.status).slice(0, 4).map((project) => (
+                  <button className={project.id === selectedProject?.id ? "active" : ""} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
+                    <strong>{project.title}</strong>
+                    <span>{project.department} · {project.progress}%</span>
+                  </button>
+                ))}
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel pm-gantt">
+          <PanelTitle title="Timeline" icon={TrendingUp} detail="Gantt view" />
+          <div className="pm-gantt-chart">
+            {managedProjects.slice(0, 6).map((project, index) => (
+              <article key={project.id}>
+                <span>{project.ward}</span>
+                <i style={{ marginLeft: `${(index % 4) * 8}%`, width: `${Math.max(18, project.progress * 0.62)}%` }}><b>{project.progress}%</b></i>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel pm-map-card">
+          <PanelTitle title="District Project Map" icon={MapPinned} detail="interactive portfolio geography" />
+          <div className="pm-district-map">
+            {managedProjects.slice(0, 10).map((project, index) => (
+              <button className={`pm-map-pin ${project.deliveryStatus}`} key={project.id} onClick={() => setSelectedProjectId(project.id)} style={{ left: `${14 + (index % 5) * 18}%`, top: `${18 + Math.floor(index / 5) * 38}%` }} type="button">
+                {index + 1}
+              </button>
+            ))}
+            <span>District boundary</span>
+          </div>
+        </section>
+
+        <section className="panel pm-spend">
+          <PanelTitle title="Expenditure Tracking" icon={Database} detail={`₹${totalSpent.toFixed(1)} Cr / ₹${totalBudget.toFixed(1)} Cr`} />
+          <div className="pm-spend-bars">
+            {managedProjects.slice(0, 5).map((project) => (
+              <article key={project.id}>
+                <div><strong>{project.ward}</strong><span>₹{project.spentCr.toFixed(1)} Cr spent</span></div>
+                <meter min="0" max={project.budgetCr} value={project.spentCr} />
+              </article>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      {selectedProject ? (
+        <section className="pm-detail-grid">
+          <section className="panel pm-milestones">
+            <PanelTitle title="Milestone Tracker" icon={CheckCircle2} detail={selectedProject.title} />
+            {["DPR approved", "Tender issued", "Work order released", "Site execution", "Citizen inspection"].map((item, index) => (
+              <article className={index * 22 <= selectedProject.progress ? "done" : ""} key={item}>
+                <span>{index + 1}</span>
+                <strong>{item}</strong>
+                <small>{index * 22 <= selectedProject.progress ? "Completed" : "Pending"}</small>
+              </article>
+            ))}
+          </section>
+
+          <section className="panel pm-alerts">
+            <PanelTitle title="Delay Alerts" icon={Zap} detail="AI risk monitor" />
+            <article><strong>{selectedProject.aiRisk >= 70 ? "High execution risk" : "Risk under watch"}</strong><span>Contractor progress and citizen feedback indicate {selectedProject.deliveryStatus} delivery status.</span></article>
+            <article><strong>Budget utilization</strong><span>{Math.round((selectedProject.spentCr / selectedProject.budgetCr) * 100)}% of budget consumed for {selectedProject.progress}% physical progress.</span></article>
+            <article><strong>Citizen impact</strong><span>{formatCount(selectedProject.citizenImpact)} residents depend on timely completion.</span></article>
+          </section>
+
+          <section className="panel pm-docs">
+            <PanelTitle title="Documents and Media" icon={FileText} detail="evidence room" />
+            <div className="pm-doc-list">
+              {["DPR.pdf", "Tender notice.pdf", "Inspection notes.docx", "Budget release.xlsx"].map((doc) => <button key={doc} type="button">{doc}</button>)}
+            </div>
+            <div className="pm-photo-grid">
+              <span>Before</span><span>After</span><span>Site photo</span><span>Inspection</span>
+            </div>
+          </section>
+
+          <section className="panel pm-recommendations">
+            <PanelTitle title="AI Recommendations" icon={Bot} detail="execution improvement" />
+            <p>Prioritize weekly review with {selectedProject.department}, publish milestone photos, and resolve contractor blockers before the next citizen feedback cycle.</p>
+            <ul>
+              <li>Escalate delayed approvals older than 14 days.</li>
+              <li>Link expenditure releases to measurable site progress.</li>
+              <li>Schedule citizen verification for high-impact milestones.</li>
+            </ul>
+          </section>
+        </section>
+      ) : null}
+    </section>
+  );
+}
+
+function buildManagedProjects(projects: RankedProject[]): ManagedProject[] {
+  const departments: Record<string, string> = {
+    Roads: "Public Works",
+    Water: "Water Board",
+    Health: "Health Department",
+    Healthcare: "Health Department",
+    Education: "Education Department",
+    Power: "Power Utility",
+    Sanitation: "Municipal Services"
+  };
+  const statuses: ManagedProjectStatus[] = ["ongoing", "completed", "delayed", "proposed"];
+  const templates = [
+    { category: "Roads", title: "Resurface priority access road", ward: "Ludhiana South" },
+    { category: "Health", title: "Upgrade PHC diagnostics and staffing", ward: "Gill Road" },
+    { category: "Water", title: "Replace leaking water pipeline", ward: "Dugri Urban" },
+    { category: "Education", title: "Repair classrooms and toilets", ward: "Kalindi Nagar" },
+    { category: "Employment", title: "Set up skills and placement center", ward: "Focal Point" },
+    { category: "Sanitation", title: "Construct covered drainage network", ward: "Samrala Road" },
+    { category: "Power", title: "Install high-mast street lighting", ward: "River Market" },
+    { category: "Roads", title: "Build pedestrian safety corridor", ward: "East Colony" }
+  ];
+  const source = projects.length ? projects : [fallbackProject];
+  const portfolio = source.length >= 8
+    ? source
+    : templates.map((template, index) => {
+      const base = source[index % source.length] ?? fallbackProject;
+      return {
+        ...base,
+        id: `${base.id}-portfolio-${index}`,
+        title: template.title,
+        category: template.category,
+        ward: template.ward,
+        score: Math.max(58, Math.min(99, base.score - (index % 5) * 4 + (index % 2) * 3)),
+        demandCount: Math.max(28, base.demandCount + index * 17),
+        confidence: Math.max(0.68, Math.min(0.97, base.confidence - (index % 4) * 0.035)),
+        urgencyScore: Math.max(8, base.urgencyScore + (index % 5)),
+        demandScore: Math.max(20, base.demandScore + index * 3),
+        evidence: base.evidence.length ? base.evidence : ["Citizen submissions", "Ward-level demand trend", "Public dataset match"]
+      };
+    });
+  return portfolio.map((project, index) => {
+    const deliveryStatus = statuses[index % statuses.length];
+    const progress = deliveryStatus === "completed" ? 100 : deliveryStatus === "delayed" ? 42 + (index % 4) * 7 : deliveryStatus === "proposed" ? 12 + (index % 3) * 9 : 58 + (index % 5) * 6;
+    const budgetCr = Number((1.8 + (project.score / 100) * 5.8 + (index % 4) * 0.7).toFixed(1));
+    const spentCr = Number((budgetCr * Math.min(0.96, Math.max(0.12, progress / 100 + (deliveryStatus === "delayed" ? 0.16 : -0.04)))).toFixed(1));
+    return {
+      ...project,
+      department: departments[project.category] ?? "District Administration",
+      budgetCr,
+      spentCr,
+      progress,
+      contractor: ["Nirman Infra", "Shakti Buildcon", "UrbanWorks JV", "Saraswati Engineers"][index % 4],
+      startDate: `2026-${String(1 + (index % 6)).padStart(2, "0")}-15`,
+      completionDate: `2026-${String(7 + (index % 5)).padStart(2, "0")}-28`,
+      citizenImpact: Math.max(project.demandCount * 1600, 18000 + index * 4200),
+      aiRisk: Math.min(96, Math.round(100 - project.confidence * 45 + (deliveryStatus === "delayed" ? 26 : 0) + (index % 3) * 4)),
+      deliveryStatus
+    };
+  });
+}
+
+function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
+  const [category, setCategory] = useState("All Categories");
+  const recommendations = useMemo(() => buildManagedProjects(dashboard.projects)
+    .map((project) => ({
+      ...project,
+      recommendationScore: Math.round(project.score * 0.48 + project.urgencyScore * 2.1 + project.demandScore * 0.72 + project.confidence * 18),
+      costBenefit: Math.round((project.citizenImpact / Math.max(1, project.budgetCr * 100000)) * 100),
+      priorityBand: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
+    }))
+    .sort((a, b) => b.recommendationScore - a.recommendationScore), [dashboard.projects]);
+  const filtered = category === "All Categories" ? recommendations : recommendations.filter((project) => project.category === category || (category === "Healthcare" && project.category === "Health"));
+  const top = filtered[0] ?? recommendations[0];
+  const categories = ["All Categories", "Roads", "Healthcare", "Water", "Education", "Employment"];
+  const totalBudget = filtered.reduce((sum, project) => sum + project.budgetCr, 0);
+  const totalBeneficiaries = filtered.reduce((sum, project) => sum + project.citizenImpact, 0);
+  const districtGroups = [...filtered.reduce<Map<string, { district: string; score: number; budget: number; count: number }>>((acc, project) => {
+    const current = acc.get(project.district) ?? { district: project.district, score: 0, budget: 0, count: 0 };
+    current.score += project.recommendationScore;
+    current.budget += project.budgetCr;
+    current.count += 1;
+    acc.set(project.district, current);
+    return acc;
+  }, new Map()).values()].map((item) => ({ ...item, score: Math.round(item.score / Math.max(1, item.count)) })).sort((a, b) => b.score - a.score);
+
+  return (
+    <section className="recommendations-page">
+      <section className="panel rec-hero">
+        <div>
+          <p className="eyebrow">AI Recommendations</p>
+          <h3>Prioritized development investments</h3>
+          <p>Rank projects using citizen demand, public datasets, urgency, confidence, budget fit, and expected constituency impact.</p>
+        </div>
+        <div className="rec-impact-grid">
+          <article><span>Recommended Budget</span><strong>₹{totalBudget.toFixed(1)} Cr</strong></article>
+          <article><span>Beneficiaries</span><strong>{formatCount(totalBeneficiaries)}</strong></article>
+          <article><span>Top Confidence</span><strong>{top ? Math.round(top.confidence * 100) : 0}%</strong></article>
+          <article><span>High Priority</span><strong>{filtered.filter((project) => project.priorityBand === "High").length}</strong></article>
+        </div>
+      </section>
+
+      <section className="panel rec-filterbar">
+        {categories.map((item) => (
+          <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)} type="button">{item}</button>
+        ))}
+      </section>
+
+      <section className="rec-layout">
+        <section className="panel rec-ranked-list">
+          <PanelTitle title="AI-Ranked Recommendations" icon={Scale} detail={`${filtered.length} projects scored`} />
+          <div className="rec-card-list">
+            {filtered.slice(0, 6).map((project, index) => (
+              <article className={`rec-card ${project.priorityBand.toLowerCase()}`} key={project.id}>
+                <div className="rec-card-top">
+                  <span>#{index + 1}</span>
+                  <mark>{project.priorityBand} Priority</mark>
+                </div>
+                <h4>{project.title}</h4>
+                <p>{project.department} · {project.district} · {project.ward}</p>
+                <div className="rec-score-row">
+                  <strong>{project.recommendationScore}</strong>
+                  <meter min="0" max="100" value={Math.min(100, project.recommendationScore)} />
+                </div>
+                <dl>
+                  <div><dt>Urgency</dt><dd>{project.urgencyScore}/20</dd></div>
+                  <div><dt>Budget</dt><dd>₹{project.budgetCr.toFixed(1)} Cr</dd></div>
+                  <div><dt>Beneficiaries</dt><dd>{formatCount(project.citizenImpact)}</dd></div>
+                  <div><dt>Timeline</dt><dd>{project.startDate} → {project.completionDate}</dd></div>
+                  <div><dt>Confidence</dt><dd>{Math.round(project.confidence * 100)}%</dd></div>
+                  <div><dt>Evidence</dt><dd>{project.evidence.length} sources</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel rec-map-panel">
+          <PanelTitle title="Affected Regions Map" icon={MapPinned} detail="priority heat overlay" />
+          <div className="rec-map">
+            {filtered.slice(0, 12).map((project, index) => (
+              <button className={`rec-map-dot ${project.priorityBand.toLowerCase()}`} key={project.id} style={{ left: `${12 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 25}%` }} type="button">
+                {project.recommendationScore}
+              </button>
+            ))}
+            <span className="rec-map-boundary">District demand surface</span>
+          </div>
+          <div className="rec-legend"><span className="high">High</span><span className="medium">Medium</span><span className="low">Low</span></div>
+        </section>
+
+        <section className="panel rec-reasoning">
+          <PanelTitle title="AI Reasoning" icon={Bot} detail={top?.title ?? "No project"} />
+          {top ? (
+            <>
+              <p>{top.rationale}</p>
+              <ul>
+                <li>Citizen demand contributes {top.demandScore} demand points and {formatCount(top.demandCount)} direct signals.</li>
+                <li>Public dataset confidence is {Math.round(top.confidence * 100)}% with {top.evidence.length} supporting evidence items.</li>
+                <li>Expected impact reaches {formatCount(top.citizenImpact)} beneficiaries for ₹{top.budgetCr.toFixed(1)} Cr.</li>
+              </ul>
+            </>
+          ) : <p>No recommendations match this filter.</p>}
+        </section>
+      </section>
+
+      <section className="rec-analytics-grid">
+        <section className="panel rec-cost">
+          <PanelTitle title="Cost-Benefit Analysis" icon={Database} detail="beneficiaries per budget unit" />
+          {filtered.slice(0, 5).map((project) => (
+            <article key={project.id}>
+              <div><strong>{project.ward}</strong><span>{project.costBenefit} impact index</span></div>
+              <meter min="0" max="120" value={Math.min(120, project.costBenefit)} />
+            </article>
+          ))}
+        </section>
+
+        <section className="panel rec-districts">
+          <PanelTitle title="District Comparison" icon={TrendingUp} detail="average recommendation score" />
+          {districtGroups.slice(0, 5).map((district) => (
+            <article key={district.district}>
+              <span>{district.district}</span>
+              <i style={{ width: `${Math.min(100, district.score)}%` }} />
+              <strong>{district.score}</strong>
+            </article>
+          ))}
+        </section>
+
+        <section className="panel rec-budget">
+          <PanelTitle title="Budget Allocation Suggestions" icon={DatabaseZap} detail="AI-balanced portfolio" />
+          {["Fund top 3 high-priority works first", "Reserve 18% contingency for delayed tenders", "Shift low-confidence proposals to evidence review", "Bundle nearby road and drainage works"].map((item) => <p key={item}>{item}</p>)}
+        </section>
+      </section>
+
+      <section className="panel rec-table-card">
+        <PanelTitle title="Project Ranking Table" icon={FileText} detail="decision-ready queue" />
+        <div className="rec-table">
+          <b>Project</b><b>Category</b><b>Score</b><b>Budget</b><b>Beneficiaries</b><b>Priority</b>
+          {filtered.slice(0, 8).map((project) => (
+            <div key={project.id}>
+              <span>{project.title}</span>
+              <span>{project.category}</span>
+              <span>{project.recommendationScore}</span>
+              <span>₹{project.budgetCr.toFixed(1)} Cr</span>
+              <span>{formatCount(project.citizenImpact)}</span>
+              <mark className={project.priorityBand.toLowerCase()}>{project.priorityBand}</mark>
+            </div>
+          ))}
+        </div>
       </section>
     </section>
   );
@@ -3014,17 +3545,20 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", copilot: "Grounded answers", knowledge: "Document intelligence", compare: "Comparative intelligence", settings: "Administration" })[page];
+  return ({ overview: "Executive home", priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", copilot: "Grounded answers", knowledge: "Document intelligence", recommendations: "AI prioritization", projects: "Execution portfolio", compare: "Comparative intelligence", settings: "Administration" })[page];
 }
 
 function pageTitle(page: Page): string {
   return ({
+    overview: "Overview",
     priorities: "Ranked development priorities",
     pulse: "Top 5 problems across India",
     map: "Where demand is concentrated",
     signals: "What the web says citizens need",
     copilot: "Ask why a work ranks high",
     knowledge: "Knowledge base and indexing",
+    recommendations: "AI-ranked development recommendations",
+    projects: "Development projects management",
     compare: "Compare constituencies and districts",
     settings: "Enterprise AI governance settings"
   })[page];
