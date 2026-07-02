@@ -823,6 +823,27 @@ const presentationDemoVariants = [
   "Citizens asked for inspection before the next rain spell."
 ];
 
+const presentationDelhiDemoAreas = [
+  { district: "Central Delhi", ward: "Kalindi Nagar", mpId: "mp-delhi-central", category: "Education", base: "Government school toilets are broken and two classrooms flood after rain.", urgency: 5, rating: 5, channel: "whatsapp" },
+  { district: "Central Delhi", ward: "Kalindi Nagar", mpId: "mp-delhi-central", category: "Water", base: "A drinking water line leaks near the school lane and pressure drops before noon.", urgency: 4, rating: 4, channel: "photo" },
+  { district: "Central Delhi", ward: "Kalindi Nagar", mpId: "mp-delhi-central", category: "Sanitation", base: "The drain outside the school gate blocks after every market day.", urgency: 4, rating: 4, channel: "text" },
+  { district: "Central Delhi", ward: "Kalindi Nagar", mpId: "mp-delhi-central", category: "Roads", base: "The approach road to the school has potholes and waterlogging near the bus stop.", urgency: 5, rating: 5, channel: "voice" },
+  { district: "Central Delhi", ward: "River Market", mpId: "mp-delhi-central", category: "Roads", base: "Deep potholes on the river market road slow ambulances and delivery vehicles.", urgency: 5, rating: 5, channel: "photo" },
+  { district: "Central Delhi", ward: "River Market", mpId: "mp-delhi-central", category: "Power", base: "Streetlights near the river approach fail at night and pedestrians feel unsafe.", urgency: 4, rating: 5, channel: "whatsapp" },
+  { district: "Central Delhi", ward: "River Market", mpId: "mp-delhi-central", category: "Water", base: "Market taps run dry during peak hours and tanker dependency is increasing.", urgency: 4, rating: 4, channel: "text" },
+  { district: "East Delhi", ward: "East Colony", mpId: "mp-delhi-east", category: "Health", base: "Elderly residents need an evening clinic and regular medicine counter.", urgency: 5, rating: 4, channel: "voice" },
+  { district: "East Delhi", ward: "East Colony", mpId: "mp-delhi-east", category: "Sanitation", base: "Garbage collection misses inner lanes and drain covers are damaged.", urgency: 4, rating: 4, channel: "photo" },
+  { district: "East Delhi", ward: "East Colony", mpId: "mp-delhi-east", category: "Digital Access", base: "Mobile network is weak near the community centre and students cannot attend online sessions.", urgency: 3, rating: 4, channel: "whatsapp" }
+] satisfies Array<{ district: string; ward: string; mpId: string; category: string; base: string; urgency: number; rating: number; channel: Submission["channel"] }>;
+
+const presentationDelhiDemoVariants = [
+  "The same complaint came through the ward office twice this week.",
+  "Residents attached location details and asked for inspection before the next public meeting.",
+  "Women, senior citizens, and school children are mentioned as the most affected groups.",
+  "Local volunteers reported that the issue overlaps with traffic and safety concerns.",
+  "The MP office needs a presentation-ready evidence cluster for this locality."
+];
+
 export const presentationDemoSubmissions: Submission[] = presentationDemoAreas.flatMap((area, areaIndex) =>
   presentationDemoVariants.map((variant, variantIndex) => {
     const serial = areaIndex * presentationDemoVariants.length + variantIndex + 1;
@@ -855,4 +876,36 @@ export const presentationDemoSubmissions: Submission[] = presentationDemoAreas.f
   })
 );
 
-export const demoSubmissions: Submission[] = [...seedSubmissions, ...presentationDemoSubmissions];
+export const presentationDelhiDemoSubmissions: Submission[] = presentationDelhiDemoAreas.flatMap((area, areaIndex) =>
+  presentationDelhiDemoVariants.map((variant, variantIndex) => {
+    const serial = areaIndex * presentationDelhiDemoVariants.length + variantIndex + 1;
+    const text = `${area.base} ${variant}`;
+    return {
+      id: `demo-delhi-${String(serial).padStart(3, "0")}`,
+      userId: `demo-delhi-user-${String(serial).padStart(3, "0")}`,
+      username: `delhi-demo-${String(serial).padStart(3, "0")}`,
+      displayName: `Delhi Voice ${500 + serial}`,
+      privacyMode: true,
+      state: "Delhi",
+      district: area.district,
+      mpId: area.mpId,
+      channel: area.channel,
+      language: variantIndex % 2 === 0 ? "Hindi" : "English",
+      detectedLanguage: "English",
+      normalizedText: text,
+      category: area.category,
+      ward: area.ward,
+      urgency: Math.max(3, area.urgency - (variantIndex % 3 === 0 ? 1 : 0)),
+      rating: Math.max(3, area.rating - (variantIndex % 4 === 0 ? 1 : 0)),
+      citizenScore: 74 + ((serial * 5) % 20),
+      text,
+      createdAt: hoursAgo(2 + serial),
+      processedAt: hoursAgo(1 + serial),
+      processingStatus: "processed",
+      rawIntakeId: `delhi-demo-${String(serial).padStart(6, "0")}`,
+      batchId: "demo-delhi-local"
+    };
+  })
+);
+
+export const demoSubmissions: Submission[] = [...seedSubmissions, ...presentationDemoSubmissions, ...presentationDelhiDemoSubmissions];

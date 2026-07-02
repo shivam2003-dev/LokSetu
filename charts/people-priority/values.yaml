@@ -89,6 +89,7 @@ api:
   openAiCompatible:
     existingSecret: ""
     secretKey: api-key
+  extraSecretEnv: []
   googleMaps:
     existingSecret: ""
     secretKey: api-key
