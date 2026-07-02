@@ -1,15 +1,16 @@
-import { civicDatasets, sourceSnapshots } from "./data.js";
+import { areaMappings, civicDatasets, mpProfiles, sourceSnapshots } from "./data.js";
 import { DashboardFilters, RankedProject, Submission } from "./types.js";
 import { VertexTextAnalysis } from "./vertexAi.js";
 
 const categoryTerms: Record<string, string[]> = {
   Education: ["school", "classroom", "teacher", "toilet", "student", "bench", "enrollment"],
-  Roads: ["road", "pothole", "street", "bridge", "traffic", "ambulance", "flood"],
+  Roads: ["road", "pothole", "street", "bridge", "traffic", "ambulance"],
   Health: ["clinic", "hospital", "doctor", "medicine", "elderly", "opd", "health"],
   Water: ["water", "tap", "tanker", "drinking", "pipeline", "supply"],
-  Sanitation: ["garbage", "waste", "drain", "sewer", "toilet", "cleaning", "solid waste"],
+  Sanitation: ["garbage", "waste", "drain", "sewer", "toilet", "cleaning", "solid waste", "litter", "littering", "trash", "dumping", "hotel waste"],
   Power: ["streetlight", "light", "electricity", "transformer", "power", "dark"],
-  "Digital Access": ["internet", "network", "mobile", "tower", "broadband", "digital", "signal"]
+  "Digital Access": ["internet", "network", "mobile", "tower", "broadband", "digital", "signal"],
+  "Disaster Relief": ["disaster", "relief", "flood", "cyclone", "storm", "fire", "rescue", "shelter", "food", "ration", "emergency"]
 };
 
 const projectTitles: Record<string, string> = {
@@ -19,7 +20,8 @@ const projectTitles: Record<string, string> = {
   Water: "Stabilize drinking water supply",
   Sanitation: "Upgrade drainage and waste collection",
   Power: "Restore streetlights and safe public lighting",
-  "Digital Access": "Improve mobile and broadband access"
+  "Digital Access": "Improve mobile and broadband access",
+  "Disaster Relief": "Open emergency relief response"
 };
 
 type SubmissionInput = {
@@ -42,6 +44,7 @@ type SubmissionInput = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  noiseReason?: string;
   aiProviderMode?: Submission["aiProviderMode"];
   aiModel?: string;
   aiFallbackUsed?: boolean;
@@ -49,25 +52,34 @@ type SubmissionInput = {
 
 export function normalizeSubmission(input: SubmissionInput, analysis: VertexTextAnalysis): Submission {
   const civic = civicDatasets.find((dataset) => dataset.ward === input.ward && dataset.district === input.district);
+  const mapping = areaMappings.find((area) => area.state === input.state && area.district === input.district && area.ward === input.ward);
+  const dynamicRoute = dynamicMpRoute(input.state, input.district);
   const displayName = input.privacyMode ? randomAlias(input.userId) : input.username;
   const rating = Math.max(1, Math.min(5, input.rating));
   const urgency = Math.max(1, Math.min(5, input.urgency));
   const text = (input.text || analysis.normalizedText).trim();
+  const ruleCategory = categorize([text, analysis.normalizedText].filter(Boolean).join(" "));
+  const category =
+    input.isCivicIssue === false
+      ? "Needs Review"
+      : analysis.category === "Civic Services" && ruleCategory !== "Civic Services"
+        ? ruleCategory
+        : analysis.category;
 
   return {
     ...input,
     id: crypto.randomUUID(),
     displayName,
-    mpId: civic?.mpId ?? "unassigned",
+    mpId: civic?.mpId ?? mapping?.mpId ?? dynamicRoute.id,
     language: input.language || analysis.detectedLanguage,
     detectedLanguage: analysis.detectedLanguage,
     normalizedText: analysis.normalizedText,
-    category: analysis.category,
+    category,
     text,
     rating,
     urgency,
     mediaType: input.mediaType ?? "none",
-    citizenScore: calculateCitizenScore(text, urgency, rating, analysis.confidence),
+    citizenScore: input.isCivicIssue === false ? 5 : calculateCitizenScore(text, urgency, rating, analysis.confidence),
     createdAt: new Date().toISOString()
   };
 }
@@ -125,6 +137,8 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
   const civic = civicDatasets.find(
     (dataset) => dataset.state === state && dataset.district === district && dataset.ward === ward && dataset.category === category
   );
+  const mp = mpProfiles.find((profile) => profile.wards.includes(ward) && profile.district === district && profile.state === state);
+  const dynamicRoute = dynamicMpRoute(state, district);
   const sources = sourceSnapshots.filter(
     (source) => source.state === state && source.district === district && source.ward === ward
   );
@@ -144,8 +158,8 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
     state,
     district,
     ward,
-    mpId: civic?.mpId ?? items[0]?.mpId ?? "unassigned",
-    mpName: civic?.mpName ?? "Unassigned MP",
+    mpId: civic?.mpId ?? items[0]?.mpId ?? dynamicRoute.id,
+    mpName: civic?.mpName ?? mp?.name ?? dynamicRoute.name,
     score,
     confidence: Number(Math.min(0.94, 0.58 + items.length * 0.06 + (civic ? 0.16 : 0)).toFixed(2)),
     demandCount,
@@ -237,6 +251,18 @@ function repeatedTextRatio(submissions: Submission[]): number {
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function dynamicMpRoute(state: string, district: string): { id: string; name: string } {
+  const cleanState = state?.trim() || "unknown-state";
+  const cleanDistrict = district?.trim() || "location-pending";
+  if (cleanDistrict === "Location pending" || cleanDistrict === "Delhi") {
+    return { id: `review-${slug(cleanState) || "unknown"}`, name: `${cleanState} routing review` };
+  }
+  return {
+    id: `mp-${slug(cleanState)}-${slug(cleanDistrict)}`,
+    name: `MP ${cleanDistrict}`
+  };
 }
 
 function randomAlias(seed: string): string {

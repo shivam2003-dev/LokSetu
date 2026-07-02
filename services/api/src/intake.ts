@@ -85,6 +85,7 @@ export async function processIntake(
   } else {
     analysis = await analyzeWithVertexAi(input.text ?? "", input.language);
   }
+  isCivicIssue = isCivicIssue ?? analysis.isCivicIssue;
 
   const now = new Date().toISOString();
   const submission = normalizeSubmission(
@@ -107,6 +108,7 @@ export async function processIntake(
       transcript,
       imageSummary,
       isCivicIssue,
+      noiseReason: analysis.noiseReason,
       aiProviderMode: analysis.providerMode,
       aiModel: analysis.model,
       aiFallbackUsed: analysis.fallbackUsed

@@ -766,10 +766,11 @@ app.get("/api/intake/audit", async (_request, response) => {
               transcript: submission.transcript,
               imageSummary: submission.imageSummary,
               isCivicIssue: submission.isCivicIssue ?? true,
+              noiseReason: submission.noiseReason,
               providerMode: submission.aiProviderMode,
               model: submission.aiModel,
               fallbackUsed: submission.aiFallbackUsed,
-              explanation: `${submission.channel} intake was normalized as ${submission.category}, routed to ${submission.ward}, scored with urgency ${submission.urgency}/5 and rating ${submission.rating}/5, then added to project ranking evidence.`
+              explanation: auditExplanation(submission)
             }
           : {
               category: "pending_batch",
@@ -780,6 +781,20 @@ app.get("/api/intake/audit", async (_request, response) => {
     })
   });
 });
+
+function auditExplanation(submission: Awaited<ReturnType<typeof getSubmissions>>[number]): string {
+  const media =
+    submission.mediaType && submission.mediaType !== "none"
+      ? `${submission.channel} intake with ${submission.mediaType} evidence`
+      : `${submission.channel} intake`;
+  const area = [submission.ward, submission.district, submission.state].filter(Boolean).join(", ");
+  const route = submission.mpId === "unassigned" ? "held for constituency review" : `routed to ${submission.mpId}`;
+  const confidence = submission.aiFallbackUsed ? "offline fallback rules" : `${submission.aiProviderMode ?? "AI"} model`;
+  if (submission.isCivicIssue === false) {
+    return `${media} was held for review as non-addressable or noisy input. Reason: ${submission.noiseReason ?? "AI could not confirm a public civic issue"}. It was placed in ${area} from captured location but not treated as normal ranked demand.`;
+  }
+  return `${media} was tagged as ${submission.category}, placed in ${area}, ${route}, and scored from urgency ${submission.urgency}/5, citizen rating ${submission.rating}/5, language ${submission.detectedLanguage}, and ${confidence}.`;
+}
 
 app.get("/api/audit", async (_request, response) => {
   const submissions = await getSubmissions();
@@ -810,7 +825,7 @@ app.post("/api/submissions", async (request, response) => {
 
 // Simple citizen app submission. Same engine, friendlier receipt.
 app.post("/api/citizen/submit", async (request, response) => {
-  await handleIntake(request.body, response, { friendly: true });
+  await handleIntake(request.body, response, { friendly: true, requireLocation: true });
 });
 
 app.get("/api/citizen/receipts/:receiptId", async (request, response) => {
@@ -994,11 +1009,15 @@ initDatabase()
 async function handleIntake(
   body: unknown,
   response: express.Response,
-  options: { friendly?: boolean } = {}
+  options: { friendly?: boolean; requireLocation?: boolean } = {}
 ) {
   const parsed = intakeSchema.safeParse(body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid submission", details: parsed.error.flatten() });
+    return;
+  }
+  if (options.requireLocation && (typeof parsed.data.lat !== "number" || typeof parsed.data.lng !== "number")) {
+    response.status(400).json({ error: "Location required", message: "Allow browser location before submitting an issue." });
     return;
   }
 

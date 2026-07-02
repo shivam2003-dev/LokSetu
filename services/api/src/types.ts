@@ -79,6 +79,7 @@ export type Submission = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  noiseReason?: string;
   aiProviderMode?: "vertex" | "openai-compatible" | "fallback";
   aiModel?: string;
   aiFallbackUsed?: boolean;

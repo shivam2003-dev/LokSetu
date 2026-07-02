@@ -82,7 +82,7 @@ export default function App() {
 
   function detectLocation() {
     if (!("geolocation" in navigator)) {
-      setGeo({ status: "denied", label: "Location off — your MP area will be set by staff" });
+      setGeo({ status: "denied", label: "Location required — enable browser location" });
       return;
     }
     setGeo({ status: "locating", label: "Detecting your area…" });
@@ -95,7 +95,7 @@ export default function App() {
           label: `Located near ${position.coords.latitude.toFixed(3)}, ${position.coords.longitude.toFixed(3)}`
         });
       },
-      () => setGeo({ status: "denied", label: "Location off — tap to enable for auto-routing" }),
+      () => setGeo({ status: "denied", label: "Location required — tap to allow access" }),
       { enableHighAccuracy: true, timeout: 8000 }
     );
   }
@@ -146,11 +146,18 @@ export default function App() {
     }
   }
 
-  const canSubmit = channel === "text" ? text.trim().length >= 4 : Boolean(media);
+  const hasIssueContent = channel === "text" ? text.trim().length >= 4 : Boolean(media);
+  const hasLocation = geo.status === "ready" && typeof geo.lat === "number" && typeof geo.lng === "number";
+  const canSubmit = hasIssueContent && hasLocation;
 
   async function submit() {
-    if (!canSubmit) {
+    if (!hasIssueContent) {
       setError(channel === "text" ? "Please write the problem." : "Please add a photo or recording.");
+      return;
+    }
+    if (!hasLocation) {
+      setError("Location is required before submission. Tap Enable and allow location permission.");
+      detectLocation();
       return;
     }
     setError("");
@@ -396,7 +403,7 @@ export default function App() {
             <div className="area-card">
               <MapPin size={16} />
               <div>
-                <strong>{geo.status === "ready" ? "Auto-detected area" : "Area"}</strong>
+                <strong>{geo.status === "ready" ? "Auto-detected area" : "Location required"}</strong>
                 <small>{geo.label}</small>
               </div>
               {geo.status !== "ready" ? (
@@ -410,7 +417,7 @@ export default function App() {
 
             <button className="submit" disabled={!canSubmit || step === "sending"} onClick={submit} type="button">
               {step === "sending" ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              {step === "sending" ? "Sending to your MP…" : "Submit problem"}
+              {step === "sending" ? "Sending to your MP…" : hasLocation ? "Submit problem" : "Allow location to submit"}
             </button>
           </section>
         ) : null}
