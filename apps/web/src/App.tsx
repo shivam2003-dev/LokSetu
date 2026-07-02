@@ -812,7 +812,7 @@ function ExplorePage({
 
   return (
     <section className="explore-workspace">
-      <section className="panel">
+      <section className="panel gis-surface-panel">
         <PanelTitle title="All-India issue atlas" icon={Globe2} />
         <IssueMap
           dashboard={dashboard}
@@ -873,6 +873,21 @@ function IssueMap({
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
   const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
+  const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
+  const gisLayers = [
+    { label: "Roads", color: "#ef4444", active: true },
+    { label: "Schools", color: "#f59e0b", active: true },
+    { label: "Hospitals", color: "#22c55e", active: true },
+    { label: "PHCs", color: "#14b8a6", active: true },
+    { label: "Water Pipelines", color: "#3b82f6", active: true },
+    { label: "Citizen Complaints", color: "#7c3aed", active: true },
+    { label: "Development Projects", color: "#0f766e", active: true },
+    { label: "Flood Zones", color: "#06b6d4", active: false },
+    { label: "Weather", color: "#64748b", active: false },
+    { label: "Population Density", color: "#e11d48", active: true },
+    { label: "Satellite Imagery", color: "#475569", active: false },
+    { label: "Demand Heatmaps", color: "#dc2626", active: true }
+  ];
 
   useEffect(() => {
     if (!maps.apiKey || hotspots.length === 0 || !mapRef.current) {
@@ -936,28 +951,104 @@ function IssueMap({
   }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
 
   return (
-    <div className="map-stack">
+    <div className="map-stack gis-dashboard">
       <div className="map-toolbar">
         <div>
           <strong>Geospatial demand hotspots</strong>
-          <span>{hotspots.length} ward-level signals from ranking pipeline</span>
+          <span>Premium GIS control room · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {clusters.clusters.length} AI clusters</span>
         </div>
         <small className={`map-state ${mapState}`}>{mapStatusText(mapState)}</small>
       </div>
-      <div className="map-layout">
-        <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""}`}>
-          <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
-          {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
-        </div>
-        <div className="hotspot-list" aria-label="Map hotspot details">
-          {hotspots.map((hotspot, index) => (
-            <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)}>
-              <span>{index + 1}</span>
-              <strong>{hotspot.category}</strong>
-              <small>{hotspot.ward} · score {hotspot.intensity}</small>
-            </button>
-          ))}
-        </div>
+      <div className="map-layout gis-layout">
+        <aside className="gis-control-panel" aria-label="GIS layer controls">
+          <section>
+            <h4>Layers</h4>
+            <div className="gis-layer-list">
+              {gisLayers.map((layer) => (
+                <label key={layer.label}>
+                  <input type="checkbox" defaultChecked={layer.active} />
+                  <i style={{ background: layer.color }} />
+                  <span>{layer.label}</span>
+                </label>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h4>Filters</h4>
+            <select aria-label="GIS issue filter" defaultValue="All issue types">
+              <option>All issue types</option>
+              <option>Roads</option>
+              <option>Healthcare</option>
+              <option>Water Supply</option>
+              <option>Education</option>
+            </select>
+            <select aria-label="GIS confidence filter" defaultValue="High confidence">
+              <option>High confidence</option>
+              <option>All confidence levels</option>
+              <option>Needs verification</option>
+            </select>
+          </section>
+          <section>
+            <h4>Timeline</h4>
+            <input aria-label="GIS timeline slider" defaultValue="72" max="100" min="0" type="range" />
+            <div className="gis-time-row"><span>Jan</span><b>Current batch</b><span>Dec</span></div>
+          </section>
+          <section>
+            <h4>Analysis</h4>
+            <div className="gis-tool-grid">
+              <button type="button">Route analysis</button>
+              <button type="button">Buffer 2 km</button>
+              <button type="button">Flood overlap</button>
+              <button type="button">Boundary clip</button>
+            </div>
+          </section>
+        </aside>
+
+        <section className="gis-map-panel">
+          <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""}`}>
+            <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
+            {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
+            <div className="gis-map-actions" aria-label="GIS map tools">
+              <button type="button">AI hotspot detection</button>
+              <button type="button">Cluster markers</button>
+              <button type="button">Demand heatmap</button>
+            </div>
+            <div className="gis-scale">5 km</div>
+          </div>
+          <div className="hotspot-list" aria-label="Map hotspot details">
+            {hotspots.map((hotspot, index) => (
+              <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)}>
+                <span>{index + 1}</span>
+                <strong>{hotspot.category}</strong>
+                <small>{hotspot.ward} · score {hotspot.intensity}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <aside className="gis-insight-panel" aria-label="GIS AI location insights">
+          <div className="gis-ai-badge"><Bot size={15} /> AI hotspot detection active</div>
+          <h3>{selectedProject.ward}</h3>
+          <p>{selectedProject.category} demand cluster in {selectedProject.district}, {selectedProject.state}.</p>
+          <div className="gis-score-grid">
+            <span><b>{selectedProject.score}</b>Priority</span>
+            <span><b>{formatCount(selectedProject.demandCount)}</b>Signals</span>
+            <span><b>{Math.round(selectedProject.confidence * 100)}%</b>Confidence</span>
+          </div>
+          <section>
+            <h4>AI Insights</h4>
+            <p>{selectedProject.rationale}</p>
+          </section>
+          <section>
+            <h4>Citizen Feedback</h4>
+            <ul>{selectedProject.evidence.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>
+          </section>
+          <section>
+            <h4>Project Details</h4>
+            <p>{selectedProject.title}</p>
+            <button onClick={() => selectProject(selectedProject.id)} type="button">Open supporting evidence</button>
+          </section>
+        </aside>
       </div>
       {mapState === "fallback" ? (
         <p className="map-note">
