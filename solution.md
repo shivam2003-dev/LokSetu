@@ -6,6 +6,20 @@ JanVaani AI is an AI-powered constituency intelligence platform for Members of P
 
 The citizen-facing app is **Apni Awaaz**. It accepts text, voice, and image reports, requires location before submission, queues the raw intake, runs AI processing in batch or on demand, and sends processed civic signals into the MP dashboard.
 
+## Submission Form Answers
+
+### Explain Your Solution
+
+JanVaani AI is a constituency intelligence platform for MPs. Citizens use Apni Awaaz to submit local problems by text, voice, or photo. Location permission is required, so every issue is placed using GPS and reverse geocoding instead of manual hardcoding. The backend stores raw intake, runs batch or on-demand AI processing, detects whether the input is a real public civic issue, normalizes multilingual content, extracts image/voice evidence, assigns category, routes it to the correct MP area, and creates an explainable audit trail. The MP dashboard then shows demand signals, AI-ranked recommendations, GIS hotspots, project tracking, source data, RAG answers, and reports. Evaluators can submit an issue, run the pipeline, inspect what AI inferred, and see how citizen demand becomes evidence-backed development action.
+
+### Technologies Used
+
+Gemini API and Vertex AI for text, image, voice-derived analysis, issue classification, noise detection, explanations, recommendations, and RAG answers. Cloud Speech-to-Text, Translation API, and Dialogflow are the production path for multilingual voice and conversational intake. Gemini multimodal / Vertex AI Vision analyze citizen photos. Google Maps, Mappls, OSM fallback, and future Earth Engine support location placement, hotspots, satellite and flood layers. Postgres with pgvector stores submissions, raw intake, RAG evidence, and audit trails. Express API, React/Vite web apps, Kubernetes, Helm, Argo CD, and GCP/GKE provide deployable infrastructure. BigQuery can join census, NFHS, IMD, CPCB, data.gov.in, and state datasets. WhatsApp/SMS/Flutter extensions support low-connectivity access.
+
+### Presentation Upload
+
+Use the presentation PDF generated for the final demo deck. The written answer above is the short form copy for the submission portal; the full architecture and evaluation mapping are below.
+
 ## Problem
 
 Public representatives receive complaints from many fragmented channels: citizen visits, WhatsApp messages, social media, news, public meetings, documents, and local officials. These inputs are hard to compare, deduplicate, verify, prioritize, and convert into development work.
@@ -66,6 +80,31 @@ The AI pipeline supports:
 - RAG indexing for grounded answers.
 
 The system stores both the raw intake and the processed AI explanation so evaluators can inspect what was submitted, what the AI inferred, where it was placed, how it was routed, and why.
+
+## Tools And Technology Fit
+
+JanVaani AI is designed around the recommended Google Cloud and public-data stack, with fallbacks so the demo remains reliable.
+
+| Area | Recommended tools | How JanVaani AI uses them |
+| --- | --- | --- |
+| AI/ML and generative AI | Gemini API, Vertex AI, Google AI Studio | Gemini/Vertex analyzes text, voice-derived text, and images; classifies issue category; detects noisy/private inputs; writes normalized summaries; generates explanations, recommendations, report summaries, and RAG answers. |
+| Language and voice | Cloud Speech-to-Text, Text-to-Speech, Dialogflow, Translation API | Apni Awaaz supports voice intake. The production path can use Speech-to-Text for citizen recordings, Translation API for multilingual normalization, and Dialogflow/SMS/WhatsApp flows for low-literacy conversational reporting. |
+| Vision | Gemini multimodal, Vertex AI Vision, MediaPipe | Citizen-uploaded photos are analyzed to identify civic infrastructure issues such as potholes, damaged roads, flooding, broken public facilities, smoke, or non-civic/private images that should be held for review. |
+| Geospatial and mapping | Google Maps Platform, Earth Engine | GPS is required before submission. Reverse geocoding places issues into state, district, locality, and MP route. The Map View shows hotspots, demand heatmaps, boundaries, clusters, and layers. Earth Engine can extend this with satellite imagery, flood zones, crop/land signals, and environmental change detection. |
+| Data and backend | BigQuery, Firebase, Cloud Run, Cloud Functions, Cloud SQL/Postgres | The current implementation uses Express, Postgres/pgvector, Kubernetes, and Argo CD. BigQuery can be used for large-scale joins across census, NFHS, weather, public works, and demand signals. Cloud Run/Functions are a natural deployment option for batch workers and lightweight ingestion jobs. |
+| Apps and citizen channels | Flutter/Android, WhatsApp Business API, SMS gateways | The current Apni Awaaz web app proves the citizen journey. The same API supports a future Flutter/Android app, WhatsApp intake, and SMS/IVR flows for low-connectivity communities. |
+| Public data | data.gov.in, Census/NFHS, CPCB, IMD, state datasets | Dashboards are structured to combine citizen signals with official datasets such as census demographics, NFHS health indicators, CPCB air quality, IMD weather/flood alerts, state works data, public meeting minutes, and government documents. |
+
+## Evaluation Criteria Mapping
+
+| Evaluation parameter | Weight | JanVaani AI fit |
+| --- | ---: | --- |
+| Problem-Solution Fit | 20% | Directly targets the gap between scattered citizen complaints and MP decision-making. The solution is scoped to constituency/district operations and turns submissions into ranked, evidence-backed work. |
+| AI/Technical Execution | 25% | AI is central, not decorative: it normalizes text, analyzes images/voice, detects non-civic noise, places issues by location, scores priorities, generates explanations, supports RAG, and creates recommendations/reports. The flow works end to end from Apni Awaaz submission to dashboard audit trail. |
+| Deployability and Scalability | 25% | Built as separate web, citizen, API, database, and batch services with Helm, Kubernetes, Argo CD, Postgres/pgvector, and cloud-ready environment configuration. It can run as a pilot in one constituency and scale to districts/states by adding data sources and workers. |
+| Inclusivity and Accessibility | 15% | Supports text, voice, and image intake; location-first mobile flow; multilingual normalization path; privacy mode; low-literacy voice/WhatsApp/SMS extension path; and public-safe MP views. |
+| Impact Potential | 10% | Helps MPs prioritize roads, water, schools, health, sanitation, disaster relief, and other civic issues using citizen demand plus objective evidence. It can benefit every resident in a constituency by improving allocation and response speed. |
+| Presentation and Clarity | 5% | Includes a product tour, Overview dashboard, Data Explorer audit trail, Maps, Recommendations, Projects, and Reports so a non-technical MP office can understand the value in a few minutes. |
 
 ## RAG Design
 
