@@ -5407,6 +5407,9 @@ meter::-moz-meter-bar {
     gap: 10px;
   }
   .topbar-title-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
     min-width: 0;
     width: 100%;
   }
@@ -5418,8 +5421,13 @@ meter::-moz-meter-bar {
     line-height: 1.14;
   }
   .topbar-actions {
+    grid-row: 2;
     justify-content: stretch;
     width: 100%;
+  }
+  .mobile-nav-button {
+    position: relative;
+    z-index: 2;
   }
   .tour-button,
   .icon-button,
