@@ -36,7 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DemandSignalsPage } from "./DemandSignals";
 
-type Page = "overview" | "priorities" | "pulse" | "map" | "signals" | "copilot" | "knowledge" | "recommendations" | "projects" | "compare" | "settings";
+type Page = "overview" | "priorities" | "pulse" | "map" | "signals" | "explorer" | "copilot" | "knowledge" | "recommendations" | "projects" | "reports" | "compare" | "settings";
 
 type Scope = "local" | "mp" | "global";
 
@@ -219,8 +219,8 @@ const navItems: Array<{ id: string; page: Page; label: string; hint?: string; ic
   { id: "copilot", page: "copilot", label: "AI Assistant (RAG)", icon: MessageSquareText, badge: "New" },
   { id: "recommendations", page: "recommendations", label: "Recommendations", icon: Scale },
   { id: "projects", page: "projects", label: "Projects", icon: Briefcase },
-  { id: "reports", page: "pulse", label: "Reports", icon: FileText },
-  { id: "explorer", page: "signals", label: "Data Explorer", icon: Database },
+  { id: "reports", page: "reports", label: "Reports", icon: FileText },
+  { id: "explorer", page: "explorer", label: "Data Explorer", icon: Database },
   { id: "knowledge", page: "knowledge", label: "Knowledge Base", icon: Search },
   { id: "map", page: "map", label: "Map View", icon: MapIcon },
   { id: "compare", page: "compare", label: "Compare", icon: TrendingUp },
@@ -230,13 +230,15 @@ const navItems: Array<{ id: string; page: Page; label: string; hint?: string; ic
 const activeNavIdByPage: Record<Page, string> = {
   overview: "overview",
   priorities: "priorities",
-  pulse: "compare",
+  pulse: "reports",
   map: "map",
   signals: "signals",
+  explorer: "explorer",
   copilot: "copilot",
   knowledge: "knowledge",
   recommendations: "recommendations",
   projects: "projects",
+  reports: "reports",
   compare: "compare",
   settings: "settings"
 };
@@ -322,6 +324,7 @@ const fallbackMapClusters: MapClusterResponse = {
 function pageFromHash(): Page {
   const raw = window.location.hash.replace("#", "") || "overview";
   if (["home", "mp"].includes(raw)) return "overview";
+  if (raw === "pulse") return "pulse";
   if (["public", "analytics", "enterprise", "moderation", "admin", "integrations", "ai"].includes(raw)) return "priorities";
   if (["explore", "india"].includes(raw)) return "map";
   if (["simulation", "submit", "intake"].includes(raw)) return "priorities";
@@ -622,10 +625,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
         {page === "signals" ? <DemandSignalsPage /> : null}
+        {page === "explorer" ? <DataExplorerPage dashboard={dashboard} /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
         {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} /> : null}
         {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} /> : null}
+        {page === "reports" ? <ReportsPage dashboard={dashboard} /> : null}
         {page === "compare" ? <ComparePage /> : null}
         {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
@@ -2002,6 +2007,90 @@ function KnowledgeBasePage() {
   );
 }
 
+function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
+  const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
+  const sourceCards = [
+    { name: "Citizen Submissions", rows: dashboard.totals.submissions, freshness: "Live", health: "Ready" },
+    { name: "Ranked Projects", rows: rows.length, freshness: "Current batch", health: "Ready" },
+    { name: "Demand Signals", rows: dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0), freshness: "15 min", health: "Ready" },
+    { name: "Public Datasets", rows: 18, freshness: "Daily", health: "Partial" },
+    { name: "Maps Layers", rows: 12, freshness: "Runtime", health: "Ready" },
+    { name: "RAG Evidence", rows: 942, freshness: "Indexed", health: "Ready" }
+  ];
+  const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "confidence", "budget_cr", "progress", "citizen_impact"];
+
+  return (
+    <section className="explorer-page">
+      <section className="panel explorer-hero">
+        <div>
+          <p className="eyebrow">Data Explorer</p>
+          <h3>Constituency data workspace</h3>
+          <p>Inspect live citizen signals, project rankings, public datasets, map layers, and indexed evidence before they feed AI dashboards.</p>
+        </div>
+        <div className="explorer-health">
+          <article><span>Datasets</span><strong>{sourceCards.length}</strong></article>
+          <article><span>Rows</span><strong>{formatCount(sourceCards.reduce((sum, item) => sum + item.rows, 0))}</strong></article>
+          <article><span>Quality</span><strong>94%</strong></article>
+          <article><span>Refresh</span><strong>Live</strong></article>
+        </div>
+      </section>
+
+      <section className="explorer-source-grid">
+        {sourceCards.map((source) => (
+          <article className="panel explorer-source-card" key={source.name}>
+            <span>{source.health}</span>
+            <strong>{source.name}</strong>
+            <small>{formatCount(source.rows)} records · {source.freshness}</small>
+          </article>
+        ))}
+      </section>
+
+      <section className="explorer-main-grid">
+        <section className="panel explorer-query-card">
+          <PanelTitle title="Query Builder" icon={Database} detail="reviewed source query" />
+          <div className="explorer-query-box">
+            <code>{`SELECT ward, category, priority_score, confidence\nFROM janvaani.projects\nWHERE confidence >= 0.75\nORDER BY priority_score DESC\nLIMIT 50;`}</code>
+            <button type="button">Run query</button>
+          </div>
+          <div className="explorer-filter-row">
+            {["State", "District", "Category", "Confidence", "Date range"].map((item) => <button key={item} type="button">{item}</button>)}
+          </div>
+        </section>
+
+        <section className="panel explorer-schema-card">
+          <PanelTitle title="Schema Browser" icon={Search} detail="semantic fields" />
+          <div className="explorer-schema-list">
+            {schemaFields.map((field) => <span key={field}>{field}</span>)}
+          </div>
+        </section>
+
+        <section className="panel explorer-quality-card">
+          <PanelTitle title="Data Quality" icon={CheckCircle2} detail="pipeline checks" />
+          {["Deduplication complete", "PII safeguards active", "Geo coordinates validated", "Evidence citations linked"].map((item) => <article key={item}><CheckCircle2 size={15} /><span>{item}</span></article>)}
+        </section>
+      </section>
+
+      <section className="panel explorer-table-card">
+        <PanelTitle title="Live Data Preview" icon={FileText} detail="project ranking dataset" />
+        <div className="explorer-table">
+          <b>Ward</b><b>Category</b><b>Score</b><b>Confidence</b><b>Budget</b><b>Progress</b><b>Impact</b>
+          {rows.map((row) => (
+            <div key={row.id}>
+              <span>{row.ward}</span>
+              <span>{row.category}</span>
+              <span>{row.score}</span>
+              <span>{Math.round(row.confidence * 100)}%</span>
+              <span>₹{row.budgetCr.toFixed(1)} Cr</span>
+              <span>{row.progress}%</span>
+              <span>{formatCount(row.citizenImpact)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
 type ManagedProjectStatus = "ongoing" | "completed" | "delayed" | "proposed";
 type ManagedProject = RankedProject & {
   department: string;
@@ -2396,6 +2485,129 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
               <mark className={project.priorityBand.toLowerCase()}>{project.priorityBand}</mark>
             </div>
           ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
+  const projects = buildManagedProjects(dashboard.projects);
+  const templates = [
+    "Monthly Report",
+    "Constituency Summary",
+    "Citizen Feedback Analysis",
+    "Budget Utilization",
+    "Demand Signals",
+    "Infrastructure Status",
+    "Development Progress",
+    "AI Recommendations"
+  ];
+  const topCategories = [...dashboard.projects.reduce<Map<string, number>>((acc, project) => {
+    acc.set(project.category, (acc.get(project.category) ?? 0) + project.demandCount);
+    return acc;
+  }, new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const totalBudget = projects.reduce((sum, project) => sum + project.budgetCr, 0);
+  const beneficiaries = projects.reduce((sum, project) => sum + project.citizenImpact, 0);
+
+  return (
+    <section className="reports-page">
+      <section className="panel reports-hero">
+        <div>
+          <p className="eyebrow">Official AI Reports</p>
+          <h3>Generate constituency briefings</h3>
+          <p>Create polished government-ready reports with AI summaries, charts, maps, tables, citations, and branded export packages.</p>
+        </div>
+        <div className="reports-export-actions">
+          {["PDF", "PowerPoint", "Word", "Excel"].map((format) => <button key={format} type="button">Export {format}</button>)}
+        </div>
+      </section>
+
+      <section className="reports-template-grid">
+        {templates.map((template, index) => (
+          <button className="panel report-template-card" key={template} type="button">
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <strong>{template}</strong>
+            <small>{index % 2 === 0 ? "AI draft ready" : "Template configured"}</small>
+          </button>
+        ))}
+      </section>
+
+      <section className="reports-main-grid">
+        <section className="panel report-preview-card">
+          <PanelTitle title="Report Preview" icon={FileText} detail="official presentation layout" />
+          <div className="report-cover">
+            <span>JanVaani AI · MP Constituency Report</span>
+            <h4>Monthly constituency intelligence briefing</h4>
+            <p>{formatCount(dashboard.totals.submissions)} citizen submissions, {projects.length} development projects, ₹{totalBudget.toFixed(1)} Cr tracked budget, and {formatCount(beneficiaries)} expected beneficiaries.</p>
+          </div>
+          <div className="report-preview-grid">
+            {["Executive summary", "Priority map", "Budget table", "Evidence citations"].map((item) => <article key={item}>{item}</article>)}
+          </div>
+        </section>
+
+        <section className="panel report-summary-card">
+          <PanelTitle title="AI Executive Summary" icon={Bot} detail="editable draft" />
+          <p>Citizen demand is concentrated around {topCategories[0]?.[0] ?? "infrastructure"} with visible project delivery pressure in high-density wards. AI recommends prioritizing high-confidence, high-beneficiary works and attaching citations for every public claim.</p>
+          <ul>
+            <li>{formatCount(dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0))} demand signals processed.</li>
+            <li>{projects.filter((project) => project.deliveryStatus === "delayed").length} projects require delay mitigation.</li>
+            <li>{Math.round(average(dashboard.projects.map((project) => project.confidence)) * 100) || 86}% average evidence confidence.</li>
+          </ul>
+        </section>
+
+        <section className="panel scheduled-reports">
+          <PanelTitle title="Scheduled Reports" icon={RefreshCw} detail="automated delivery" />
+          {["Monthly MP Briefing · 1st Monday", "Citizen Feedback Digest · Friday", "Budget Utilization · Month end", "AI Risk Watch · Daily 8 AM"].map((item) => <article key={item}><strong>{item}</strong><span>Share with MP office and district team</span></article>)}
+        </section>
+      </section>
+
+      <section className="reports-analytics-grid">
+        <section className="panel report-chart-card">
+          <PanelTitle title="Demand Chart" icon={TrendingUp} detail="citizen priorities" />
+          {topCategories.map(([category, demand]) => (
+            <article key={category}><span>{category}</span><i style={{ width: `${Math.min(100, demand / Math.max(1, topCategories[0]?.[1] ?? 1) * 100)}%` }} /><strong>{formatCount(demand)}</strong></article>
+          ))}
+        </section>
+
+        <section className="panel report-map-card">
+          <PanelTitle title="Map Snapshot" icon={MapPinned} detail="affected regions" />
+          <div className="report-map">
+            {projects.slice(0, 8).map((project, index) => <i key={project.id} style={{ left: `${12 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 30}%` }}>{project.score}</i>)}
+            <span>Constituency boundary</span>
+          </div>
+        </section>
+
+        <section className="panel report-citations-card">
+          <PanelTitle title="Citations" icon={Search} detail="source-backed claims" />
+          {["Citizen complaint batch", "District development plan", "Budget release note", "News and public datasets"].map((item, index) => <article key={item}><strong>[{index + 1}] {item}</strong><span>Verified source · confidence {96 - index * 3}%</span></article>)}
+        </section>
+      </section>
+
+      <section className="panel reports-table-card">
+        <PanelTitle title="Report Data Table" icon={Database} detail="ready for Excel export" />
+        <div className="reports-table">
+          <b>Project</b><b>Department</b><b>Budget</b><b>Progress</b><b>Impact</b><b>Status</b>
+          {projects.slice(0, 7).map((project) => (
+            <div key={project.id}>
+              <span>{project.title}</span>
+              <span>{project.department}</span>
+              <span>₹{project.budgetCr.toFixed(1)} Cr</span>
+              <span>{project.progress}%</span>
+              <span>{formatCount(project.citizenImpact)}</span>
+              <mark>{project.deliveryStatus}</mark>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel reports-share-card">
+        <PanelTitle title="Sharing and Branding" icon={Send} detail="official government presentation" />
+        <div>
+          <button type="button">Share secure link</button>
+          <button type="button">Email MP office</button>
+          <button type="button">Prepare cabinet note</button>
+          <button type="button">Apply JanVaani AI branding</button>
         </div>
       </section>
     </section>
@@ -3544,7 +3756,7 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ overview: "Executive home", priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", copilot: "Grounded answers", knowledge: "Document intelligence", recommendations: "AI prioritization", projects: "Execution portfolio", compare: "Comparative intelligence", settings: "Administration" })[page];
+  return ({ overview: "Executive home", priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", explorer: "Source data", copilot: "Grounded answers", knowledge: "Document intelligence", recommendations: "AI prioritization", projects: "Execution portfolio", reports: "Official reporting", compare: "Comparative intelligence", settings: "Administration" })[page];
 }
 
 function pageTitle(page: Page): string {
@@ -3554,10 +3766,12 @@ function pageTitle(page: Page): string {
     pulse: "Top 5 problems across India",
     map: "Where demand is concentrated",
     signals: "What the web says citizens need",
+    explorer: "Explore source data",
     copilot: "Ask why a work ranks high",
     knowledge: "Knowledge base and indexing",
     recommendations: "AI-ranked development recommendations",
     projects: "Development projects management",
+    reports: "AI-powered constituency reports",
     compare: "Compare constituencies and districts",
     settings: "Enterprise AI governance settings"
   })[page];

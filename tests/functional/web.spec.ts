@@ -64,8 +64,14 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("Rate this priority").getByRole("button", { name: "5" }).click();
     await expect(page.getByLabel("Rate this priority")).toContainText("Rating recorded");
 
-    // National Pulse aggregates general problem categories across states and UTs.
+    // Reports is a dedicated AI reporting workspace.
     await page.getByRole("button", { name: "Reports" }).click();
+    await expect(page.getByRole("heading", { name: "AI-powered constituency reports" })).toBeVisible();
+    await expect(page.getByText("Monthly Report")).toBeVisible();
+    await expect(page.getByText("Export PDF")).toBeVisible();
+
+    // National Pulse remains available as the reports data source page.
+    await page.goto("/#pulse");
     await expect(page.getByRole("heading", { name: "India", exact: true })).toBeVisible();
     await expect(page.getByLabel("National pulse filters")).toBeVisible();
     await page.getByLabel("Pulse state").selectOption("Uttar Pradesh");
@@ -90,6 +96,11 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByRole("heading", { name: "District Ranking" })).toBeVisible();
     await expect(page.locator(".rank-row").first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Trending This Week" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Data Explorer" }).click();
+    await expect(page.getByRole("heading", { name: "Explore source data" })).toBeVisible();
+    await expect(page.getByText("Constituency data workspace")).toBeVisible();
+    await expect(page.getByText("Live Data Preview")).toBeVisible();
 
     await page.getByRole("button", { name: "Compare" }).click();
     await expect(page.getByRole("heading", { name: "Constituency Comparison Dashboard" })).toBeVisible();
@@ -197,6 +208,32 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("Settings state").selectOption("Bihar");
     await expect(page.getByLabel("Settings district")).toHaveValue("Patna");
     await expect(page.getByLabel("Settings district")).not.toContainText("Lucknow");
+  });
+
+  test("all sidebar navigation buttons route to their own working dashboards", async ({ page }) => {
+    await loginIfNeeded(page);
+    const nav = page.getByLabel("JanVaani navigation");
+    const cases = [
+      { button: "Overview", heading: "Overview", marker: "Constituency Health" },
+      { button: "Demand Signals", heading: "What the web says citizens need", marker: "Demand Signal Score" },
+      { button: /AI Assistant/, heading: "Ask why a work ranks high", marker: "Grounded AI Assistant" },
+      { button: "Recommendations", heading: "AI-ranked development recommendations", marker: "Project Ranking Table" },
+      { button: "Projects", heading: "Development projects management", marker: "Kanban Board" },
+      { button: "Reports", heading: "AI-powered constituency reports", marker: "Monthly Report" },
+      { button: "Data Explorer", heading: "Explore source data", marker: "Live Data Preview" },
+      { button: "Knowledge Base", heading: "Knowledge base and indexing", marker: "Vector Database" },
+      { button: "Map View", heading: "Where demand is concentrated", marker: "Geospatial demand hotspots" },
+      { button: "Compare", heading: "Compare constituencies and districts", marker: "Radar Comparison" },
+      { button: "Settings", heading: "Enterprise AI governance settings", marker: "API Keys & Integrations" }
+    ];
+
+    for (const item of cases) {
+      await nav.getByRole("button", { name: item.button }).click();
+      await expect(page.locator(".topbar h2")).toHaveText(item.heading);
+      await expect(page.getByText(item.marker).first()).toBeVisible();
+      const active = page.locator(".nav-item.active");
+      await expect(active).toContainText(typeof item.button === "string" ? item.button : "AI Assistant");
+    }
   });
 
   test("maps fallback works without a browser key", async ({ page }) => {
