@@ -16,12 +16,15 @@ fi
 for package_name in ${PACKAGES}; do
   image_path="${LOCATION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${package_name}"
   echo "Checking ${image_path}; keeping latest ${KEEP} tagged versions"
-  mapfile -t old_versions < <(
+  old_versions=()
+  while IFS= read -r digest; do
+    [[ -n "${digest}" ]] && old_versions+=("${image_path}@${digest}")
+  done < <(
     gcloud artifacts docker images list "${image_path}" \
       --project="${PROJECT_ID}" \
       --include-tags \
       --sort-by='~UPDATE_TIME' \
-      --format='value(IMAGE)' | awk -v keep="${KEEP}" 'NF && NR > keep { print }'
+      --format='value(DIGEST)' | awk -v keep="${KEEP}" 'NF && NR > keep { print }'
   )
 
   if [[ "${#old_versions[@]}" -eq 0 ]]; then
