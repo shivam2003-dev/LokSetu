@@ -2860,12 +2860,16 @@ meter::-moz-meter-bar {
 
 .drawer-backdrop {
   position: fixed;
-  inset: 0;
+  inset: 0 0 0 260px;
   z-index: 60;
   display: flex;
   justify-content: flex-end;
   background: rgba(7, 16, 35, 0.32);
   backdrop-filter: blur(2px);
+}
+
+.sidebar-collapsed .drawer-backdrop {
+  left: 78px;
 }
 
 .issue-drawer {
@@ -4528,6 +4532,9 @@ meter::-moz-meter-bar {
   .sidebar-footer {
     display: block;
     padding-top: 8px;
+  }
+  .drawer-backdrop {
+    inset: 0;
   }
   .citizen-link {
     min-height: 40px;
