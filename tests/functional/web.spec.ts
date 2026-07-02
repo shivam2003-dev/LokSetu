@@ -1,11 +1,20 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("MP/admin web functional flow", () => {
-  test("priority desk decision loop, map, intake, and copilot render", async ({ page }) => {
+  test("priority desk decision loop, pulse, map, signals, and copilot render", async ({ page }) => {
     await loginIfNeeded(page);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "LokSetu", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /JanVaani/ })).toBeVisible();
     await expect(page.getByText(/Live - (memory|postgres)/)).toBeVisible();
+    await page.getByLabel("Collapse navigation").click();
+    await expect(page.locator(".app-shell")).toHaveClass(/sidebar-collapsed/);
+    await page.getByLabel("Expand navigation").click();
+    await expect(page.locator(".app-shell")).not.toHaveClass(/sidebar-collapsed/);
+    await expect(page.getByLabel("Demo data controls")).toBeVisible();
+    await page.getByLabel("Demo data controls").getByRole("button", { name: "Disable demo data" }).click();
+    await expect(page.getByLabel("Demo data controls")).toContainText("Demo data off");
+    await page.getByLabel("Demo data controls").getByRole("button", { name: "Load local demo data" }).click();
+    await expect(page.getByLabel("Demo data controls")).toContainText("Demo data on");
 
     // Priority Desk is the default core workflow page.
     await expect(page.getByRole("heading", { name: "Ranked development priorities" })).toBeVisible();
@@ -52,7 +61,41 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("Rate this priority").getByRole("button", { name: "5" }).click();
     await expect(page.getByLabel("Rate this priority")).toContainText("Rating recorded");
 
-    await page.getByRole("button", { name: "Demand Map" }).click();
+    // National Pulse aggregates general problem categories across states and UTs.
+    await page.getByRole("button", { name: "Reports" }).click();
+    await expect(page.getByRole("heading", { name: "India", exact: true })).toBeVisible();
+    await expect(page.getByLabel("National pulse filters")).toBeVisible();
+    await page.getByLabel("Pulse state").selectOption("Uttar Pradesh");
+    await expect(page.getByRole("heading", { name: "Uttar Pradesh", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Selected problem intelligence")).toBeVisible();
+    await page.getByLabel("Pulse problem").selectOption("Roads");
+    await expect(page.getByLabel("Selected problem intelligence")).toContainText("Roads");
+    await page.getByRole("button", { name: "View All Districts" }).click();
+    await expect(page.getByRole("button", { name: "Show Top Districts" })).toBeVisible();
+    await page.getByRole("button", { name: "View All Trends" }).click();
+    await expect(page.getByRole("button", { name: "Show Top Trends" })).toBeVisible();
+    await page.getByLabel("Close problem intelligence").click();
+    await page.getByLabel("Open problem intelligence").click();
+    await page.getByLabel("Ask JanVaani AI").click();
+    await expect(page.getByText(/Roads leads|No processed demand records/)).toBeVisible();
+    await page.getByLabel("Pulse state").selectOption("All States");
+    await page.getByLabel("Pulse problem").selectOption("All Problems");
+    await expect(page.getByText("AI Priority Score")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Top 5 Citizen Problems" })).toBeVisible();
+    await expect(page.locator(".problem-row")).toHaveCount(5);
+    await expect(page.locator(".problem-pct").first()).toHaveText(/%$/);
+    await expect(page.getByRole("heading", { name: "District Ranking" })).toBeVisible();
+    await expect(page.locator(".rank-row").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trending This Week" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Compare" }).click();
+    await expect(page.getByRole("heading", { name: "Constituency Comparison Dashboard" })).toBeVisible();
+    await expect(page.getByLabel("Comparison controls")).toBeVisible();
+    await expect(page.getByText("AI-Generated Insights")).toBeVisible();
+    await page.getByLabel("Compare level").selectOption("district");
+    await expect(page.getByText("Radar Comparison")).toBeVisible();
+
+    await page.getByLabel("JanVaani navigation").getByRole("button", { name: "Map View" }).click();
     await expect(page.getByRole("heading", { name: "All-India issue atlas" })).toBeVisible();
     await expect(page.getByText("Geospatial demand hotspots")).toBeVisible();
     await expect(page.locator(".map-state")).toContainText(/Google Maps live|Local map fallback|Loading map/);
@@ -76,37 +119,81 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("Close issue detail").click();
 
     await page.getByRole("button", { name: "My area" }).click();
-    await page.getByLabel("State").selectOption("Uttar Pradesh");
+    await page.getByLabel("State", { exact: true }).selectOption("Uttar Pradesh");
     await expect(page.getByLabel("District")).toHaveValue("Lucknow");
     await expect(page.getByLabel("Ward", { exact: true })).toHaveValue("Aminabad Basti");
     await expect(page.getByLabel("MP", { exact: true })).toHaveValue("mp-up-lucknow");
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page.locator(".hotspot-row").first()).toContainText("Aminabad Basti");
 
-    await expect(page.getByRole("link", { name: "Open Apni Awaaz" })).toHaveAttribute("href", "http://localhost:5174");
+    await expect(page.getByRole("link", { name: "Open JanVaani" })).toHaveAttribute("href", "http://localhost:5174");
 
-    await page.getByRole("button", { name: "Evidence Copilot" }).click();
-    await expect(page.getByRole("heading", { name: "LokSetu AI" })).toBeVisible();
-    await expect(page.getByText("RAG status")).toBeVisible();
+    // Web Signals is the Demand Signals Intelligence dashboard.
+    await page.getByRole("button", { name: "Demand Signals" }).click();
+    await expect(page.getByRole("heading", { name: "Demand Signals Intelligence" })).toBeVisible();
+    await expect(page.getByLabel("State and union territory filters")).toBeVisible();
+    await expect(page.getByRole("button", { name: "All India + UT" })).toHaveClass(/active/);
+    await expect(page.locator(".dsi-source-chips span")).toHaveCount(9);
+    await expect(page.locator(".dsi-growth-tile").first()).toBeVisible();
+    await expect(page.getByText("Demand Signal Score")).toBeVisible();
+    await page.getByRole("radio", { name: "Compare Sources" }).check();
+    await expect(page.getByRole("heading", { name: /Current Demand/ })).toContainText("All India and UTs");
+    await expect(page.getByRole("heading", { name: /Evidence Timeline/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Demand Heatmap/ })).toBeVisible();
+    await page.locator(".dsi-real-heatmap button").first().click();
+    await expect(page.locator(".dsi-district-card")).toBeVisible();
+    await page.getByRole("button", { name: "States", exact: true }).click();
+    await page.getByLabel("State", { exact: true }).selectOption("Uttar Pradesh");
+    await expect(page.getByLabel("State and union territory filters")).toContainText("Uttar Pradesh");
+    await expect(page.locator(".dsi-real-heatmap")).toContainText("Uttar Pradesh");
+    await page.getByRole("button", { name: "Union Territories", exact: true }).click();
+    await page.getByLabel("Union Territory", { exact: true }).selectOption("Delhi");
+    await expect(page.getByLabel("State and union territory filters")).toContainText("Delhi");
+    await expect(page.getByRole("heading", { name: /Escalation Watch/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Evidence Correlation/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Why .* Leads/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Compare Issues" })).toBeVisible();
+    await expect(page.locator(".dsi-compare tbody tr").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Top Recommended Actions" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Top Trending Topics/ })).toBeVisible();
+    await page.getByRole("button", { name: "View All Trends" }).click();
+    await expect(page.getByRole("heading", { name: "All Real Trends" })).toBeVisible();
+    await page.getByLabel("Close expanded signal panel").click();
+    await page.getByRole("button", { name: "View All Recommendations" }).click();
+    await expect(page.getByRole("heading", { name: "All Recommended Actions" })).toBeVisible();
+    await page.getByLabel("Close expanded signal panel").click();
+    await page.getByRole("button", { name: "View All", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "All Source Evidence" })).toBeVisible();
+
+    await page.getByRole("button", { name: /AI Assistant/ }).click();
+    await expect(page.getByRole("heading", { name: "Grounded AI Assistant", level: 3 })).toBeVisible();
+    await expect(page.getByLabel("RAG filters")).toBeVisible();
+    await page.getByLabel("RAG mode").selectOption("submitted");
     await expect(page.getByLabel("India search and locality controls")).toHaveCount(0);
-    await page.getByPlaceholder(/Ask anything about priorities/).fill("bihar stats");
-    await page.getByRole("button", { name: "Send" }).click();
-    await expect(page.locator(".chat-message.assistant .message-meta").first()).toBeVisible();
-    await expect(page.getByText("Retrieved context")).toBeVisible();
-    await expect(page.getByText("Citations", { exact: true })).toBeVisible();
-    await expect(page.getByText(/not-configured|pgvector-hybrid/).first()).toBeVisible();
-    await expect(page.getByText(/retrieved/i).first()).toBeVisible();
+    await expect(page.getByLabel("AI answer")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Key Evidence" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Evidence Map" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Grounded By/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "How AI Reached This Answer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ask Follow-up" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Export Answer" })).toBeVisible();
+    await page.getByLabel("RAG question").fill("latest submitted issue");
+    await page.getByRole("button", { name: "Ask AI" }).click();
+    await expect(page.getByLabel("AI answer").getByText(/Latest processed submission|No processed citizen submissions/i).first()).toBeVisible();
     await expect(page.getByText("Kalindi Nagar")).toHaveCount(0);
-    await page.getByPlaceholder(/Ask anything about priorities/).fill("hi");
-    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByLabel("RAG mode").selectOption("online");
+    await page.getByLabel("RAG question").fill("hi");
+    await page.getByRole("button", { name: "Ask AI" }).click();
     await expect(page.getByText("Ask me about constituency priorities")).toBeVisible();
     await expect(page.getByText("Copilot query failed")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Citizen Intake" }).click();
-    await expect(page.getByRole("heading", { name: "Simulation workbench" })).toBeVisible();
-    await page.getByRole("button", { name: /School flooding/ }).click();
-    await page.getByRole("button", { name: "Submit simulation" }).click();
-    await expect(page.getByText("pending_batch")).toBeVisible();
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByRole("heading", { name: "AI Governance Settings", exact: true })).toBeVisible();
+    await expect(page.getByText("API Keys & Integrations")).toBeVisible();
+    await expect(page.getByText("Audit Logs")).toBeVisible();
+    await page.getByLabel("Settings state").selectOption("Bihar");
+    await expect(page.getByLabel("Settings district")).toHaveValue("Patna");
+    await expect(page.getByLabel("Settings district")).not.toContainText("Lucknow");
   });
 
   test("maps fallback works without a browser key", async ({ page }) => {

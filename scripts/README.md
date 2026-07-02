@@ -45,10 +45,13 @@ npm run local
 - `VITE_GOOGLE_MAPS_API_KEY`: build-time browser Maps key.
 - `GOOGLE_MAPS_API_KEY`: backend geocoding secret value.
 - `OPENAI_COMPATIBLE_API_KEY`: AI secret value.
+- `X_BEARER_TOKEN`: X recent-search bearer token for live external signals.
+- `NEWS_API_KEY`: NewsAPI.org key for live news signals.
 - `APP_ACCESS_PASSWORD`: local app login password. Defaults to `local-dev`.
 - `RAG_INGEST_PATHS`: comma-separated local or `gs://` documents to seed into RAG.
 - `RAG_EMBEDDING_PROVIDER`: defaults to `hash` for offline local development.
 
 ## Safety
+`npm run local` loads `.env.local` when present. `.env.local` is ignored by Git.
 Scripts create Kubernetes Secrets from environment variables. They do not write secrets to Git.
 The GCP safety scripts only read or update local Cloud SDK config. They do not enable APIs, create resources, or run Terraform.

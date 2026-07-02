@@ -4,12 +4,13 @@ import helmet from "helmet";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import pino from "pino";
 import { z } from "zod";
-import { areaMappings, mpProfiles, seedSubmissions, seedUsers, sourceSnapshots } from "./data.js";
+import { areaMappings, demoSubmissions, mpProfiles, seedUsers, sourceSnapshots } from "./data.js";
 import {
   countRawIntakesByStatus,
   findRawIntakesByReceiptPrefix,
   initDatabase,
   insertRawIntake,
+  insertSubmission,
   isDatabaseEnabled,
   listRecentBatchRuns,
   listSubmissions
@@ -18,7 +19,7 @@ import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./int
 import { buildDashboard } from "./pipeline.js";
 import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
-import { fallbackRun, fetchGdeltSignals, fetchXSignals } from "./externalSignals.js";
+import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
 import { buildEnterpriseSituation } from "./enterprise.js";
@@ -30,7 +31,9 @@ const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
 const accessPassword = process.env.APP_ACCESS_PASSWORD ?? "";
 const authSecret = process.env.APP_AUTH_SECRET ?? accessPassword;
-let memorySubmissions = [...seedSubmissions];
+let memorySubmissions = [...demoSubmissions];
+let demoDataEnabled = true;
+const demoSubmissionIds = new Set(demoSubmissions.map((submission) => submission.id));
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
 const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
@@ -71,6 +74,7 @@ const projectStatusSchema = z.object({
 
 const copilotQuerySchema = z.object({
   role: z.enum(["mp", "collector", "citizen", "analyst"]).default("mp"),
+  mode: z.enum(["online", "submitted", "all"]).default("all"),
   question: z.string().trim().min(1).max(1_000),
   language: z.string().trim().min(2).max(40).optional(),
   projectId: z.string().trim().optional()
@@ -232,6 +236,29 @@ app.get("/api/context", (_request, response) => {
     wardsByDistrict,
     areaMappings
   });
+});
+
+app.get("/api/demo-data", async (_request, response) => {
+  response.json(await demoDataStatus());
+});
+
+app.post("/api/demo-data/load", async (_request, response) => {
+  demoDataEnabled = true;
+  if (isDatabaseEnabled()) {
+    for (const submission of demoSubmissions) await insertSubmission(submission);
+  } else {
+    const existing = new Set(memorySubmissions.map((submission) => submission.id));
+    memorySubmissions = [
+      ...memorySubmissions,
+      ...demoSubmissions.filter((submission) => !existing.has(submission.id))
+    ];
+  }
+  response.json(await demoDataStatus());
+});
+
+app.post("/api/demo-data/disable", async (_request, response) => {
+  demoDataEnabled = false;
+  response.json(await demoDataStatus());
 });
 
 app.get("/api/users", (_request, response) => {
@@ -430,6 +457,11 @@ app.get("/api/external-signals", async (request, response) => {
     if (provider === "all" || provider === "gdelt") runs.push(await fetchGdeltSignals(query));
   } catch {
     runs.push(fallbackRun("gdelt", query));
+  }
+  try {
+    if (provider === "all" || provider === "news") runs.push(await fetchNewsSignals(query));
+  } catch {
+    runs.push(fallbackRun("news", query));
   }
   response.json({
     query,
@@ -793,7 +825,22 @@ async function handleIntake(
 }
 
 async function getSubmissions() {
-  return isDatabaseEnabled() ? listSubmissions() : memorySubmissions;
+  const submissions = isDatabaseEnabled() ? await listSubmissions() : memorySubmissions;
+  return demoDataEnabled ? submissions : submissions.filter((submission) => !demoSubmissionIds.has(submission.id));
+}
+
+async function demoDataStatus() {
+  const allSubmissions = isDatabaseEnabled() ? await listSubmissions() : memorySubmissions;
+  const demoRows = allSubmissions.filter((submission) => demoSubmissionIds.has(submission.id)).length;
+  const visibleRows = demoDataEnabled ? allSubmissions.length : allSubmissions.length - demoRows;
+  return {
+    enabled: demoDataEnabled,
+    mode: isDatabaseEnabled() ? "postgres" : "memory",
+    demoRows,
+    visibleRows,
+    totalRows: allSubmissions.length,
+    label: demoDataEnabled ? "Demo data on" : "Demo data off"
+  };
 }
 
 async function buildDashboardWithOverrides(filters: DashboardFilters = {}) {
@@ -900,8 +947,10 @@ function signAccessToken(expiresAt: string) {
 function verifyAccessToken(token: string) {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return false;
-  const expected = createHmac("sha256", authSecret).update(payload).digest("base64url");
-  if (!constantTimeEqual(signature, expected)) return false;
+  const validSignature = [authSecret, accessPassword]
+    .filter(Boolean)
+    .some((secret) => constantTimeEqual(signature, createHmac("sha256", secret).update(payload).digest("base64url")));
+  if (!validSignature) return false;
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; exp?: string };
     return parsed.sub === "loksetu-access" && Boolean(parsed.exp) && Date.parse(parsed.exp!) > Date.now();

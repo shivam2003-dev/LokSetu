@@ -1,31 +1,42 @@
 import {
   Bot,
+  Briefcase,
+  Construction,
   CheckCircle2,
   Database,
   DatabaseZap,
+  Droplets,
+  FileText,
   Flag,
   Globe2,
+  GraduationCap,
+  HeartPulse,
   Home,
-  Inbox,
   Languages,
   Lock,
   LockKeyhole,
-  Map,
+  Map as MapIcon,
   MapPinned,
   MapPin,
   MessageSquareText,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Scale,
   Search,
   Send,
-  ShieldCheck,
   Star,
+  Trash2,
+  TrendingUp,
   Users,
-  X
+  Wifi,
+  X,
+  Zap
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DemandSignalsPage } from "./DemandSignals";
 
-type Page = "priorities" | "map" | "intake" | "copilot";
+type Page = "priorities" | "pulse" | "map" | "signals" | "copilot" | "compare" | "settings";
 
 type Scope = "local" | "mp" | "global";
 
@@ -94,6 +105,15 @@ type ClientConfig = {
   generatedAt: string;
 };
 
+type DemoDataStatus = {
+  enabled: boolean;
+  mode: "postgres" | "memory";
+  demoRows: number;
+  visibleRows: number;
+  totalRows: number;
+  label: string;
+};
+
 type BoundaryLevel = "state" | "district" | "constituency" | "ward";
 type BoundaryFeature = {
   id: string;
@@ -147,6 +167,7 @@ type CopilotCapabilitiesResponse = {
 type CopilotAnswer = {
   generatedAt: string;
   role: string;
+  mode?: "online" | "submitted" | "all";
   language: string;
   agent: { id: string; label: string; purpose: string };
   intent: string;
@@ -173,19 +194,6 @@ type RagStatusResponse = {
 
 type Hotspot = DashboardResponse["hotspots"][number];
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
-type SimulationScenario = {
-  id: string;
-  title: string;
-  channel: "text" | "voice" | "photo" | "video" | "whatsapp";
-  state: string;
-  district: string;
-  ward: string;
-  language: string;
-  urgency: number;
-  rating: number;
-  text: string;
-};
-
 declare global {
   interface Window {
     google?: any;
@@ -205,12 +213,30 @@ const citizenAppUrl =
     ? "http://localhost:5174"
     : `https://citizen.${window.location.host}`);
 
-const navItems: Array<{ page: Page; label: string; hint: string; icon: typeof Home }> = [
-  { page: "priorities", label: "Priority Desk", hint: "Ranked works - decide and approve", icon: Scale },
-  { page: "map", label: "Demand Map", hint: "Where citizen demand clusters", icon: Map },
-  { page: "intake", label: "Citizen Intake", hint: "Voice, text, photo, WhatsApp", icon: Inbox },
-  { page: "copilot", label: "Evidence Copilot", hint: "Ask why, with citations", icon: MessageSquareText }
+const navItems: Array<{ id: string; page: Page; label: string; hint?: string; icon: typeof Home; badge?: string }> = [
+  { id: "overview", page: "priorities", label: "Overview", icon: Home },
+  { id: "priorities", page: "priorities", label: "People's Priorities", icon: Droplets },
+  { id: "signals", page: "signals", label: "Demand Signals", icon: DatabaseZap },
+  { id: "copilot", page: "copilot", label: "AI Assistant (RAG)", icon: MessageSquareText, badge: "New" },
+  { id: "recommendations", page: "priorities", label: "Recommendations", icon: Scale },
+  { id: "projects", page: "priorities", label: "Projects", icon: Briefcase },
+  { id: "reports", page: "pulse", label: "Reports", icon: FileText },
+  { id: "explorer", page: "signals", label: "Data Explorer", icon: Database },
+  { id: "knowledge", page: "copilot", label: "Knowledge Base", icon: Search },
+  { id: "map", page: "map", label: "Map View", icon: MapIcon },
+  { id: "compare", page: "compare", label: "Compare", icon: TrendingUp },
+  { id: "settings", page: "settings", label: "Settings", icon: Lock }
 ];
+
+const activeNavIdByPage: Record<Page, string> = {
+  priorities: "priorities",
+  pulse: "compare",
+  map: "map",
+  signals: "signals",
+  copilot: "copilot",
+  compare: "compare",
+  settings: "settings"
+};
 
 const fallbackProject: RankedProject = {
   id: "kalindi-nagar-education",
@@ -266,6 +292,15 @@ const fallbackClientConfig: ClientConfig = {
   generatedAt: new Date().toISOString()
 };
 
+const fallbackDemoDataStatus: DemoDataStatus = {
+  enabled: true,
+  mode: "memory",
+  demoRows: 0,
+  visibleRows: 0,
+  totalRows: 0,
+  label: "Demo data on"
+};
+
 const fallbackMapBoundaries: MapBoundaryResponse = {
   generatedAt: new Date().toISOString(),
   sourceStatus: "local_fallback",
@@ -285,7 +320,7 @@ function pageFromHash(): Page {
   const raw = window.location.hash.replace("#", "") || "priorities";
   if (["home", "mp", "projects", "public", "analytics", "enterprise", "moderation", "admin", "integrations", "ai"].includes(raw)) return "priorities";
   if (["explore", "india"].includes(raw)) return "map";
-  if (["simulation", "submit"].includes(raw)) return "intake";
+  if (["simulation", "submit", "intake"].includes(raw)) return "priorities";
   return navItems.some((item) => item.page === raw) ? (raw as Page) : "priorities";
 }
 
@@ -335,6 +370,7 @@ export default function App() {
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPageState] = useState<Page>(() => pageFromHash());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [scope, setScope] = useState<Scope>("local");
   const [state, setState] = useState("Delhi");
   const [district, setDistrict] = useState("Central Delhi");
@@ -344,6 +380,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [dashboard, setDashboard] = useState<DashboardResponse>(fallbackDashboard);
   const [context, setContext] = useState<ContextResponse>(fallbackContext);
   const [clientConfig, setClientConfig] = useState<ClientConfig>(fallbackClientConfig);
+  const [demoData, setDemoData] = useState<DemoDataStatus>(fallbackDemoDataStatus);
   const [apiConnected, setApiConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [regions, setRegions] = useState<RegionResponse | null>(null);
@@ -384,8 +421,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   async function refreshAll() {
     try {
-      const [nextConfig, nextContext, nextDashboard, nextRegions, nextCopilot, nextRagStatus, nextBoundaries, nextClusters] = await Promise.all([
+      const [nextConfig, nextDemoData, nextContext, nextDashboard, nextRegions, nextCopilot, nextRagStatus, nextBoundaries, nextClusters] = await Promise.all([
         requestJson<ClientConfig>("/api/client-config"),
+        getJson<DemoDataStatus>("/api/demo-data", fallbackDemoDataStatus),
         requestJson<ContextResponse>("/api/context"),
         fetchDashboard(filters),
         getJson<RegionResponse>("/api/regions", {
@@ -398,6 +436,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         getJson<MapClusterResponse>("/api/maps/clusters?zoom=5", fallbackMapClusters)
       ]);
       setClientConfig(mergeClientConfig(nextConfig));
+      setDemoData(nextDemoData);
       setContext(nextContext);
       setDashboard(nextDashboard);
       setRegions(nextRegions);
@@ -427,6 +466,19 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     } catch (error) {
       setApiConnected(false);
       setConnectionError(error instanceof Error ? error.message : "API unavailable");
+      setNotice("Disconnected");
+    }
+  }
+
+  async function updateDemoData(action: "load" | "disable") {
+    try {
+      const response = await apiFetch(`/api/demo-data/${action}`, { method: "POST" });
+      if (!response.ok) throw new Error(`Demo data ${action} failed`);
+      const nextDemoData = await response.json() as DemoDataStatus;
+      setDemoData(nextDemoData);
+      await refreshAll();
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : "Demo data update failed");
       setNotice("Disconnected");
     }
   }
@@ -472,14 +524,23 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar" aria-label="LokSetu navigation">
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <aside className="sidebar" aria-label="JanVaani navigation">
         <div className="brand">
-          <div className="brand-mark">LS</div>
+          <div className="brand-mark">JV</div>
           <div>
-            <h1>LokSetu</h1>
-            <p>Citizen voice to ranked development works</p>
+            <h1>JanVaani <em>AI</em></h1>
+            <p>People&apos;s Priorities Intelligence Platform</p>
           </div>
+          <button
+            aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            title={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+            type="button"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
         </div>
         <nav className="nav-scroll">
           <div className="nav-section">
@@ -487,12 +548,13 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
-                <button className={`nav-item rich ${page === item.page ? "active" : ""}`} key={item.page} onClick={() => setPage(item.page)}>
+                <button className={`nav-item rich ${activeNavIdByPage[page] === item.id ? "active" : ""}`} key={item.id} onClick={() => setPage(item.page)}>
                   <Icon size={18} />
                   <span className="nav-copy">
                     <strong>{item.label}</strong>
-                    <small>{item.hint}</small>
+                    {item.hint ? <small>{item.hint}</small> : null}
                   </span>
+                  {item.badge ? <em>{item.badge}</em> : null}
                 </button>
               );
             })}
@@ -501,7 +563,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         <div className="sidebar-footer">
           <a className="citizen-link" href={effectiveCitizenAppUrl}>
             <Send size={16} />
-            Open Apni Awaaz
+            Open JanVaani
           </a>
           <div className={`status-pill ${apiConnected ? "connected" : "disconnected"}`}>
             <CheckCircle2 size={16} />
@@ -516,10 +578,18 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             <p className="eyebrow">{pageLabel(page)}</p>
             <h2>{pageTitle(page)}</h2>
           </div>
-          <button className="icon-button" title="Refresh" onClick={refreshAll}>
-            <RefreshCw size={18} />
-          </button>
-          <button className="logout-button" onClick={onLogout} type="button">Logout</button>
+          <div className="topbar-actions">
+            <div className={`demo-data-toggle ${demoData.enabled ? "enabled" : "disabled"}`} aria-label="Demo data controls">
+              <span>{demoData.label}</span>
+              <small>{formatCount(demoData.visibleRows)} visible / {formatCount(demoData.demoRows)} demo</small>
+              <button onClick={() => updateDemoData("load")} type="button">Load local demo data</button>
+              <button onClick={() => updateDemoData("disable")} type="button">Disable demo data</button>
+            </div>
+            <button className="icon-button" title="Refresh" onClick={refreshAll}>
+              <RefreshCw size={18} />
+            </button>
+            <button className="logout-button" onClick={onLogout} type="button">Logout</button>
+          </div>
         </header>
 
         {showControlStrip ? (
@@ -545,8 +615,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         {page === "priorities" ? <PriorityDeskPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} setPage={setPage} /> : null}
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
-        {page === "intake" ? <SimulationPage refreshAll={refreshAll} /> : null}
+        {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
+        {page === "signals" ? <DemandSignalsPage /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
+        {page === "compare" ? <ComparePage /> : null}
+        {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
     </main>
   );
@@ -592,11 +665,11 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
     <main className="login-shell">
       <section className="login-panel">
         <div className="brand-lock">
-          <span>LS</span>
+          <span>JV</span>
           <LockKeyhole size={22} />
         </div>
         <p className="eyebrow">Access Required</p>
-        <h1>LokSetu Login</h1>
+        <h1>JanVaani AI Login</h1>
         <p>Enter the deployment password before using AI, submission, map, or dashboard APIs.</p>
         <form onSubmit={login}>
           <label>
@@ -692,6 +765,11 @@ function mergeClientConfig(config: ClientConfig): ClientConfig {
 
 function formatCount(value: number) {
   return value.toLocaleString("en-IN");
+}
+
+function average(values: number[]) {
+  const clean = values.filter((value) => Number.isFinite(value));
+  return clean.length ? clean.reduce((sum, value) => sum + value, 0) / clean.length : 0;
 }
 
 function ExplorePage({
@@ -1261,29 +1339,43 @@ function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
 }
 
 function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[] }) {
-  const prompts = [
-    "What are the top 10 issues in my constituency this month?",
-    "Why is the highest ranked project urgent? Show evidence.",
-    "Which scheme or budget path can fund this?",
-    "Summarize today's citizen feedback for a public meeting.",
-    "What changed compared to yesterday?",
-    "What should the district officer do next?"
-  ];
+  const prompts = ["Compare roads vs healthcare", "Which villages lack PHCs?", "Show delayed projects", "Summarize citizen feedback"];
   const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
   const [language, setLanguage] = useState("English");
-  const [question, setQuestion] = useState("");
+  const [mode, setMode] = useState<"online" | "submitted" | "all">("all");
+  const [stateFilter, setStateFilter] = useState("Punjab");
+  const [districtFilter, setDistrictFilter] = useState("Ludhiana");
+  const [constituencyFilter, setConstituencyFilter] = useState("Ludhiana South");
+  const [timeRange, setTimeRange] = useState("Last 2 Years");
+  const [topic, setTopic] = useState("Roads");
+  const [question, setQuestion] = useState("Why are road complaints increasing in Ludhiana South?");
   const [projectId, setProjectId] = useState("");
   const [messages, setMessages] = useState<Array<{ id: string; role: "assistant" | "user"; text: string; answer?: CopilotAnswer }>>([
     {
       id: "welcome",
       role: "assistant",
-      text: "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current LokSetu intelligence corpus and cite the supporting records."
+      text: "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current JanVaani AI intelligence corpus and cite the supporting records."
     }
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const threadRef = useRef<HTMLDivElement>(null);
 
   const latestAnswer = [...messages].reverse().find((message) => message.answer)?.answer ?? null;
+  const confidence = latestAnswer?.confidence ?? 97;
+  const sourceCounts = buildGroundingSources(latestAnswer, ragStatus);
+  const evidenceItems = (latestAnswer?.citations.length ? latestAnswer.citations : latestAnswer?.retrievedContext.map((item) => ({
+    type: item.sourceType,
+    id: item.id,
+    title: item.title,
+    snippet: item.snippet
+  })) ?? []).slice(0, 5);
+  const selectedProject = projectId ? projects.find((project) => project.id === projectId) : projects[0];
+  const relatedProjects = projects.slice(0, 3);
+
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, busy]);
 
   async function askCopilot(nextQuestion = question) {
     const cleanQuestion = nextQuestion.trim();
@@ -1293,10 +1385,14 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
     const userMessage = { id: `user-${Date.now()}`, role: "user" as const, text: cleanQuestion };
     setMessages((current) => [...current, userMessage]);
     if (cleanQuestion === question.trim()) setQuestion("");
+    const groundedQuestion = [
+      cleanQuestion,
+      `Filters: state=${stateFilter}; district=${districtFilter}; constituency=${constituencyFilter}; timeRange=${timeRange}; topic=${topic}; mode=${mode}.`
+    ].join("\n");
     try {
       const response = await apiFetch("/api/copilot/query", {
         method: "POST",
-        body: JSON.stringify({ role, language, question: cleanQuestion, projectId: projectId || undefined })
+        body: JSON.stringify({ role, mode, language, question: groundedQuestion, projectId: projectId || undefined })
       });
       if (!response.ok) {
         let message = "Copilot query failed";
@@ -1326,137 +1422,670 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
   }
 
   return (
-    <section className="copilot-chat-page">
-      <section className="panel copilot-chat-shell">
-        <div className="copilot-chat-header">
-          <div className="assistant-identity">
-            <span><Bot size={20} /></span>
-            <div>
-              <h3>LokSetu AI</h3>
-              <p>Grounded RAG assistant for constituency intelligence</p>
-            </div>
-          </div>
-          <div className="rag-badge">
-            <DatabaseZap size={16} />
-            {ragStatus?.mode ?? capabilities?.rag?.mode ?? "local-hybrid-rag"}
-          </div>
+    <section className="rag-command-page">
+      <header className="rag-hero">
+        <div>
+          <h3>Grounded AI Assistant</h3>
+          <p>Ask anything. Answers are backed by real data and sources.</p>
         </div>
-
-        <div className="copilot-context">
-          <label>Role
-            <select value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
-              {(capabilities?.supportedRoles ?? ["mp", "collector", "citizen", "analyst"]).map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </label>
-          <label>Language
-            <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-              {["English", "Hindi", "Tamil", "Bengali", "Marathi", "Kannada", "Telugu", "Gujarati", "Malayalam", "Odia", "Punjabi", "Urdu"].map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label>Grounding
-            <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-              <option value="">Search full intelligence corpus</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-            </select>
-          </label>
+        <div className="rag-hero-actions">
+          <span>AI Confidence <b>{confidence}%</b></span>
+          <button type="button">History</button>
+          <button className="primary" onClick={() => setMessages((current) => current.slice(0, 1))} type="button">New Query</button>
         </div>
+      </header>
 
-        <div className="chat-thread" aria-label="Copilot conversation">
-          {messages.map((message) => (
-            <article className={`chat-message ${message.role}`} key={message.id}>
-              <div className={`message-body ${message.answer ? "assistant-answer" : ""}`}>
-                {message.answer ? <AnswerContent text={message.text} /> : <p>{message.text}</p>}
-                {message.answer?.citations.length ? (
-                  <div className="message-citations" aria-label="Answer citations">
-                    {message.answer.citations.slice(0, 5).map((citation, index) => (
-                      <span key={`${citation.id}-${index}`}>[{index + 1}] {citation.title}</span>
-                    ))}
-                  </div>
-                ) : null}
-                {message.answer ? (
-                  <div className="message-meta">
-                    <span>{message.answer.agent.label}</span>
-                    <span>{message.answer.confidence}% confidence</span>
-                    <span>{message.answer.retrieval.retrieved} retrieved</span>
-                    <span>{message.answer.retrieval.latencyMs}ms</span>
-                  </div>
-                ) : null}
-              </div>
-            </article>
-          ))}
-          {busy ? (
-            <article className="chat-message assistant">
-              <div className="message-body"><p>Retrieving LokSetu records and preparing a grounded answer...</p></div>
-            </article>
-          ) : null}
-        </div>
-
-        <div className="prompt-strip">
-          {prompts.map((prompt) => (
-            <button key={prompt} onClick={() => askCopilot(prompt)} type="button">{prompt}</button>
-          ))}
-        </div>
-
-        <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); askCopilot(); }}>
-          <textarea
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Ask anything about priorities, schemes, evidence, maps, documents, public feedback, or next actions..."
-            rows={3}
-          />
-          <button className="primary" disabled={busy || !question.trim()} type="submit">
-            <Send size={16} />
-            Send
-          </button>
-        </form>
-        {error ? <div className="error-state">{error}</div> : null}
+      <section className="rag-filters" aria-label="RAG filters">
+        <label>Mode
+          <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)} aria-label="RAG mode">
+            <option value="online">Online mode</option>
+            <option value="submitted">Submitted issue mode</option>
+            <option value="all">All mode</option>
+          </select>
+        </label>
+        <label>State
+          <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}>
+            {["Punjab", "Delhi", "Uttar Pradesh", "Tamil Nadu", "West Bengal", "Maharashtra"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>District
+          <select value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}>
+            {["Ludhiana", "Central Delhi", "Lucknow", "Chennai", "Kolkata", "Nashik Rural"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Constituency
+          <select value={constituencyFilter} onChange={(event) => setConstituencyFilter(event.target.value)}>
+            {["Ludhiana South", "Central Delhi", "Lucknow", "Chennai Central", "Kolkata East"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Time Range
+          <select value={timeRange} onChange={(event) => setTimeRange(event.target.value)}>
+            {["Last 30 Days", "Last 1 Year", "Last 2 Years", "Current Batch"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Topic
+          <select value={topic} onChange={(event) => setTopic(event.target.value)}>
+            {["Roads", "Water", "Healthcare", "Education", "Employment", "Sanitation"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
       </section>
 
-      <aside className="panel rag-side-panel">
-        <PanelTitle title="RAG status" icon={Database} detail={ragStatus?.embeddingStore ?? "local-deterministic-index"} />
-        <div className="rag-status-grid">
-          <Metric label="Corpus records" value={String(ragStatus?.corpusDocuments ?? 0)} detail={ragStatus?.refreshCadence ?? "batch refresh"} />
-          <Metric label="Retrieved" value={String(latestAnswer?.retrieval.retrieved ?? 0)} detail={latestAnswer?.intent ?? "waiting"} />
+      <section className="rag-layout">
+        <main className="rag-main">
+          <form className="rag-query-box" onSubmit={(event) => { event.preventDefault(); askCopilot(); }}>
+            <input aria-label="RAG question" value={question} onChange={(event) => setQuestion(event.target.value)} />
+            <button className="primary" disabled={busy || !question.trim()} type="submit">Ask AI</button>
+          </form>
+          <div className="prompt-strip rag-prompts">
+            <span>Suggested Questions:</span>
+            {prompts.map((prompt) => <button key={prompt} onClick={() => askCopilot(prompt)} type="button">{prompt}</button>)}
+          </div>
+          {error ? <div className="error-state">{error}</div> : null}
+
+          <section className="panel rag-answer-card" aria-label="AI answer">
+            <header>
+              <strong>AI Answer</strong>
+              <mark>{latestAnswer ? `${latestAnswer.mode ?? mode} grounded` : `${mode} ready`}</mark>
+            </header>
+            <div className="rag-answer-grid">
+              <div ref={threadRef}>
+                {latestAnswer ? <AnswerContent text={latestAnswer.answer} /> : <p>Ask a question to retrieve online sources, submitted issues, or both. Current mode: {mode}.</p>}
+                {busy ? <p>Retrieving JanVaani records and preparing a grounded answer...</p> : null}
+                <h4>AI Recommendation</h4>
+                <ul className="check-list">
+                  {(latestAnswer?.suggestedActions ?? ["Use a specific ward, district, and topic for better grounding.", "Switch modes to control source coverage."]).slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+              <aside>
+                <Metric label="Expected Impact" value={selectedProject ? `${formatCount(Math.max(1, selectedProject.demandCount * 1800))}` : "2.1 Lakh"} detail="Citizens benefited" />
+                <Metric label="Confidence Score" value={`${confidence}%`} detail={`Based on ${sourceCounts.length} source groups`} />
+              </aside>
+            </div>
+          </section>
+
+          <section className="rag-evidence-grid">
+            <section className="panel rag-evidence-list" aria-label="Key evidence">
+              <PanelTitle title="Key Evidence" icon={CheckCircle2} />
+              {(evidenceItems.length ? evidenceItems : [{ type: "mode", id: "waiting", title: "No answer yet", snippet: "Run a query to see retrieved sources." }]).map((item, index) => (
+                <article key={`${item.type}-${item.id}`}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.snippet}</p>
+                  </div>
+                  <mark>{Math.max(88, confidence - index)}% Match</mark>
+                </article>
+              ))}
+            </section>
+            <section className="panel rag-map-card" aria-label="Evidence map">
+              <PanelTitle title="Evidence Map" icon={MapPinned} detail="View Full Map" />
+              <div className="rag-evidence-map">
+                {Array.from({ length: 42 }, (_, index) => <i key={index} style={{ left: `${8 + (index * 17) % 84}%`, top: `${12 + (index * 23) % 72}%` }} />)}
+                <strong>{districtFilter}</strong>
+              </div>
+            </section>
+          </section>
+
+          <section className="rag-bottom-grid">
+            <section className="panel">
+              <PanelTitle title="Timeline of Events" icon={TrendingUp} />
+              <div className="rag-timeline">{["Jul 2024", "Sep 2024", "Nov 2024", "Mar 2025", "Jul 2025", "Jul 2026"].map((item) => <span key={item}>{item}</span>)}</div>
+            </section>
+            <section className="panel">
+              <PanelTitle title="Related Projects" icon={Briefcase} />
+              <div className="rag-project-list">
+                {relatedProjects.map((project) => <button key={project.id} onClick={() => setProjectId(project.id)} type="button"><strong>{project.title}</strong><span>{project.status}</span></button>)}
+              </div>
+            </section>
+            <section className="panel">
+              <PanelTitle title="Ask Follow-up" icon={MessageSquareText} />
+              <div className="rag-followups">{(latestAnswer?.followUpQuestions ?? prompts).slice(0, 4).map((item) => <button key={item} onClick={() => askCopilot(item)} type="button">{item}</button>)}</div>
+            </section>
+          </section>
+        </main>
+
+        <aside className="rag-source-rail">
+          <section className="panel">
+            <PanelTitle title={`Grounded By (${sourceCounts.reduce((sum, item) => sum + item.count, 0)} Sources)`} icon={Database} detail="View All" />
+            <div className="rag-grounded-list">
+              {sourceCounts.map((item) => <button key={item.label} type="button"><span>{item.icon}</span><strong>{item.label}</strong><em>{formatCount(item.count)}</em></button>)}
+            </div>
+          </section>
+          <section className="panel">
+            <PanelTitle title="How AI Reached This Answer" icon={Scale} detail="View Details" />
+            <div className="rag-donut-card">
+              <strong>{confidence}%<span>Confidence</span></strong>
+              {sourceCounts.slice(0, 6).map((item) => <p key={item.label}>{item.label}<b>{Math.max(4, Math.round((item.count / Math.max(1, sourceCounts[0]?.count ?? 1)) * 42))}%</b></p>)}
+            </div>
+          </section>
+          <section className="panel">
+            <PanelTitle title="Export Answer" icon={FileText} />
+            <div className="rag-export-grid">
+              {["Export PDF", "Export Word", "Export PPT", "Share Answer"].map((item) => <button key={item} type="button">{item}</button>)}
+            </div>
+          </section>
+        </aside>
+      </section>
+    </section>
+  );
+}
+
+function buildGroundingSources(answer: CopilotAnswer | null, ragStatus: RagStatusResponse | null) {
+  if (answer?.citations.length || answer?.retrievedContext.length) {
+    const counts = [...answer.citations.map((item) => item.type), ...answer.retrievedContext.map((item) => item.sourceType)]
+      .reduce<Record<string, number>>((acc, item) => {
+        acc[item] = (acc[item] ?? 0) + 1;
+        return acc;
+      }, {});
+    return Object.entries(counts).map(([label, count]) => ({ label: titleCase(label), count, icon: sourceIcon(label) }));
+  }
+  const statusCounts = Object.entries(ragStatus?.bySource ?? {});
+  if (statusCounts.length) return statusCounts.map(([label, count]) => ({ label: titleCase(label), count, icon: sourceIcon(label) }));
+  const corpusDocuments = ragStatus?.corpusDocuments ?? 0;
+  return [
+    { label: "Indexed RAG Documents", count: corpusDocuments, icon: "◇" },
+    { label: "Submitted Issues", count: 0, icon: "●" },
+    { label: "Online Signals", count: 0, icon: "▣" },
+    { label: "Government Documents", count: 0, icon: "□" }
+  ];
+}
+
+function titleCase(value: string) {
+  return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function sourceIcon(value: string) {
+  const lower = value.toLowerCase();
+  if (lower.includes("citizen") || lower.includes("submission")) return "●";
+  if (lower.includes("news") || lower.includes("online")) return "▣";
+  if (lower.includes("government") || lower.includes("document")) return "□";
+  if (lower.includes("traffic")) return "⬡";
+  return "◇";
+}
+
+type CompareLevel = "state" | "district" | "constituency";
+type CompareRegion = {
+  id: string;
+  name: string;
+  level: CompareLevel;
+  projects: RankedProject[];
+  population: number;
+  roads: number;
+  healthcare: number;
+  education: number;
+  water: number;
+  employment: number;
+  budget: number;
+  satisfaction: number;
+  demand: number;
+  infrastructure: number;
+  priority: number;
+  completion: number;
+};
+
+const compareMetrics: Array<{ key: keyof CompareRegion; label: string; suffix?: string }> = [
+  { key: "population", label: "Population" },
+  { key: "roads", label: "Roads", suffix: "/100" },
+  { key: "healthcare", label: "Healthcare", suffix: "/100" },
+  { key: "education", label: "Education", suffix: "/100" },
+  { key: "water", label: "Water Supply", suffix: "/100" },
+  { key: "employment", label: "Employment", suffix: "/100" },
+  { key: "budget", label: "Budget Utilization", suffix: "%" },
+  { key: "satisfaction", label: "Citizen Satisfaction", suffix: "%" },
+  { key: "demand", label: "Demand Signals" },
+  { key: "infrastructure", label: "Infrastructure Index", suffix: "/100" },
+  { key: "priority", label: "AI Priority Score", suffix: "/100" }
+];
+
+function ComparePage() {
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [level, setLevel] = useState<CompareLevel>("state");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    requestJson<DashboardResponse>("/api/priorities?scope=global")
+      .then((next) => {
+        if (cancelled) return;
+        setDashboard(next);
+        setError("");
+      })
+      .catch((loadError) => {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Comparison data unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const regions = useMemo(() => buildCompareRegions(dashboard?.projects ?? [], level), [dashboard, level]);
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const valid = current.filter((id) => regions.some((region) => region.id === id));
+      return valid.length >= 2 ? valid : regions.slice(0, 3).map((region) => region.id);
+    });
+  }, [regions]);
+
+  const selected = regions.filter((region) => selectedIds.includes(region.id)).slice(0, 5);
+  const insights = buildCompareInsights(selected);
+
+  function toggleRegion(id: string) {
+    setSelectedIds((current) => {
+      if (current.includes(id)) return current.length <= 2 ? current : current.filter((item) => item !== id);
+      return [...current, id].slice(-5);
+    });
+  }
+
+  return (
+    <section className="compare-page">
+      <section className="compare-hero panel">
+        <div>
+          <p className="eyebrow">Synchronized Analytics</p>
+          <h3>Constituency Comparison Dashboard</h3>
+          <p>Compare states, districts, or constituencies across citizen demand, infrastructure, budget, demographics, projects, and AI priority.</p>
         </div>
-        <section className="copilot-section">
-          <strong>Retrieved context</strong>
-          <div className="retrieved-list">
-            {(latestAnswer?.retrievedContext ?? []).map((item) => (
-              <article key={item.id}>
-                <span>{item.sourceType} · score {item.score}</span>
-                <strong>{item.title}</strong>
-                <p>{item.snippet}</p>
-              </article>
-            ))}
-            {!latestAnswer ? <p className="side-muted">Ask a question to see retrieved chunks from projects, citizen signals, digest, forecasts, and recommendations.</p> : null}
+        <div className="compare-controls" aria-label="Comparison controls">
+          <label>Compare Level
+            <select value={level} onChange={(event) => setLevel(event.target.value as CompareLevel)} aria-label="Compare level">
+              <option value="state">States</option>
+              <option value="district">Districts</option>
+              <option value="constituency">Constituencies</option>
+            </select>
+          </label>
+          <span>{selected.length} synchronized regions</span>
+        </div>
+      </section>
+
+      {error ? <div className="error-state">{error}</div> : null}
+
+      <section className="panel compare-picker">
+        {regions.slice(0, 12).map((region) => (
+          <button className={selectedIds.includes(region.id) ? "active" : ""} key={region.id} onClick={() => toggleRegion(region.id)} type="button">
+            <strong>{region.name}</strong>
+            <span>{formatCount(region.demand)} signals</span>
+          </button>
+        ))}
+      </section>
+
+      <section className="compare-kpi-matrix">
+        {compareMetrics.map((metric) => (
+          <section className="panel compare-metric-card" key={String(metric.key)}>
+            <h4>{metric.label}</h4>
+            <div>
+              {selected.map((region) => (
+                <article key={region.id}>
+                  <span>{region.name}</span>
+                  <strong>{formatCompareValue(region[metric.key], metric.suffix)}</strong>
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+      </section>
+
+      <section className="compare-chart-grid">
+        <section className="panel compare-chart-card">
+          <PanelTitle title="Radar Comparison" icon={TrendingUp} detail="normalized strengths" />
+          <div className="compare-radar-grid">{selected.map((region) => <RadarMini key={region.id} region={region} />)}</div>
+        </section>
+        <section className="panel compare-chart-card">
+          <PanelTitle title="Budget Analysis" icon={Database} detail="utilization vs demand" />
+          <CompareBars regions={selected} metric="budget" color="#5b35f5" />
+          <CompareBars regions={selected} metric="demand" color="#f97316" compact />
+        </section>
+        <section className="panel compare-chart-card">
+          <PanelTitle title="Trend Lines" icon={TrendingUp} detail="synchronized 6-month view" />
+          <TrendMini regions={selected} />
+        </section>
+        <section className="panel compare-chart-card">
+          <PanelTitle title="Infrastructure Heatmap" icon={MapPinned} detail="category intensity" />
+          <CompareHeatmap regions={selected} />
+        </section>
+      </section>
+
+      <section className="compare-analysis-grid">
+        <section className="panel compare-chart-card">
+          <PanelTitle title="Demographic Comparison" icon={Users} />
+          <CompareBars regions={selected} metric="population" color="#0ea5e9" />
+        </section>
+        <section className="panel compare-chart-card">
+          <PanelTitle title="Project Completion Rates" icon={CheckCircle2} />
+          <CompareBars regions={selected} metric="completion" color="#16a34a" />
+        </section>
+        <section className="panel compare-chart-card">
+          <PanelTitle title="AI-Generated Insights" icon={Bot} />
+          <div className="compare-insights">
+            {insights.map((item) => <p key={item}>{item}</p>)}
           </div>
         </section>
-        <section className="copilot-section">
-          <strong>Citations</strong>
-          <div className="citation-list">
-            {(latestAnswer?.citations ?? []).map((item) => (
-              <article key={`${item.type}-${item.id}`}>
-                <span>{item.type}</span>
-                <strong>{item.title}</strong>
-                <p>{item.snippet}</p>
-              </article>
-            ))}
+      </section>
+    </section>
+  );
+}
+
+function buildCompareRegions(projects: RankedProject[], level: CompareLevel): CompareRegion[] {
+  const groups = new Map<string, RankedProject[]>();
+  for (const project of projects) {
+    const key = level === "state" ? project.state : level === "district" ? `${project.state} / ${project.district}` : project.mpName;
+    groups.set(key, [...(groups.get(key) ?? []), project]);
+  }
+  return [...groups.entries()].map(([name, items]) => {
+    const byCategory = (category: string) => Math.round(average(items.filter((item) => item.category === category).map((item) => item.score)) || average(items.map((item) => item.score)) * 0.72);
+    const demand = items.reduce((sum, item) => sum + item.demandCount, 0);
+    const satisfaction = Math.round((average(items.map((item) => item.averageRating)) / 5) * 100);
+    const infrastructure = Math.round(average([byCategory("Roads"), byCategory("Water"), byCategory("Power"), byCategory("Sanitation")]));
+    return {
+      id: `${level}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      name,
+      level,
+      projects: items,
+      population: Math.max(125000, demand * 1800 + items.length * 42000),
+      roads: byCategory("Roads"),
+      healthcare: byCategory("Health"),
+      education: byCategory("Education"),
+      water: byCategory("Water"),
+      employment: Math.round(average(items.map((item) => item.score)) * 0.68),
+      budget: Math.min(98, Math.round(52 + average(items.map((item) => item.confidence)) * 38)),
+      satisfaction,
+      demand,
+      infrastructure,
+      priority: Math.round(Math.max(...items.map((item) => item.score), 0)),
+      completion: Math.round((items.filter((item) => item.status === "approved").length / Math.max(1, items.length)) * 100)
+    };
+  }).sort((a, b) => b.priority - a.priority || b.demand - a.demand);
+}
+
+function formatCompareValue(value: CompareRegion[keyof CompareRegion], suffix?: string) {
+  if (typeof value !== "number") return String(value);
+  return `${formatCount(value)}${suffix ?? ""}`;
+}
+
+function RadarMini({ region }: { region: CompareRegion }) {
+  const values = [region.roads, region.healthcare, region.education, region.water, region.employment, region.infrastructure];
+  const points = values.map((value, index) => {
+    const angle = (-90 + index * 60) * Math.PI / 180;
+    const radius = 12 + (Math.min(100, value) / 100) * 42;
+    return `${60 + Math.cos(angle) * radius},${60 + Math.sin(angle) * radius}`;
+  }).join(" ");
+  return (
+    <article className="radar-mini">
+      <svg viewBox="0 0 120 120" role="img" aria-label={`${region.name} radar chart`}>
+        <polygon points="60,12 101,36 101,84 60,108 19,84 19,36" />
+        <polygon className="value" points={points} />
+      </svg>
+      <strong>{region.name}</strong>
+    </article>
+  );
+}
+
+function CompareBars({ regions, metric, color, compact = false }: { regions: CompareRegion[]; metric: keyof CompareRegion; color: string; compact?: boolean }) {
+  const max = Math.max(1, ...regions.map((region) => Number(region[metric]) || 0));
+  return (
+    <div className={`compare-bars ${compact ? "compact" : ""}`}>
+      {regions.map((region) => {
+        const value = Number(region[metric]) || 0;
+        return <span key={region.id}><em>{region.name}</em><i style={{ background: color, width: `${Math.max(6, (value / max) * 100)}%` }} /><b>{formatCount(value)}</b></span>;
+      })}
+    </div>
+  );
+}
+
+function TrendMini({ regions }: { regions: CompareRegion[] }) {
+  return (
+    <div className="trend-mini">
+      {regions.map((region, index) => {
+        const values = Array.from({ length: 6 }, (_, month) => Math.max(10, region.priority - 18 + month * 4 + index * 3));
+        const points = values.map((value, month) => `${month * 48},${90 - value}`).join(" ");
+        return <svg key={region.id} viewBox="0 0 240 100"><polyline points={points} /><text x="0" y={96 - index * 12}>{region.name}</text></svg>;
+      })}
+    </div>
+  );
+}
+
+function CompareHeatmap({ regions }: { regions: CompareRegion[] }) {
+  const keys: Array<keyof CompareRegion> = ["roads", "healthcare", "education", "water", "employment", "infrastructure"];
+  return (
+    <div className="compare-heatmap">
+      <span />
+      {keys.map((key) => <b key={String(key)}>{titleCase(String(key))}</b>)}
+      {regions.flatMap((region) => [
+        <strong key={`${region.id}-name`}>{region.name}</strong>,
+        ...keys.map((key) => <i key={`${region.id}-${String(key)}`} style={{ opacity: Math.max(0.25, Number(region[key]) / 100) }}>{Number(region[key])}</i>)
+      ])}
+    </div>
+  );
+}
+
+function buildCompareInsights(regions: CompareRegion[]) {
+  if (!regions.length) return ["Select at least two regions to generate comparative insights."];
+  const strongest = [...regions].sort((a, b) => b.infrastructure - a.infrastructure)[0];
+  const highestDemand = [...regions].sort((a, b) => b.demand - a.demand)[0];
+  const lowestSatisfaction = [...regions].sort((a, b) => a.satisfaction - b.satisfaction)[0];
+  return [
+    `${strongest.name} is strongest on infrastructure readiness with index ${strongest.infrastructure}/100.`,
+    `${highestDemand.name} has the highest demand pressure with ${formatCount(highestDemand.demand)} citizen signals.`,
+    `${lowestSatisfaction.name} needs citizen-experience attention; satisfaction is ${lowestSatisfaction.satisfaction}%.`,
+    "Recommended focus: fund high-demand road and water gaps first, then track PHC and education backlogs through weekly reviews."
+  ];
+}
+
+const indiaAdminDistricts: Record<string, string[]> = {
+  "Andhra Pradesh": ["Anantapur", "Guntur", "Krishna", "Visakhapatnam", "Vijayawada"],
+  "Arunachal Pradesh": ["East Siang", "Itanagar", "Tawang", "West Kameng"],
+  Assam: ["Dibrugarh", "Guwahati", "Jorhat", "Silchar"],
+  Bihar: ["Patna", "Gaya", "Muzaffarpur", "Bhagalpur", "Darbhanga", "Purnea", "Nalanda"],
+  Chhattisgarh: ["Raipur", "Bilaspur", "Durg", "Korba"],
+  Goa: ["North Goa", "South Goa"],
+  Gujarat: ["Ahmedabad", "Surat", "Vadodara", "Rajkot"],
+  Haryana: ["Gurugram", "Faridabad", "Hisar", "Karnal"],
+  "Himachal Pradesh": ["Shimla", "Kangra", "Mandi", "Solan"],
+  Jharkhand: ["Ranchi", "Dhanbad", "Jamshedpur", "Bokaro"],
+  Karnataka: ["Bengaluru Urban", "Mysuru", "Mangaluru", "Belagavi"],
+  Kerala: ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur"],
+  "Madhya Pradesh": ["Bhopal", "Indore", "Jabalpur", "Gwalior"],
+  Maharashtra: ["Mumbai", "Pune", "Nagpur", "Nashik Rural"],
+  Manipur: ["Imphal East", "Imphal West", "Thoubal"],
+  Meghalaya: ["East Khasi Hills", "West Garo Hills", "Ri Bhoi"],
+  Mizoram: ["Aizawl", "Lunglei", "Champhai"],
+  Nagaland: ["Kohima", "Dimapur", "Mokokchung"],
+  Odisha: ["Bhubaneswar", "Cuttack", "Puri", "Sambalpur"],
+  Punjab: ["Ludhiana", "Amritsar", "Patiala", "Jalandhar", "Bathinda", "Mohali"],
+  Rajasthan: ["Jaipur", "Jodhpur", "Udaipur", "Kota"],
+  Sikkim: ["Gangtok", "Namchi", "Gyalshing"],
+  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli"],
+  Telangana: ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar"],
+  Tripura: ["West Tripura", "Gomati", "Dhalai"],
+  "Uttar Pradesh": ["Lucknow", "Varanasi", "Kanpur Nagar", "Prayagraj", "Gorakhpur"],
+  Uttarakhand: ["Dehradun", "Haridwar", "Nainital", "Udham Singh Nagar"],
+  "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "North 24 Parganas"],
+  Delhi: ["Central Delhi", "East Delhi", "New Delhi", "South Delhi", "North Delhi"],
+  "Jammu and Kashmir": ["Srinagar", "Jammu", "Anantnag", "Baramulla"],
+  Ladakh: ["Leh", "Kargil"],
+  Puducherry: ["Puducherry", "Karaikal", "Mahe", "Yanam"],
+  Chandigarh: ["Chandigarh"],
+  "Andaman and Nicobar Islands": ["South Andaman", "North and Middle Andaman", "Nicobar"],
+  Lakshadweep: ["Lakshadweep"],
+  "Dadra and Nagar Haveli and Daman and Diu": ["Daman", "Diu", "Dadra and Nagar Haveli"]
+};
+
+function SettingsPage({ clientConfig, ragStatus, demoData, context }: { clientConfig: ClientConfig; ragStatus: RagStatusResponse | null; demoData: DemoDataStatus; context: ContextResponse }) {
+  const adminDistricts = useMemo(() => {
+    const merged = { ...indiaAdminDistricts };
+    for (const [state, districts] of Object.entries(context.districtsByState)) {
+      merged[state] = [...new Set([...(merged[state] ?? []), ...districts])].sort();
+    }
+    return merged;
+  }, [context]);
+  const [settingsState, setSettingsState] = useState("Punjab");
+  const [settingsDistrict, setSettingsDistrict] = useState("Ludhiana");
+  const districtOptions = adminDistricts[settingsState] ?? [];
+  const constituencyOptions = useMemo(() => {
+    const mapped = context.mps
+      .filter((mp) => mp.state === settingsState && mp.district === settingsDistrict)
+      .map((mp) => mp.name);
+    return mapped.length ? mapped : [`${settingsDistrict} Constituency`, `${settingsDistrict} Urban`, `${settingsDistrict} Rural`];
+  }, [context, settingsState, settingsDistrict]);
+  const [settingsConstituency, setSettingsConstituency] = useState("MP Ludhiana");
+
+  useEffect(() => {
+    if (!districtOptions.includes(settingsDistrict)) setSettingsDistrict(districtOptions[0] ?? "");
+  }, [districtOptions, settingsDistrict]);
+
+  useEffect(() => {
+    if (!constituencyOptions.includes(settingsConstituency)) setSettingsConstituency(constituencyOptions[0] ?? "");
+  }, [constituencyOptions, settingsConstituency]);
+
+  const integrations = [
+    { name: "OpenAI", status: "Environment key required", usage: "0 calls", health: "Not connected" },
+    { name: "Gemini", status: "Vertex-ready adapter", usage: "Fallback mode active", health: "Ready" },
+    { name: "News API", status: "Environment key supported", usage: "Live when configured", health: "Connector ready" },
+    { name: "X API", status: "Bearer token supported", usage: "Recent search", health: "Connector ready" },
+    { name: "Weather API", status: "Planned connector", usage: "0 calls", health: "Pending" },
+    { name: "Maps API", status: clientConfig.maps.enabled ? "Connected" : "Not configured", usage: clientConfig.maps.source, health: clientConfig.maps.enabled ? "Live" : "Needs key" }
+  ];
+  const roles = ["MP Admin", "District Officer", "Ward Staff", "Analyst", "Citizen Support", "Read-only Auditor"];
+  const dataSources = ["Citizen submissions", "Online signals", "Government documents", "Census layers", "Weather alerts", "Satellite imagery", "Traffic data", "Manual uploads"];
+  const auditRows = [
+    { action: "Demo data toggled", actor: "Admin", time: "Current session", status: demoData.enabled ? "Enabled" : "Disabled" },
+    { action: "RAG health checked", actor: "System", time: ragStatus?.refreshCadence ?? "On demand", status: ragStatus?.mode ?? "Not configured" },
+    { action: "Maps runtime config read", actor: "System", time: clientConfig.generatedAt, status: clientConfig.maps.source }
+  ];
+
+  return (
+    <section className="settings-page">
+      <section className="settings-hero panel">
+        <div>
+          <p className="eyebrow">Enterprise Administration</p>
+          <h3>AI Governance Settings</h3>
+          <p>Manage JanVaani AI workspace identity, model access, connectors, security controls, and operational health.</p>
+        </div>
+        <div className="settings-health">
+          <Metric label="API Status" value={clientConfig.generatedAt ? "Live" : "Unknown"} detail={clientConfig.dataMode} />
+          <Metric label="Vector DB" value={ragStatus?.mode ?? "Offline"} detail={`${formatCount(ragStatus?.corpusDocuments ?? 0)} documents`} />
+          <Metric label="Indexing" value={ragStatus?.refreshCadence ?? "Manual"} detail={ragStatus?.embeddingStore ?? "No vector store"} />
+          <Metric label="Storage" value={`${formatCount(demoData.visibleRows)} rows`} detail={demoData.label} />
+        </div>
+      </section>
+
+      <section className="settings-grid">
+        <section className="panel settings-card">
+          <PanelTitle title="Profile" icon={Users} />
+          <label>Name<input value="Shivam Kumar" readOnly /></label>
+          <label>Email<input value="admin@janvaani.local" readOnly /></label>
+          <label>Role<select defaultValue="MP Admin">{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+        </section>
+
+        <section className="panel settings-card">
+          <PanelTitle title="Organization" icon={Briefcase} />
+          <label>Organization<input value="JanVaani AI Governance Workspace" readOnly /></label>
+          <label>Region<input value="India" readOnly /></label>
+          <label>Data mode<input value={clientConfig.dataMode} readOnly /></label>
+        </section>
+
+        <section className="panel settings-card">
+          <PanelTitle title="Constituency Settings" icon={MapPinned} />
+          <label>Default State
+            <select value={settingsState} onChange={(event) => setSettingsState(event.target.value)} aria-label="Settings state">
+              {Object.keys(adminDistricts).sort().map((state) => <option key={state}>{state}</option>)}
+            </select>
+          </label>
+          <label>Default District
+            <select value={settingsDistrict} onChange={(event) => setSettingsDistrict(event.target.value)} aria-label="Settings district">
+              {districtOptions.map((district) => <option key={district}>{district}</option>)}
+            </select>
+          </label>
+          <label>Default Constituency
+            <select value={settingsConstituency} onChange={(event) => setSettingsConstituency(event.target.value)} aria-label="Settings constituency">
+              {constituencyOptions.map((constituency) => <option key={constituency}>{constituency}</option>)}
+            </select>
+          </label>
+        </section>
+
+        <section className="panel settings-card">
+          <PanelTitle title="AI Model Selection" icon={Bot} />
+          <label>Primary Model<select defaultValue="Gemini / Vertex AI"><option>Gemini / Vertex AI</option><option>OpenAI GPT</option><option>OpenAI-compatible</option><option>Fallback rules</option></select></label>
+          <label>RAG Retrieval<select defaultValue={ragStatus?.mode ?? "Local hybrid"}><option>{ragStatus?.mode ?? "Local hybrid"}</option><option>Vertex AI RAG Engine</option><option>Vertex AI Vector Search</option></select></label>
+          <label>Confidence Threshold<input value="75%" readOnly /></label>
+        </section>
+      </section>
+
+      <section className="panel settings-wide">
+        <PanelTitle title="API Keys & Integrations" icon={DatabaseZap} />
+        <div className="integration-status-grid">
+          {integrations.map((item) => (
+            <article key={item.name}>
+              <strong>{item.name}</strong>
+              <span className={item.health === "Live" || item.health === "Ready" || item.health === "Connector ready" ? "ok" : "warn"}>{item.health}</span>
+              <p>{item.status}</p>
+              <small>{item.usage}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-two-col">
+        <section className="panel settings-wide">
+          <PanelTitle title="Data Sources" icon={Database} />
+          <div className="settings-check-grid">
+            {dataSources.map((item) => <label key={item}><input type="checkbox" defaultChecked />{item}</label>)}
           </div>
         </section>
-        <section className="copilot-section">
-          <strong>Source coverage</strong>
-          <div className="source-family-list">
-            {Object.entries(ragStatus?.bySource ?? {}).map(([source, count]) => <span key={source}>{source} · {count}</span>)}
+        <section className="panel settings-wide">
+          <PanelTitle title="Notification Preferences" icon={MessageSquareText} />
+          <div className="settings-check-grid">
+            {["Daily intelligence digest", "Indexing failures", "Connector downtime", "High-priority issue spike", "Billing usage alert", "Security audit alert"].map((item) => <label key={item}><input type="checkbox" defaultChecked />{item}</label>)}
           </div>
         </section>
-        <section className="copilot-section">
-          <strong>Guardrails</strong>
-          <div className="guardrail-list">
-            {(latestAnswer?.guardrails ?? capabilities?.currentLimitations ?? []).map((item) => <p key={item}>{item}</p>)}
-            <p>{ragStatus?.privacy ?? "Personal citizen identifiers are not shown in answers."}</p>
-          </div>
+      </section>
+
+      <section className="settings-grid compact">
+        <section className="panel settings-card">
+          <PanelTitle title="Security" icon={Lock} />
+          <label><input type="checkbox" defaultChecked /> Require admin login</label>
+          <label><input type="checkbox" defaultChecked /> Mask citizen identity</label>
+          <label><input type="checkbox" defaultChecked /> Enforce citation guardrails</label>
         </section>
-      </aside>
+        <section className="panel settings-card">
+          <PanelTitle title="Access Control" icon={Lock} />
+          <label>Session Timeout<select defaultValue="12 hours"><option>1 hour</option><option>12 hours</option><option>24 hours</option></select></label>
+          <label>API Policy<select defaultValue="Server-side keys only"><option>Server-side keys only</option><option>Read-only public keys</option></select></label>
+        </section>
+        <section className="panel settings-card">
+          <PanelTitle title="User Roles" icon={Users} />
+          <div className="role-chip-list">{roles.map((role) => <span key={role}>{role}</span>)}</div>
+        </section>
+        <section className="panel settings-card">
+          <PanelTitle title="Language & Theme" icon={Languages} />
+          <label>Language<select defaultValue="English"><option>English</option><option>Hindi</option><option>Punjabi</option><option>Tamil</option><option>Bengali</option></select></label>
+          <label>Mode<select defaultValue="Light"><option>Light</option><option>Dark</option><option>System</option></select></label>
+        </section>
+        <section className="panel settings-card">
+          <PanelTitle title="Backup Settings" icon={RefreshCw} />
+          <label>Backup Frequency<select defaultValue="Daily"><option>Hourly</option><option>Daily</option><option>Weekly</option></select></label>
+          <label>Retention<input value="90 days" readOnly /></label>
+        </section>
+        <section className="panel settings-card">
+          <PanelTitle title="Billing" icon={Star} />
+          <label>Plan<input value="Enterprise pilot" readOnly /></label>
+          <label>Usage Limit<input value="Governed by API quotas" readOnly /></label>
+        </section>
+      </section>
+
+      <section className="panel settings-wide">
+        <PanelTitle title="Audit Logs" icon={FileText} />
+        <div className="settings-audit-table">
+          {auditRows.map((row) => (
+            <article key={row.action}>
+              <strong>{row.action}</strong>
+              <span>{row.actor}</span>
+              <span>{row.time}</span>
+              <mark>{row.status}</mark>
+            </article>
+          ))}
+        </div>
+      </section>
     </section>
   );
 }
@@ -1475,133 +2104,401 @@ function AnswerContent({ text }: { text: string }) {
   );
 }
 
-function SimulationPage({ refreshAll }: { refreshAll: () => Promise<void> }) {
-  const [scenarios, setScenarios] = useState<SimulationScenario[]>([]);
-  const [channel, setChannel] = useState<SimulationScenario["channel"]>("text");
-  const [stateName, setStateName] = useState("Delhi");
-  const [districtName, setDistrictName] = useState("Central Delhi");
-  const [wardName, setWardName] = useState("Kalindi Nagar");
-  const [language, setLanguage] = useState("Hindi");
-  const [urgency, setUrgency] = useState(5);
-  const [rating, setRating] = useState(5);
-  const [text, setText] = useState("School classrooms flood after rain and toilets are unusable for girls.");
-  const [media, setMedia] = useState("");
-  const [receipt, setReceipt] = useState<{ rawIntakeId: string; status: string; message: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+const categoryMeta: Record<string, { icon: typeof Home; color: string }> = {
+  Roads: { icon: Construction, color: "#dc2626" },
+  Water: { icon: Droplets, color: "#2563eb" },
+  Health: { icon: HeartPulse, color: "#138a52" },
+  Power: { icon: Zap, color: "#d97706" },
+  Education: { icon: GraduationCap, color: "#7c3aed" },
+  Sanitation: { icon: Trash2, color: "#0d9488" },
+  "Digital Access": { icon: Wifi, color: "#db2777" },
+  Employment: { icon: Briefcase, color: "#4f46e5" }
+};
+
+const fallbackCategoryMeta = { icon: Flag, color: "#64748b" };
+
+type DailyPulse = {
+  viralLocalTopics: Array<{ topic: string; mentions: number; trend: string }>;
+  indices: Record<string, number>;
+};
+
+function PulsePage({ setPage }: { setPage: (page: Page) => void }) {
+  const [data, setData] = useState<DashboardResponse | null>(null);
+  const [daily, setDaily] = useState<DailyPulse | null>(null);
+  const [error, setError] = useState("");
+  const [stateFilter, setStateFilter] = useState("All States");
+  const [districtFilter, setDistrictFilter] = useState("All Districts");
+  const [constituencyFilter, setConstituencyFilter] = useState("All Constituencies");
+  const [problemFilter, setProblemFilter] = useState("All Problems");
+  const [timeFilter, setTimeFilter] = useState("Current Batch");
+  const [languageFilter, setLanguageFilter] = useState("English");
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [showAllDistricts, setShowAllDistricts] = useState(false);
+  const [showAllTrends, setShowAllTrends] = useState(false);
+  const [assistantQuestion, setAssistantQuestion] = useState("What is the biggest issue?");
+  const [assistantAnswer, setAssistantAnswer] = useState("");
 
   useEffect(() => {
-    getJson<{ scenarios: SimulationScenario[] }>("/api/simulation/scenarios", { scenarios: [] }).then((payload) => {
-      setScenarios(payload.scenarios);
-    });
+    let cancelled = false;
+    Promise.all([
+      requestJson<DashboardResponse>("/api/priorities?scope=global"),
+      getJson<DailyPulse>("/api/intelligence/daily", { viralLocalTopics: [], indices: {} })
+    ])
+      .then(([dashboard, nextDaily]) => {
+        if (cancelled) return;
+        setData(dashboard);
+        setDaily(nextDaily);
+        setError("");
+      })
+      .catch((loadError) => {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "National pulse unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function applyScenario(scenario: SimulationScenario) {
-    setChannel(scenario.channel);
-    setStateName(scenario.state);
-    setDistrictName(scenario.district);
-    setWardName(scenario.ward);
-    setLanguage(scenario.language);
-    setUrgency(scenario.urgency);
-    setRating(scenario.rating);
-    setText(scenario.text);
-    setMedia(sampleMediaFor(scenario.channel));
-    setReceipt(null);
-  }
+  const projects = data?.projects ?? [];
+  const allStates = useMemo(() => ["All States", ...[...new Set(projects.map((project) => project.state))].sort()], [projects]);
+  const districtOptions = useMemo(() => {
+    const filtered = projects.filter((project) => stateFilter === "All States" || project.state === stateFilter);
+    return ["All Districts", ...[...new Set(filtered.map((project) => project.district))].sort()];
+  }, [projects, stateFilter]);
+  const constituencyOptions = useMemo(() => {
+    const filtered = projects.filter((project) =>
+      (stateFilter === "All States" || project.state === stateFilter) &&
+      (districtFilter === "All Districts" || project.district === districtFilter)
+    );
+    return ["All Constituencies", ...[...new Set(filtered.map((project) => project.mpName))].sort()];
+  }, [projects, stateFilter, districtFilter]);
+  const problemOptions = useMemo(() => ["All Problems", ...[...new Set(projects.map((project) => project.category))].sort()], [projects]);
+  const filteredProjects = useMemo(() => projects.filter((project) =>
+    (stateFilter === "All States" || project.state === stateFilter) &&
+    (districtFilter === "All Districts" || project.district === districtFilter) &&
+    (constituencyFilter === "All Constituencies" || project.mpName === constituencyFilter) &&
+    (problemFilter === "All Problems" || project.category === problemFilter)
+  ), [projects, stateFilter, districtFilter, constituencyFilter, problemFilter]);
 
-  async function submitSimulation() {
-    setBusy(true);
-    try {
-      const response = await apiFetch("/api/simulation/submit", {
-        method: "POST",
-        body: JSON.stringify({
-          channel,
-          state: stateName,
-          district: districtName,
-          ward: wardName,
-          language,
-          urgency,
-          rating,
-          text,
-          media: media || undefined
-        })
-      });
-      if (!response.ok) throw new Error("Simulation submit failed");
-      setReceipt(await response.json());
-      await refreshAll();
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    setDistrictFilter("All Districts");
+    setConstituencyFilter("All Constituencies");
+  }, [stateFilter]);
+
+  useEffect(() => {
+    setConstituencyFilter("All Constituencies");
+  }, [districtFilter]);
+
+  const categoryGroups = new Map<string, { demand: number; works: number; states: Set<string>; top: RankedProject }>();
+  for (const project of filteredProjects) {
+    const group = categoryGroups.get(project.category);
+    if (group) {
+      group.demand += project.demandCount;
+      group.works += 1;
+      group.states.add(project.state);
+      if (project.demandCount > group.top.demandCount) group.top = project;
+    } else {
+      categoryGroups.set(project.category, { demand: project.demandCount, works: 1, states: new Set([project.state]), top: project });
     }
   }
+  const categories = [...categoryGroups.entries()]
+    .map(([category, group]) => ({ category, ...group }))
+    .sort((a, b) => b.demand - a.demand);
+  const top5 = categories.slice(0, 5);
+  const maxCategoryDemand = Math.max(1, top5[0]?.demand ?? 1);
+  const focusCategory = categories.find((entry) => entry.category === (problemFilter === "All Problems" ? top5[0]?.category : problemFilter)) ?? top5[0];
+  const focusProject = focusCategory?.top;
 
-  async function readFile(file: File | undefined) {
-    if (!file) return;
-    const value = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-    setMedia(value);
+  const stateGroups = new Map<string, number>();
+  for (const project of filteredProjects) {
+    stateGroups.set(project.state, (stateGroups.get(project.state) ?? 0) + project.demandCount);
+  }
+  const stateRanking = [...stateGroups.entries()]
+    .map(([state, demand]) => ({ state, demand }))
+    .sort((a, b) => b.demand - a.demand);
+
+  const districtRanking = [...filteredProjects.reduce<Map<string, { district: string; state: string; demand: number }>>((acc, project) => {
+    const key = `${project.state}::${project.district}`;
+    const current = acc.get(key) ?? { district: project.district, state: project.state, demand: 0 };
+    current.demand += project.demandCount;
+    acc.set(key, current);
+    return acc;
+  }, new Map()).values()].sort((a, b) => b.demand - a.demand);
+  const totalSignals = filteredProjects.reduce((sum, project) => sum + project.demandCount, 0);
+  const priorityScore = Math.round(focusProject?.score ?? daily?.indices.priorityScore ?? Math.max(0, ...filteredProjects.map((project) => project.score)));
+  const trending = categories.map((entry) => ({ topic: entry.category, mentions: entry.demand, trend: entry.top.urgencyScore >= 13 ? "rising" : "stable" })).slice(0, showAllTrends ? 10 : 4);
+  const selectedRegionName = stateFilter === "All States" ? "India" : stateFilter;
+  const selectedProblemName = focusCategory?.category ?? "No issue";
+  const affectedCitizens = focusProject ? `${formatCount(Math.max(focusProject.demandCount * 1800, focusProject.demandCount))}+` : "0";
+  const relatedProjects = filteredProjects.filter((project) => project.category === focusCategory?.category).slice(0, 4);
+  const areaMix = buildAreaMix(filteredProjects);
+
+  function submitAssistant(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const top = focusProject;
+    setAssistantAnswer(top
+      ? `${selectedProblemName} leads in ${selectedRegionName}: ${formatCount(top.demandCount)} demand signals, ${Math.round(top.confidence * 100)}% confidence, strongest location ${top.ward}, ${top.district}.`
+      : `No processed demand records for ${selectedRegionName} with current filters.`);
   }
 
   return (
-    <section className="two-grid wide-right">
-      <section className="panel">
-        <PanelTitle title="Simulation workbench" icon={DatabaseZap} detail="Generate realistic multimodal civic intake" />
-        <div className="scenario-grid">
-          {scenarios.map((scenario) => (
-            <button className="scenario-card" key={scenario.id} onClick={() => applyScenario(scenario)}>
-              <strong>{scenario.title}</strong>
-              <span>{scenario.channel} · {scenario.ward}</span>
-            </button>
-          ))}
-        </div>
-        <div className="form-grid">
-          <label>Channel
-            <select value={channel} onChange={(event) => { const next = event.target.value as SimulationScenario["channel"]; setChannel(next); setMedia(sampleMediaFor(next)); }}>
-              <option value="text">Text</option>
-              <option value="photo">Image/photo</option>
-              <option value="voice">Voice/audio</option>
-              <option value="video">Video</option>
-              <option value="whatsapp">WhatsApp</option>
-            </select>
-          </label>
-          <label>Language<input value={language} onChange={(event) => setLanguage(event.target.value)} /></label>
-          <label>State<input value={stateName} onChange={(event) => setStateName(event.target.value)} /></label>
-          <label>District<input value={districtName} onChange={(event) => setDistrictName(event.target.value)} /></label>
-          <label>Ward<input value={wardName} onChange={(event) => setWardName(event.target.value)} /></label>
-          <label>Urgency<input type="number" min="1" max="5" value={urgency} onChange={(event) => setUrgency(Number(event.target.value))} /></label>
-          <label>Rating<input type="number" min="1" max="5" value={rating} onChange={(event) => setRating(Number(event.target.value))} /></label>
-        </div>
-        <label>Problem text<textarea value={text} onChange={(event) => setText(event.target.value)} /></label>
-        <label>Upload simulated media<input type="file" accept="image/*,audio/*,video/*" onChange={(event) => readFile(event.target.files?.[0])} /></label>
-        <div className="simulator-actions">
-          <button className="primary" disabled={busy} onClick={submitSimulation}>{busy ? "Submitting..." : "Submit simulation"}</button>
-          <button onClick={() => setMedia(sampleMediaFor(channel))}>Use sample media</button>
-        </div>
+    <section className={`janvaani-pulse ${drawerOpen ? "" : "drawer-hidden"}`}>
+      <section className="pulse-filterbar" aria-label="National pulse filters">
+        <label>State
+          <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} aria-label="Pulse state">
+            {allStates.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>District
+          <select value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)} aria-label="Pulse district">
+            {districtOptions.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Constituency
+          <select value={constituencyFilter} onChange={(event) => setConstituencyFilter(event.target.value)} aria-label="Pulse constituency">
+            {constituencyOptions.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Problem
+          <select value={problemFilter} onChange={(event) => setProblemFilter(event.target.value)} aria-label="Pulse problem">
+            {problemOptions.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Range
+          <select value={timeFilter} onChange={(event) => setTimeFilter(event.target.value)} aria-label="Pulse time range">
+            {["Current Batch", "Last 30 Days", "Last 90 Days", "This Year"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>Language
+          <select value={languageFilter} onChange={(event) => setLanguageFilter(event.target.value)} aria-label="Pulse language">
+            {["English", "Hindi", "Tamil", "Bengali", "Marathi", "Gujarati"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
       </section>
-      <section className="panel">
-        <PanelTitle title="Simulation receipt" icon={Inbox} />
-        {receipt ? (
-          <div className="receipt small">
-            <strong>{receipt.status}</strong>
-            <span>{receipt.rawIntakeId}</span>
-            <p>{receipt.message}</p>
-          </div>
+
+      {error ? <div className="error-state">{error}</div> : null}
+
+      <section className="pulse-command">
+        {drawerOpen ? (
+          <aside className="pulse-drawer" aria-label="Selected problem intelligence">
+            <button aria-label="Close problem intelligence" className="drawer-close" onClick={() => setDrawerOpen(false)} type="button"><X size={16} /></button>
+            <div className="drawer-head">
+              <h3>{selectedProblemName}</h3>
+              <mark>{priorityScore >= 80 ? "High Priority" : priorityScore >= 55 ? "Priority" : "Needs Data"}</mark>
+            </div>
+            <section>
+              <h4>Priority Score</h4>
+              <strong className="priority-score">{priorityScore}<em>/100</em></strong>
+              <span className="score-line"><i style={{ width: `${Math.min(100, priorityScore)}%` }} /></span>
+            </section>
+            <section>
+              <h4>Citizen Requests <em>({formatCount(focusCategory?.demand ?? 0)})</em></h4>
+              <ul>
+                {(focusProject?.evidence ?? ["No processed records for this filter."]).slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </section>
+            <section>
+              <h4>AI Summary</h4>
+              <p>{focusProject?.rationale ?? `No ${selectedRegionName} priority summary available for current filters.`}</p>
+            </section>
+            <section>
+              <h4>Root Causes</h4>
+              <ul>{(focusProject?.evidence ?? []).slice(1, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+            </section>
+            <section>
+              <h4>Suggested Actions</h4>
+              <ul className="check-list">
+                {relatedProjects.length ? relatedProjects.slice(0, 4).map((project) => <li key={project.id}>Open {project.category.toLowerCase()} review for {project.ward}</li>) : <li>Process more citizen submissions for this filter</li>}
+              </ul>
+            </section>
+            <section className="impact-box">
+              <h4>Estimated Citizen Impact</h4>
+              <strong>{affectedCitizens}</strong>
+            </section>
+            <section>
+              <h4>Related Projects</h4>
+              {relatedProjects.map((project) => <button key={project.id} onClick={() => setPage("priorities")} type="button">{project.title}</button>)}
+            </section>
+            <section>
+              <h4>Supporting Evidence</h4>
+              <ul className="check-list">
+                <li>{formatCount(totalSignals)} processed citizen signals</li>
+                <li>{filteredProjects.length} ranked works</li>
+                <li>{stateRanking.length} states in current filter</li>
+              </ul>
+            </section>
+          </aside>
         ) : (
-          <div className="empty-state">Choose a scenario or compose a problem, then submit it into the batch queue.</div>
+          <button aria-label="Open problem intelligence" className="drawer-open" onClick={() => setDrawerOpen(true)} type="button"><PanelLeftOpen size={18} /></button>
         )}
-        <Feature title="What this validates" icon={ShieldCheck} points={["Same intake path as citizen app", "Privacy mode defaults on", "Text, image, voice, and video payload support", "Batch queue receipt", "Dashboard refresh after submit"]} />
+
+        <div className="pulse-main">
+          <section className="panel pulse-overview" aria-label="National overview">
+            <div>
+              <h3>{selectedRegionName}</h3>
+              <p>Overview of top problems as reported by citizens. Filter controls above update every card, ranking, and evidence panel.</p>
+            </div>
+            <div className="pulse-kpis compact">
+              <article className="pulse-kpi">
+                <span>Reporting States</span>
+                <strong>{stateRanking.length}</strong>
+              </article>
+              <article className="pulse-kpi">
+                <span>Districts</span>
+                <strong>{districtRanking.length}</strong>
+              </article>
+              <article className="pulse-kpi">
+                <span>Active Issues</span>
+                <strong>{formatCount(totalSignals)}</strong>
+              </article>
+              <article className="pulse-kpi accent">
+                <span>AI Priority Score</span>
+                <strong>{priorityScore}<em>/100</em></strong>
+              </article>
+            </div>
+          </section>
+
+          <section className="pulse-workgrid">
+            <section className="panel problem-board" aria-label="Top citizen problems">
+              <PanelTitle title="Top 5 Citizen Problems" icon={Flag} detail={timeFilter} />
+              <div className="problem-list">
+                {top5.map((entry, index) => {
+                  const meta = categoryMeta[entry.category] ?? fallbackCategoryMeta;
+                  const Icon = meta.icon;
+                  const pct = Math.round((entry.demand / maxCategoryDemand) * 100);
+                  return (
+                    <button className={`problem-row ${focusCategory?.category === entry.category ? "selected" : ""}`} key={entry.category} onClick={() => setProblemFilter(entry.category)} type="button">
+                      <span className="problem-icon" style={{ background: `${meta.color}1a`, color: meta.color }}>
+                        <Icon size={19} />
+                      </span>
+                      <span className="problem-rank">{index + 1}</span>
+                      <span className="problem-main">
+                        <strong>{entry.category}</strong>
+                        <span className="problem-bar">
+                          <i style={{ width: `${Math.max(6, pct)}%`, background: meta.color }} />
+                        </span>
+                      </span>
+                      <span className="problem-pct" style={{ color: meta.color }}>{pct}%</span>
+                    </button>
+                  );
+                })}
+                {!top5.length && !error ? <div className="empty-state">National pulse fills in as citizen submissions are processed.</div> : null}
+              </div>
+            </section>
+
+            <section className="panel pulse-map-panel" aria-label="Problem heatmap">
+              <PanelTitle title="Problem Heatmap" icon={MapPinned} detail="complaints density" />
+              <div className="pulse-map-board">
+                {filteredProjects.slice(0, 14).map((project) => {
+                  const meta = categoryMeta[project.category] ?? fallbackCategoryMeta;
+                  return (
+                    <button key={project.id} onClick={() => setProblemFilter(project.category)} style={{ background: heatForScore(project.score), borderColor: `${meta.color}55` }} type="button">
+                      <strong>{project.district}</strong>
+                      <span>{project.ward}</span>
+                    </button>
+                  );
+                })}
+                {!filteredProjects.length ? <div className="empty-state">No heatmap cells for current filters.</div> : null}
+              </div>
+              <div className="heat-legend"><span>Low</span><i /><span>High</span></div>
+            </section>
+
+            <aside className="pulse-side">
+              <section className="panel" aria-label="District ranking">
+                <PanelTitle title="District Ranking" icon={MapPin} />
+                <div className="rank-list">
+                  {districtRanking.slice(0, showAllDistricts ? 12 : 5).map((entry, index) => (
+                    <button className="rank-row" key={`${entry.state}-${entry.district}`} onClick={() => { setStateFilter(entry.state); setDistrictFilter(entry.district); }} type="button">
+                      <span className={`rank-dot rank-${Math.min(index + 1, 5)}`}>{index + 1}</span>
+                      <strong>{entry.district}</strong>
+                      <em>{formatCount(entry.demand)}</em>
+                    </button>
+                  ))}
+                </div>
+                <button className="rail-link" onClick={() => setShowAllDistricts((value) => !value)} type="button">{showAllDistricts ? "Show Top Districts" : "View All Districts"}</button>
+              </section>
+
+              <section className="panel" aria-label="Trending this week">
+                <PanelTitle title="Trending This Week" icon={TrendingUp} />
+                <div className="trend-list">
+                  {trending.map((topic) => {
+                    const meta = categoryMeta[topic.topic] ?? fallbackCategoryMeta;
+                    const Icon = meta.icon;
+                    return (
+                      <button className="trend-row" key={topic.topic} onClick={() => setProblemFilter(topic.topic)} type="button">
+                        <span className="trend-icon" style={{ color: meta.color }}><Icon size={16} /></span>
+                        <span className="trend-copy">
+                          <strong>{topic.topic}</strong>
+                          <small>{formatCount(topic.mentions)} signals</small>
+                        </span>
+                        <mark className={topic.trend === "rising" ? "up" : ""}>{topic.trend}</mark>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button className="rail-link" onClick={() => setShowAllTrends((value) => !value)} type="button">{showAllTrends ? "Show Top Trends" : "View All Trends"}</button>
+              </section>
+            </aside>
+          </section>
+
+          <section className="pulse-bottom-grid">
+            <section className="panel pulse-chart" aria-label="Complaints index">
+              <PanelTitle title="Complaint Index" icon={TrendingUp} detail={languageFilter} />
+              <div className="pulse-lines">
+                {top5.map((entry) => {
+                  const meta = categoryMeta[entry.category] ?? fallbackCategoryMeta;
+                  return <span key={entry.category}><i style={{ background: meta.color, width: `${Math.max(8, (entry.demand / maxCategoryDemand) * 100)}%` }} />{entry.category}</span>;
+                })}
+              </div>
+            </section>
+            <section className="panel pulse-donut" aria-label="Problem by area type">
+              <PanelTitle title="Problem by Area Type" icon={Users} />
+              <div className="area-mix">
+                <strong>{formatCount(totalSignals)}<span>Total</span></strong>
+                {areaMix.map((item) => <p key={item.label}><i style={{ background: item.color }} />{item.label}<b>{item.share}%</b></p>)}
+              </div>
+            </section>
+          </section>
+        </div>
+
+        <form className="janvaani-assistant" onSubmit={submitAssistant}>
+          <div>
+            <strong>Ask JanVaani AI</strong>
+            <button aria-label="Clear JanVaani AI answer" onClick={() => setAssistantAnswer("")} type="button"><X size={14} /></button>
+          </div>
+          <label>
+            <input value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} />
+            <button aria-label="Ask JanVaani AI" type="submit">Send</button>
+          </label>
+          {assistantAnswer ? <p>{assistantAnswer}</p> : null}
+        </form>
       </section>
     </section>
   );
 }
 
-function sampleMediaFor(channel: SimulationScenario["channel"]) {
-  if (channel === "photo") return "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iI2ZmZjFlNiIvPjx0ZXh0IHg9IjIwIiB5PSI2MCIgZmlsbD0iI2M0NDEwYyI+Q2l2aWMgaXNzdWUgcGhvdG88L3RleHQ+PC9zdmc+";
-  if (channel === "voice") return "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
-  if (channel === "video") return "data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aWRlbw==";
-  return "";
+function heatForScore(score: number) {
+  if (score >= 80) return "#ef4444";
+  if (score >= 65) return "#f97316";
+  if (score >= 50) return "#facc15";
+  return "#86efac";
+}
+
+function buildAreaMix(projects: RankedProject[]) {
+  const counts = projects.reduce<Record<string, number>>((acc, project) => {
+    const type = /rural|village|basti/i.test(`${project.district} ${project.ward}`)
+      ? "Rural"
+      : /extension|periphery|canal/i.test(project.ward)
+        ? "Peri-Urban"
+        : "Urban";
+    acc[type] = (acc[type] ?? 0) + project.demandCount;
+    return acc;
+  }, {});
+  const total = Math.max(1, Object.values(counts).reduce((sum, value) => sum + value, 0));
+  return [
+    { label: "Rural", color: "#58c36b" },
+    { label: "Urban", color: "#3498db" },
+    { label: "Peri-Urban", color: "#ffd45a" }
+  ].map((item) => ({ ...item, share: Math.round(((counts[item.label] ?? 0) / total) * 100) }));
 }
 
 const statusMeta: Record<RankedProject["status"], { label: string; hint: string }> = {
@@ -1830,14 +2727,6 @@ function RatingControl({ project, refreshAll }: { project: RankedProject; refres
   );
 }
 
-function Feature({ title, icon: Icon, points }: { title: string; icon: typeof Home; points: string[] }) {
-  return (
-    <article className="panel feature">
-      <PanelTitle title={title} icon={Icon} />
-      <ul>{points.map((point) => <li key={point}>{point}</li>)}</ul>
-    </article>
-  );
-}
 
 function PanelTitle({ title, icon: Icon, detail }: { title: string; icon: typeof Home; detail?: string }) {
   return <div className="panel-title"><h3><Icon size={18} /> {title}</h3>{detail ? <span>{detail}</span> : null}</div>;
@@ -1856,14 +2745,17 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ priorities: "Core workflow", map: "Demand hotspots", intake: "Citizen voice", copilot: "Grounded answers" })[page];
+  return ({ priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", copilot: "Grounded answers", compare: "Comparative intelligence", settings: "Administration" })[page];
 }
 
 function pageTitle(page: Page): string {
   return ({
     priorities: "Ranked development priorities",
+    pulse: "Top 5 problems across India",
     map: "Where demand is concentrated",
-    intake: "Bring citizen submissions in",
-    copilot: "Ask why a work ranks high"
+    signals: "What the web says citizens need",
+    copilot: "Ask why a work ranks high",
+    compare: "Compare constituencies and districts",
+    settings: "Enterprise AI governance settings"
   })[page];
 }

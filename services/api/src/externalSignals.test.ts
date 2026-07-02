@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fallbackRun, fetchXSignals } from "./externalSignals.js";
+import { fallbackRun, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
 
 const fallback = fallbackRun("gdelt", "school flood India");
 assert.equal(fallback.mode, "fallback");
@@ -10,4 +10,8 @@ const xFallback = await fetchXSignals("road OR water India", "");
 assert.equal(xFallback.mode, "fallback");
 assert.equal(xFallback.signals[0]?.source, "x");
 
-console.log(JSON.stringify({ ok: true, providers: ["x", "gdelt"] }));
+const newsFallback = await fetchNewsSignals("road OR water India", "");
+assert.equal(newsFallback.mode, "fallback");
+assert.equal(newsFallback.signals[0]?.source, "news");
+
+console.log(JSON.stringify({ ok: true, providers: ["x", "gdelt", "news"] }));

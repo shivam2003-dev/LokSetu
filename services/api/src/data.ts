@@ -58,6 +58,13 @@ export const mpProfiles = [
     state: "Gujarat",
     district: "Ahmedabad",
     wards: ["Odhav Water Line"]
+  },
+  {
+    id: "mp-pb-ludhiana",
+    name: "MP Ludhiana",
+    state: "Punjab",
+    district: "Ludhiana",
+    wards: ["Ludhiana South", "Gill Road", "Focal Point", "Samrala Road", "Jagraon Bridge", "Dugri Urban"]
   }
 ];
 
@@ -306,6 +313,84 @@ export const civicDatasets: CivicDataset[] = [
     gapScore: 0.71,
     equityScore: 0.69,
     indicators: ["Pipeline pressure loss", "High industrial-area complaints", "Low morning supply reliability"]
+  },
+  {
+    state: "Punjab",
+    district: "Ludhiana",
+    ward: "Ludhiana South",
+    lat: 30.87,
+    lng: 75.86,
+    mpId: "mp-pb-ludhiana",
+    mpName: "MP Ludhiana",
+    category: "Roads",
+    gapScore: 0.88,
+    equityScore: 0.76,
+    indicators: ["Pothole cluster near school routes", "Heavy freight corridor damage", "Monsoon waterlogging complaints"]
+  },
+  {
+    state: "Punjab",
+    district: "Ludhiana",
+    ward: "Gill Road",
+    lat: 30.86,
+    lng: 75.84,
+    mpId: "mp-pb-ludhiana",
+    mpName: "MP Ludhiana",
+    category: "Water",
+    gapScore: 0.78,
+    equityScore: 0.82,
+    indicators: ["Low morning pressure", "Pipeline leakage reports", "Tanker dependence in dense lanes"]
+  },
+  {
+    state: "Punjab",
+    district: "Ludhiana",
+    ward: "Focal Point",
+    lat: 30.89,
+    lng: 75.91,
+    mpId: "mp-pb-ludhiana",
+    mpName: "MP Ludhiana",
+    category: "Health",
+    gapScore: 0.74,
+    equityScore: 0.79,
+    indicators: ["PHC crowding", "Industrial worker clinic access gap", "Evening OPD demand"]
+  },
+  {
+    state: "Punjab",
+    district: "Ludhiana",
+    ward: "Samrala Road",
+    lat: 30.91,
+    lng: 75.88,
+    mpId: "mp-pb-ludhiana",
+    mpName: "MP Ludhiana",
+    category: "Education",
+    gapScore: 0.67,
+    equityScore: 0.73,
+    indicators: ["School toilet repairs pending", "Classroom crowding", "Drainage outside school gate"]
+  },
+  {
+    state: "Punjab",
+    district: "Ludhiana",
+    ward: "Jagraon Bridge",
+    lat: 30.92,
+    lng: 75.85,
+    mpId: "mp-pb-ludhiana",
+    mpName: "MP Ludhiana",
+    category: "Power",
+    gapScore: 0.63,
+    equityScore: 0.68,
+    indicators: ["Streetlight outage", "Transformer complaint cluster", "Unsafe pedestrian approach"]
+  },
+  {
+    state: "Punjab",
+    district: "Ludhiana",
+    ward: "Dugri Urban",
+    lat: 30.85,
+    lng: 75.82,
+    mpId: "mp-pb-ludhiana",
+    mpName: "MP Ludhiana",
+    category: "Sanitation",
+    gapScore: 0.72,
+    equityScore: 0.75,
+    indicators: ["Drain desilting overdue", "Garbage pickup misses", "Flooding after rain"]
   }
 ];
 
@@ -719,3 +804,55 @@ export const seedSubmissions: Submission[] = [
     createdAt: hoursAgo(6)
   }
 ];
+
+const presentationDemoAreas = [
+  { ward: "Ludhiana South", category: "Roads", base: "Road cave-ins and potholes slow school buses and ambulances after rain.", urgency: 5, rating: 5, channel: "photo" },
+  { ward: "Gill Road", category: "Water", base: "Water pressure is low and leakage is visible near the main market pipeline.", urgency: 4, rating: 4, channel: "whatsapp" },
+  { ward: "Focal Point", category: "Health", base: "Industrial workers report long PHC queues and no evening doctor after shifts.", urgency: 4, rating: 5, channel: "voice" },
+  { ward: "Samrala Road", category: "Education", base: "School toilets need repairs and water collects near the gate during rain.", urgency: 4, rating: 4, channel: "text" },
+  { ward: "Jagraon Bridge", category: "Power", base: "Streetlights fail near the bridge approach and the pedestrian stretch feels unsafe.", urgency: 4, rating: 5, channel: "whatsapp" },
+  { ward: "Dugri Urban", category: "Sanitation", base: "Drain desilting is overdue and garbage pickup misses inner lanes.", urgency: 5, rating: 4, channel: "photo" }
+] satisfies Array<{ ward: string; category: string; base: string; urgency: number; rating: number; channel: Submission["channel"] }>;
+
+const presentationDemoVariants = [
+  "Residents say the issue has repeated for three weeks.",
+  "Ward volunteers reported the same problem during the last public meeting.",
+  "Senior citizens and school children are most affected.",
+  "Local shopkeepers say traffic and access are getting worse.",
+  "Photos and voice notes mention the same hotspot repeatedly.",
+  "Citizens asked for inspection before the next rain spell."
+];
+
+export const presentationDemoSubmissions: Submission[] = presentationDemoAreas.flatMap((area, areaIndex) =>
+  presentationDemoVariants.map((variant, variantIndex) => {
+    const serial = areaIndex * presentationDemoVariants.length + variantIndex + 1;
+    const text = `${area.base} ${variant}`;
+    return {
+      id: `demo-pb-ludhiana-${String(serial).padStart(3, "0")}`,
+      userId: `demo-pb-user-${String(serial).padStart(3, "0")}`,
+      username: `ludhiana-demo-${String(serial).padStart(3, "0")}`,
+      displayName: `Local Voice ${300 + serial}`,
+      privacyMode: true,
+      state: "Punjab",
+      district: "Ludhiana",
+      mpId: "mp-pb-ludhiana",
+      channel: area.channel,
+      language: variantIndex % 2 === 0 ? "Punjabi" : "Hindi",
+      detectedLanguage: "English",
+      normalizedText: text,
+      category: area.category,
+      ward: area.ward,
+      urgency: Math.max(3, area.urgency - (variantIndex % 2)),
+      rating: Math.max(3, area.rating - (variantIndex % 3 === 0 ? 1 : 0)),
+      citizenScore: 72 + ((serial * 3) % 18),
+      text,
+      createdAt: hoursAgo(5 + serial),
+      processedAt: hoursAgo(4 + serial),
+      processingStatus: "processed",
+      rawIntakeId: `demo-${String(serial).padStart(8, "0")}`,
+      batchId: "demo-punjab-ludhiana"
+    };
+  })
+);
+
+export const demoSubmissions: Submission[] = [...seedSubmissions, ...presentationDemoSubmissions];
