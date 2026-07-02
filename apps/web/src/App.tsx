@@ -215,7 +215,6 @@ const citizenAppUrl =
 
 const navItems: Array<{ id: string; page: Page; label: string; hint?: string; icon: typeof Home; badge?: string }> = [
   { id: "overview", page: "overview", label: "Overview", icon: Home },
-  { id: "priorities", page: "priorities", label: "Priority Desk", icon: Droplets },
   { id: "signals", page: "signals", label: "Demand Signals", icon: DatabaseZap },
   { id: "copilot", page: "copilot", label: "AI Assistant (RAG)", icon: MessageSquareText, badge: "New" },
   { id: "recommendations", page: "recommendations", label: "Recommendations", icon: Scale },
