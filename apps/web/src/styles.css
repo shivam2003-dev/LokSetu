@@ -2252,6 +2252,19 @@ meter::-moz-meter-bar {
   gap: 16px;
 }
 
+.explore-workspace > .panel:first-child {
+  padding: 14px;
+  background: linear-gradient(180deg, #f8fbff, #eef3fb);
+}
+
+.gis-surface-panel {
+  overflow: hidden;
+}
+
+.gis-dashboard {
+  min-height: calc(100vh - 230px);
+}
+
 .map-toolbar {
   display: flex;
   align-items: center;
@@ -2301,16 +2314,124 @@ meter::-moz-meter-bar {
   color: var(--blue);
 }
 
-.map-layout {
+.map-layout,
+.gis-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px;
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
   gap: 12px;
   align-items: stretch;
 }
 
+.gis-control-panel,
+.gis-insight-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.gis-control-panel h4,
+.gis-insight-panel h4 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.gis-layer-list {
+  display: grid;
+  gap: 8px;
+}
+
+.gis-layer-list label {
+  display: grid;
+  grid-template-columns: 16px 10px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.gis-layer-list i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.gis-control-panel select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--ink);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.gis-control-panel input[type="range"] {
+  width: 100%;
+  accent-color: #2563eb;
+}
+
+.gis-time-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
+.gis-time-row b {
+  color: var(--ink);
+}
+
+.gis-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.gis-tool-grid button,
+.gis-map-actions button,
+.gis-insight-panel button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-2);
+  padding: 9px 10px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.gis-tool-grid button:hover,
+.gis-map-actions button:hover,
+.gis-insight-panel button:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.gis-map-panel {
+  display: grid;
+  grid-template-rows: minmax(560px, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+}
+
 .map-canvas {
   position: relative;
-  min-height: 440px;
+  min-height: 560px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   overflow: hidden;
@@ -2321,6 +2442,11 @@ meter::-moz-meter-bar {
     radial-gradient(circle at 60% 70%, rgba(19, 138, 82, 0.1), transparent 34%),
     #eef2f9;
   background-size: 40px 40px, 40px 40px, auto, auto, auto;
+}
+
+.gis-dashboard .map-canvas {
+  border-color: #cbd5e1;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.65), 0 24px 60px rgba(15, 23, 42, 0.12);
 }
 
 .india-map:not(.google-ready)::before {
@@ -2378,11 +2504,41 @@ meter::-moz-meter-bar {
   z-index: 1;
 }
 
+.gis-map-actions {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gis-map-actions button {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+.gis-scale {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  z-index: 5;
+  border-top: 3px solid #0f172a;
+  color: #0f172a;
+  padding-top: 4px;
+  width: 74px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .hotspot-list {
   display: grid;
-  align-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
-  max-height: 440px;
+  max-height: 180px;
   overflow: auto;
 }
 
@@ -2397,6 +2553,66 @@ meter::-moz-meter-bar {
   padding: 10px;
   text-align: left;
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.gis-insight-panel h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 22px;
+}
+
+.gis-insight-panel p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.gis-insight-panel ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.gis-ai-badge {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.gis-score-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.gis-score-grid span {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f8fafc;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.gis-score-grid b {
+  display: block;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  margin-bottom: 3px;
 }
 
 .hotspot-row:hover {
@@ -7856,4 +8072,73 @@ button.problem-row.selected {
 
 @media (max-width: 1100px) {
   .settings-hero, .settings-two-col, .settings-audit-table article { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 1360px) {
+  .gis-layout {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  .gis-insight-panel {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1fr) minmax(240px, 0.8fr);
+    align-items: start;
+  }
+
+  .gis-insight-panel .gis-score-grid {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 1180px) {
+  .gis-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gis-control-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gis-map-panel {
+    grid-template-rows: minmax(460px, 1fr) auto;
+  }
+
+  .gis-dashboard .map-canvas {
+    min-height: 460px;
+  }
+
+  .gis-insight-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .gis-surface-panel {
+    padding: 10px;
+  }
+
+  .map-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .gis-control-panel,
+  .gis-tool-grid,
+  .gis-score-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gis-map-actions {
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+  }
+
+  .gis-map-actions button {
+    flex: 1 1 140px;
+  }
+
+  .gis-scale {
+    display: none;
+  }
 }
