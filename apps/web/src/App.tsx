@@ -2288,23 +2288,27 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
           <p className="action-status" role="status">{queryNotice} Active filter: {activeExplorerFilter}</p>
         </section>
 
-        <section className="panel explorer-schema-card">
-          <PanelTitle title="Schema Browser" icon={Search} detail="semantic fields" />
-          <div className="explorer-schema-list">
-            {schemaFields.map((field) => <span key={field}>{field}</span>)}
-          </div>
-        </section>
+        <div className="explorer-side-stack">
+          <section className="panel explorer-schema-card">
+            <PanelTitle title="Schema Browser" icon={Search} detail="semantic fields" />
+            <div className="explorer-schema-list">
+              {schemaFields.map((field) => <span key={field}>{field}</span>)}
+            </div>
+          </section>
 
-        <section className="panel explorer-quality-card">
-          <PanelTitle title="Data Quality" icon={CheckCircle2} detail="pipeline checks" />
-          {["Deduplication complete", "PII safeguards active", "Geo coordinates validated", "Evidence citations linked"].map((item) => <article key={item}><CheckCircle2 size={15} /><span>{item}</span></article>)}
-        </section>
+          <section className="panel explorer-quality-card">
+            <PanelTitle title="Data Quality" icon={CheckCircle2} detail="pipeline checks" />
+            <div className="explorer-quality-list">
+              {["Deduplication complete", "PII safeguards active", "Geo coordinates validated", "Evidence citations linked"].map((item) => <article key={item}><CheckCircle2 size={15} /><span>{item}</span></article>)}
+            </div>
+          </section>
+        </div>
       </section>
 
       <section className="panel explorer-table-card">
         <PanelTitle title="Live Data Preview" icon={FileText} detail="project ranking dataset" />
         <div className="explorer-table">
-          <b>Ward</b><b>Category</b><b>Score</b><b>Confidence</b><b>Budget</b><b>Progress</b><b>Impact</b>
+          <div className="table-head"><b>Ward</b><b>Category</b><b>Score</b><b>Confidence</b><b>Budget</b><b>Progress</b><b>Impact</b></div>
           {rows.map((row) => (
             <div key={row.id}>
               <span>{row.ward}</span>
@@ -2709,7 +2713,7 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
       <section className="panel rec-table-card">
         <PanelTitle title="Project Ranking Table" icon={FileText} detail="decision-ready queue" />
         <div className="rec-table">
-          <b>Project</b><b>Category</b><b>Score</b><b>Budget</b><b>Beneficiaries</b><b>Priority</b>
+          <div className="table-head"><b>Project</b><b>Category</b><b>Score</b><b>Budget</b><b>Beneficiaries</b><b>Priority</b></div>
           {filtered.slice(0, 8).map((project) => (
             <div key={project.id}>
               <span>{project.title}</span>
@@ -2830,7 +2834,7 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
       <section className="panel reports-table-card">
         <PanelTitle title="Report Data Table" icon={Database} detail="ready for Excel export" />
         <div className="reports-table">
-          <b>Project</b><b>Department</b><b>Budget</b><b>Progress</b><b>Impact</b><b>Status</b>
+          <div className="table-head"><b>Project</b><b>Department</b><b>Budget</b><b>Progress</b><b>Impact</b><b>Status</b></div>
           {projects.slice(0, 7).map((project) => (
             <div key={project.id}>
               <span>{project.title}</span>
