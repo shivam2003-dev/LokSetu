@@ -210,8 +210,7 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByLabel("Settings district")).not.toContainText("Lucknow");
   });
 
-  test("all sidebar navigation buttons route to their own working dashboards", async ({ page }) => {
-    await loginIfNeeded(page);
+  test("all sidebar navigation buttons route to their own working dashboards on every screen size", async ({ page }) => {
     const nav = page.getByLabel("JanVaani navigation");
     const cases = [
       { button: "Overview", heading: "Overview", marker: "Constituency Health" },
@@ -227,12 +226,31 @@ test.describe("MP/admin web functional flow", () => {
       { button: "Settings", heading: "Enterprise AI governance settings", marker: "API Keys & Integrations" }
     ];
 
-    for (const item of cases) {
-      await nav.getByRole("button", { name: item.button }).click();
-      await expect(page.locator(".topbar h2")).toHaveText(item.heading);
-      await expect(page.getByText(item.marker).first()).toBeVisible();
-      const active = page.locator(".nav-item.active");
-      await expect(active).toContainText(typeof item.button === "string" ? item.button : "AI Assistant");
+    for (const viewport of [
+      { name: "desktop", width: 1440, height: 900, collapsed: false },
+      { name: "tablet", width: 820, height: 1100, collapsed: true },
+      { name: "mobile", width: 390, height: 844, collapsed: true }
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await loginIfNeeded(page);
+      await expect(page.locator(".overview-page")).toBeVisible();
+      if (viewport.collapsed) {
+        await page.getByLabel("Collapse navigation").click();
+        await expect(page.locator(".app-shell")).toHaveClass(/sidebar-collapsed/);
+      }
+
+      for (const item of cases) {
+        const button = nav.getByRole("button", { name: item.button });
+        await button.scrollIntoViewIfNeeded();
+        await button.click();
+        await expect(page.locator(".topbar h2")).toHaveText(item.heading);
+        await expect(page.getByText(item.marker).first()).toBeVisible();
+        const active = page.locator(".nav-item.active");
+        await expect(active).toContainText(typeof item.button === "string" ? item.button : "AI Assistant");
+        await expect(page.locator("html")).toHaveJSProperty("clientWidth", viewport.width);
+        const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+        expect(hasHorizontalOverflow, `${viewport.name} should not have horizontal overflow after ${String(item.button)}`).toBe(false);
+      }
     }
   });
 
