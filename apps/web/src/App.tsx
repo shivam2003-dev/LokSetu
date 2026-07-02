@@ -36,7 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DemandSignalsPage } from "./DemandSignals";
 
-type Page = "priorities" | "pulse" | "map" | "signals" | "copilot" | "compare" | "settings";
+type Page = "priorities" | "pulse" | "map" | "signals" | "copilot" | "knowledge" | "compare" | "settings";
 
 type Scope = "local" | "mp" | "global";
 
@@ -222,7 +222,7 @@ const navItems: Array<{ id: string; page: Page; label: string; hint?: string; ic
   { id: "projects", page: "priorities", label: "Projects", icon: Briefcase },
   { id: "reports", page: "pulse", label: "Reports", icon: FileText },
   { id: "explorer", page: "signals", label: "Data Explorer", icon: Database },
-  { id: "knowledge", page: "copilot", label: "Knowledge Base", icon: Search },
+  { id: "knowledge", page: "knowledge", label: "Knowledge Base", icon: Search },
   { id: "map", page: "map", label: "Map View", icon: MapIcon },
   { id: "compare", page: "compare", label: "Compare", icon: TrendingUp },
   { id: "settings", page: "settings", label: "Settings", icon: Lock }
@@ -234,6 +234,7 @@ const activeNavIdByPage: Record<Page, string> = {
   map: "map",
   signals: "signals",
   copilot: "copilot",
+  knowledge: "knowledge",
   compare: "compare",
   settings: "settings"
 };
@@ -618,6 +619,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
         {page === "signals" ? <DemandSignalsPage /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
+        {page === "knowledge" ? <KnowledgeBasePage /> : null}
         {page === "compare" ? <ComparePage /> : null}
         {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
@@ -1692,6 +1694,182 @@ function sourceIcon(value: string) {
   if (lower.includes("government") || lower.includes("document")) return "□";
   if (lower.includes("traffic")) return "⬡";
   return "◇";
+}
+
+type KnowledgeDoc = {
+  id: string;
+  title: string;
+  kind: string;
+  owner: string;
+  updated: string;
+  status: "indexed" | "processing" | "review";
+  chunks: number;
+  citations: number;
+  summary: string;
+};
+
+const knowledgeDocs: KnowledgeDoc[] = [
+  { id: "kb-policy-01", title: "Delhi Roads Maintenance Policy 2026", kind: "Policy PDF", owner: "PWD", updated: "Today", status: "indexed", chunks: 184, citations: 31, summary: "Sets road-resurfacing thresholds, contractor SLAs, and escalation rules for ward-level maintenance." },
+  { id: "kb-plan-02", title: "Central Delhi Development Plan", kind: "Development Plan", owner: "District Office", updated: "Yesterday", status: "indexed", chunks: 246, citations: 44, summary: "Maps current infrastructure gaps to sanctioned works across roads, PHCs, schools, drainage, and water supply." },
+  { id: "kb-complaints-03", title: "Citizen Complaints Batch · Kalindi Nagar", kind: "Citizen Complaints", owner: "JanVaani Intake", updated: "2 hours ago", status: "processing", chunks: 92, citations: 18, summary: "Repeated complaints mention school sanitation, blocked drains, streetlight outages, and damaged approach roads." },
+  { id: "kb-news-04", title: "Local News Articles · Public Works", kind: "News Articles", owner: "News API", updated: "4 hours ago", status: "indexed", chunks: 118, citations: 27, summary: "News coverage highlights monsoon damage, traffic delays, and public-health pressure points in dense wards." },
+  { id: "kb-census-05", title: "Census Ward Profile 2011 + 2021 Projections", kind: "Census Report", owner: "Data Office", updated: "Jun 2026", status: "indexed", chunks: 76, citations: 16, summary: "Population density, household water access, literacy, employment, and age distribution by ward cluster." },
+  { id: "kb-satellite-06", title: "Satellite Change Detection Tiles", kind: "Satellite Images", owner: "Maps Layer", updated: "Jun 2026", status: "review", chunks: 38, citations: 9, summary: "Imagery flags probable road damage, encroachment, waterlogging, and open-drain expansion." },
+  { id: "kb-project-07", title: "Road Upgrade Project Reports", kind: "Project Reports", owner: "Engineering Cell", updated: "May 2026", status: "indexed", chunks: 129, citations: 21, summary: "DPR, budget utilization, milestone delays, contractor notes, and completion-risk scoring." },
+  { id: "kb-minutes-08", title: "MP Review Meeting Minutes", kind: "Meeting Minutes", owner: "MP Office", updated: "May 2026", status: "indexed", chunks: 54, citations: 13, summary: "Action items, officer commitments, procurement blockers, and next-review dates from constituency meetings." },
+  { id: "kb-circular-09", title: "Government Circulars · Health and Roads", kind: "Government Circular", owner: "Govt Portal", updated: "Apr 2026", status: "indexed", chunks: 63, citations: 11, summary: "Circulars covering maintenance grants, PHC staffing norms, and emergency monsoon response procedures." }
+];
+
+function KnowledgeBasePage() {
+  const [selectedDocId, setSelectedDocId] = useState(knowledgeDocs[0].id);
+  const selectedDoc = knowledgeDocs.find((doc) => doc.id === selectedDocId) ?? knowledgeDocs[0];
+  const totalChunks = knowledgeDocs.reduce((sum, doc) => sum + doc.chunks, 0);
+  const indexedDocs = knowledgeDocs.filter((doc) => doc.status === "indexed").length;
+  const pipeline = [
+    { label: "Upload", value: 100, detail: "9 source types connected" },
+    { label: "OCR", value: 91, detail: "2 image sets in review" },
+    { label: "Chunking", value: 86, detail: `${formatCount(totalChunks)} chunks prepared` },
+    { label: "Embedding", value: 78, detail: "768-d vectors building" },
+    { label: "Indexing", value: 72, detail: "Hybrid BM25 + vector" }
+  ];
+  const graphNodes = [
+    { label: "Road policy", x: 50, y: 42, tone: "blue" },
+    { label: "Complaints", x: 170, y: 84, tone: "orange" },
+    { label: "Projects", x: 300, y: 52, tone: "green" },
+    { label: "Census", x: 104, y: 186, tone: "purple" },
+    { label: "Satellite", x: 242, y: 196, tone: "red" }
+  ];
+
+  return (
+    <section className="knowledge-page">
+      <section className="panel kb-hero">
+        <div>
+          <p className="eyebrow">Enterprise Knowledge Base</p>
+          <h3>Constituency intelligence library</h3>
+          <p>Indexed documents, citizen evidence, policy context, and live RAG-ready records for grounded AI decisions.</p>
+        </div>
+        <div className="kb-health-grid">
+          <article><span>Indexed Docs</span><strong>{indexedDocs}/{knowledgeDocs.length}</strong></article>
+          <article><span>Vector Chunks</span><strong>{formatCount(totalChunks)}</strong></article>
+          <article><span>Vector DB</span><strong>Healthy</strong></article>
+          <article><span>Index Freshness</span><strong>12 min</strong></article>
+        </div>
+      </section>
+
+      <section className="kb-toolbar panel">
+        <label className="kb-search"><Search size={17} /><input placeholder="Search PDFs, policies, complaints, circulars, meeting minutes..." /></label>
+        <select aria-label="Knowledge type filter" defaultValue="All sources">
+          <option>All sources</option>
+          <option>Policies</option>
+          <option>Citizen complaints</option>
+          <option>Satellite images</option>
+          <option>Project reports</option>
+        </select>
+        <select aria-label="Knowledge status filter" defaultValue="Indexed and processing">
+          <option>Indexed and processing</option>
+          <option>Indexed only</option>
+          <option>Needs review</option>
+        </select>
+      </section>
+
+      <section className="kb-main-grid">
+        <section className="panel kb-upload-card">
+          <PanelTitle title="Upload and Ingest" icon={FileText} detail="drag-and-drop intake" />
+          <div className="kb-dropzone">
+            <DatabaseZap size={28} />
+            <strong>Drop PDFs, scans, images, CSVs, minutes, or circulars</strong>
+            <span>OCR, chunking, embedding, duplicate detection, and citation extraction run automatically.</span>
+            <button type="button">Choose files</button>
+          </div>
+          <div className="kb-pipeline">
+            {pipeline.map((step) => (
+              <article key={step.label}>
+                <div><strong>{step.label}</strong><span>{step.value}%</span></div>
+                <meter min="0" max="100" value={step.value} />
+                <small>{step.detail}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel kb-doc-list">
+          <PanelTitle title="Indexed Sources" icon={Database} detail="SharePoint-style repository" />
+          <div className="kb-doc-table">
+            {knowledgeDocs.map((doc) => (
+              <button className={doc.id === selectedDoc.id ? "active" : ""} key={doc.id} onClick={() => setSelectedDocId(doc.id)} type="button">
+                <span>{doc.kind}</span>
+                <strong>{doc.title}</strong>
+                <small>{doc.owner} · {doc.updated}</small>
+                <mark className={doc.status}>{doc.status}</mark>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel kb-preview">
+          <PanelTitle title="Document Preview" icon={FileText} detail={selectedDoc.kind} />
+          <div className="kb-preview-page">
+            <span>{selectedDoc.owner}</span>
+            <h4>{selectedDoc.title}</h4>
+            <p>{selectedDoc.summary}</p>
+            <ul>
+              <li>OCR status: complete with 98.4% readable text confidence</li>
+              <li>Chunking status: {formatCount(selectedDoc.chunks)} semantic chunks with section anchors</li>
+              <li>Embedding status: latest vector index version linked to citations</li>
+            </ul>
+          </div>
+          <div className="kb-version-list">
+            <strong>Version History</strong>
+            {["v3 · AI summary refreshed", "v2 · OCR corrections approved", "v1 · Original source indexed"].map((item) => <span key={item}>{item}</span>)}
+          </div>
+        </section>
+      </section>
+
+      <section className="kb-lower-grid">
+        <section className="panel kb-ai-summary">
+          <PanelTitle title="AI Summary and Citations" icon={Bot} detail="grounded answer context" />
+          <p>{selectedDoc.summary}</p>
+          <div className="kb-citations">
+            {Array.from({ length: Math.min(4, selectedDoc.citations) }, (_, index) => (
+              <article key={index}>
+                <strong>[{index + 1}] {selectedDoc.title}</strong>
+                <span>Page {index + 2}, paragraph {index + 4} · confidence {96 - index}%</span>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel kb-vector-card">
+          <PanelTitle title="Vector Database" icon={DatabaseZap} detail="retrieval health" />
+          <div className="kb-vector-grid">
+            <article><span>Namespace</span><strong>janvaani/delhi-central</strong></article>
+            <article><span>Embedding model</span><strong>text-embedding-004</strong></article>
+            <article><span>Hybrid index</span><strong>BM25 + cosine</strong></article>
+            <article><span>Indexing queue</span><strong>14 pending chunks</strong></article>
+            <article><span>Storage</span><strong>8.7 GB / 25 GB</strong></article>
+            <article><span>Recall check</span><strong>94%</strong></article>
+          </div>
+        </section>
+
+        <section className="panel kb-graph-card">
+          <PanelTitle title="Knowledge Graph" icon={Globe2} detail="evidence relationships" />
+          <svg className="kb-graph" viewBox="0 0 360 250" role="img" aria-label="Knowledge graph visualization">
+            <line x1="50" y1="42" x2="170" y2="84" />
+            <line x1="170" y1="84" x2="300" y2="52" />
+            <line x1="170" y1="84" x2="104" y2="186" />
+            <line x1="300" y1="52" x2="242" y2="196" />
+            <line x1="104" y1="186" x2="242" y2="196" />
+            {graphNodes.map((node) => (
+              <g className={`kb-node ${node.tone}`} key={node.label}>
+                <circle cx={node.x} cy={node.y} r="22" />
+                <text x={node.x} y={node.y + 39}>{node.label}</text>
+              </g>
+            ))}
+          </svg>
+        </section>
+      </section>
+    </section>
+  );
 }
 
 type CompareLevel = "state" | "district" | "constituency";
@@ -2836,7 +3014,7 @@ function Evidence({ title, items }: { title: string; items: string[] }) {
 }
 
 function pageLabel(page: Page): string {
-  return ({ priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", copilot: "Grounded answers", compare: "Comparative intelligence", settings: "Administration" })[page];
+  return ({ priorities: "Core workflow", pulse: "All states and UTs", map: "Demand hotspots", signals: "AI web intelligence", copilot: "Grounded answers", knowledge: "Document intelligence", compare: "Comparative intelligence", settings: "Administration" })[page];
 }
 
 function pageTitle(page: Page): string {
@@ -2846,6 +3024,7 @@ function pageTitle(page: Page): string {
     map: "Where demand is concentrated",
     signals: "What the web says citizens need",
     copilot: "Ask why a work ranks high",
+    knowledge: "Knowledge base and indexing",
     compare: "Compare constituencies and districts",
     settings: "Enterprise AI governance settings"
   })[page];
