@@ -4273,6 +4273,37 @@ meter::-moz-meter-bar {
     gap: 12px;
     padding: 14px 18px;
   }
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+  .sidebar-collapsed .sidebar {
+    width: 100%;
+    padding: 14px 18px;
+  }
+  .sidebar-collapsed .brand {
+    justify-content: flex-start;
+    padding: 0 2px 12px;
+  }
+  .sidebar-collapsed .brand > div:not(.brand-mark),
+  .sidebar-collapsed .nav-copy,
+  .sidebar-collapsed .citizen-link {
+    display: grid;
+  }
+  .sidebar-collapsed .sidebar-toggle {
+    position: static;
+    margin-left: auto;
+  }
+  .sidebar-collapsed .nav-section {
+    padding-inline: 0;
+  }
+  .sidebar-collapsed .nav-item {
+    justify-content: center;
+    padding: 0 13px;
+  }
+  .sidebar-collapsed .sidebar-footer {
+    display: grid;
+    grid-template-columns: minmax(180px, 320px);
+  }
   .brand {
     padding: 0 2px 12px;
   }
@@ -4658,22 +4689,32 @@ meter::-moz-meter-bar {
 
 @media (max-width: 640px) {
   .nav-scroll {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
     gap: 8px;
-    margin: 0;
-    padding: 0 0 4px;
-    overflow: visible;
+    margin: 0 -12px;
+    padding: 0 12px 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-section {
+    display: flex;
+    gap: 8px;
+    min-width: max-content;
   }
 
   .nav-item,
   .nav-item.rich {
-    justify-content: flex-start;
-    min-width: 0;
-    width: 100%;
+    flex: 0 0 auto;
+    justify-content: center;
+    min-width: max-content;
+    width: auto;
     min-height: 46px;
-    padding: 7px 9px;
-    white-space: normal;
+    padding: 7px 12px;
+    white-space: nowrap;
+    scroll-snap-align: start;
   }
 
   .nav-item.rich svg {
@@ -4690,6 +4731,46 @@ meter::-moz-meter-bar {
 
   .nav-copy small {
     display: none;
+  }
+
+  .sidebar-collapsed .sidebar {
+    width: 100%;
+    padding: 12px;
+  }
+
+  .sidebar-collapsed .brand {
+    justify-content: flex-start;
+    padding: 0 2px 10px;
+  }
+
+  .sidebar-collapsed .brand > div:not(.brand-mark),
+  .sidebar-collapsed .nav-copy,
+  .sidebar-collapsed .citizen-link {
+    display: grid;
+  }
+
+  .sidebar-collapsed .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sidebar-collapsed .sidebar-toggle {
+    position: static;
+    margin-left: auto;
+  }
+
+  .sidebar-collapsed .nav-section {
+    padding-inline: 0;
+  }
+
+  .sidebar-collapsed .nav-item,
+  .sidebar-collapsed .nav-item.rich {
+    justify-content: center;
+    padding: 7px 12px;
+  }
+
+  .sidebar-collapsed .sidebar-footer {
+    display: block;
   }
 }
 
