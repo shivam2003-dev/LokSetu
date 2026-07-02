@@ -200,11 +200,20 @@ type RagStatusResponse = {
 
 type Hotspot = DashboardResponse["hotspots"][number];
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
+type TileFallbackState = {
+  zoom: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  tiles: Array<{ x: number; y: number; url: string; left: number; top: number; width: number; height: number }>;
+};
 declare global {
   interface Window {
     google?: any;
     __loksetuGoogleMapsPromise?: Promise<void>;
     __loksetuGoogleMapsLoaded?: () => void;
+    gm_authFailure?: () => void;
   }
 }
 
@@ -1110,6 +1119,7 @@ function IssueMap({
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
+  const [fallbackReason, setFallbackReason] = useState(maps.apiKey ? "" : "Google Maps key is not configured.");
   const [gisAction, setGisAction] = useState("Ready to run GIS analysis.");
   const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
@@ -1130,6 +1140,7 @@ function IssueMap({
 
   useEffect(() => {
     if (!maps.apiKey || hotspots.length === 0 || !mapRef.current) {
+      setFallbackReason(!maps.apiKey ? "Google Maps key is not configured." : "No hotspot coordinates available for the current filters.");
       setMapState("fallback");
       return;
     }
@@ -1137,13 +1148,25 @@ function IssueMap({
     let cancelled = false;
     let mapErrorTimer = 0;
     const originalConsoleError = window.console.error;
+    const originalAuthFailure = window.gm_authFailure;
+    const activateFallback = (reason: string) => {
+      if (cancelled) return;
+      setFallbackReason(reason);
+      if (mapRef.current) mapRef.current.replaceChildren();
+      setMapState("fallback");
+    };
+    window.gm_authFailure = () => {
+      activateFallback("Google Maps rejected the browser key. Showing the live tile-map fallback.");
+      originalAuthFailure?.();
+    };
     window.console.error = (...args: unknown[]) => {
       const message = args.map(String).join(" ");
       if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError/.test(message)) {
-        setMapState("fallback");
+        activateFallback("Google Maps demo-key quota or browser-key access failed. Showing the live tile-map fallback.");
       }
       originalConsoleError.apply(window.console, args);
     };
+    setFallbackReason("");
     setMapState("loading");
 
     loadGoogleMaps(maps.apiKey, maps.mapId)
@@ -1174,18 +1197,19 @@ function IssueMap({
         setMapState("ready");
         mapErrorTimer = window.setTimeout(() => {
           if (!cancelled && mapRef.current?.querySelector(".gm-err-container, .gm-err-title, .gm-err-message")) {
-            setMapState("fallback");
+            activateFallback("Google Maps could not render in this browser session. Showing the live tile-map fallback.");
           }
         }, 1500);
       })
       .catch(() => {
-        if (!cancelled) setMapState("fallback");
+        activateFallback("Google Maps script failed to load. Showing the live tile-map fallback.");
       });
 
     return () => {
       cancelled = true;
       if (mapErrorTimer) window.clearTimeout(mapErrorTimer);
       window.console.error = originalConsoleError;
+      window.gm_authFailure = originalAuthFailure;
     };
   }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
 
@@ -1292,7 +1316,7 @@ function IssueMap({
       </div>
       {mapState === "fallback" ? (
         <p className="map-note">
-          Google Maps key not configured or unavailable. Showing the local geospatial fallback with the same backend hotspot coordinates.
+          {fallbackReason || "Google Maps is unavailable. Showing the live tile-map fallback with the same backend hotspot coordinates."}
         </p>
       ) : null}
       <MapIntelligencePanel
@@ -1378,10 +1402,25 @@ function MapIntelligencePanel({
 }
 
 function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hotspots: Array<Hotspot & { projectId: string }>; selectedProjectId: string; selectProject: (projectId: string) => void }) {
+  const tileMap = useMemo(() => buildTileFallbackState(hotspots), [hotspots]);
   return (
-    <div className="fallback-map" aria-label="Local fallback map">
+    <div className="fallback-map osm-fallback-map" aria-label="Live tile-map fallback">
+      <div className="osm-tile-layer" aria-hidden="true">
+        {tileMap.tiles.map((tile) => (
+          <img
+            alt=""
+            decoding="async"
+            draggable={false}
+            key={`${tileMap.zoom}-${tile.x}-${tile.y}`}
+            loading="eager"
+            src={tile.url}
+            style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}
+          />
+        ))}
+      </div>
+      <div className="osm-map-tint" aria-hidden="true" />
       {hotspots.map((hotspot, index) => {
-        const position = indiaProjection(hotspot.lat, hotspot.lng);
+        const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
         return (
           <button
             className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
@@ -1389,8 +1428,10 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
             style={{
               left: `${position.x}%`,
               top: `${position.y}%`,
-              width: `${48 + hotspot.intensity / 3}px`,
-              height: `${48 + hotspot.intensity / 3}px`
+              width: `${44 + hotspot.intensity / 4}px`,
+              height: `${44 + hotspot.intensity / 4}px`,
+              ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
+              ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
             }}
             onClick={() => selectProject(hotspot.projectId)}
             title={`${hotspot.category} in ${hotspot.ward}`}
@@ -1399,6 +1440,7 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
           </button>
         );
       })}
+      <div className="osm-attribution">Map tiles © OpenStreetMap contributors</div>
     </div>
   );
 }
@@ -1606,6 +1648,69 @@ function indiaProjection(lat: number, lng: number) {
     x: Math.min(92, Math.max(8, ((lng - minLng) / (maxLng - minLng)) * 100)),
     y: Math.min(88, Math.max(12, (1 - (lat - minLat) / (maxLat - minLat)) * 100))
   };
+}
+
+function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>): TileFallbackState {
+  const points = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
+  const lats = points.map((point) => point.lat);
+  const lngs = points.map((point) => point.lng);
+  const latSpan = Math.max(...lats) - Math.min(...lats);
+  const lngSpan = Math.max(...lngs) - Math.min(...lngs);
+  const maxSpan = Math.max(latSpan, lngSpan);
+  const zoom = maxSpan > 14 ? 5 : maxSpan > 6 ? 6 : maxSpan > 2.5 ? 7 : maxSpan > 1 ? 9 : 11;
+  const centerLat = lats.reduce((sum, value) => sum + value, 0) / points.length;
+  const centerLng = lngs.reduce((sum, value) => sum + value, 0) / points.length;
+  const centerX = lngToTileX(centerLng, zoom);
+  const centerY = latToTileY(centerLat, zoom);
+  const cols = zoom <= 6 ? 5.6 : 4.6;
+  const rows = zoom <= 6 ? 4.2 : 3.4;
+  const minX = centerX - cols / 2;
+  const maxX = centerX + cols / 2;
+  const minY = Math.max(0, centerY - rows / 2);
+  const maxY = centerY + rows / 2;
+  const tileMinX = Math.floor(minX);
+  const tileMaxX = Math.ceil(maxX);
+  const tileMinY = Math.floor(minY);
+  const tileMaxY = Math.ceil(maxY);
+  const worldTiles = 2 ** zoom;
+  const tiles: TileFallbackState["tiles"] = [];
+
+  for (let x = tileMinX; x < tileMaxX; x += 1) {
+    for (let y = tileMinY; y < tileMaxY; y += 1) {
+      if (y < 0 || y >= worldTiles) continue;
+      const wrappedX = ((x % worldTiles) + worldTiles) % worldTiles;
+      tiles.push({
+        x,
+        y,
+        url: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        left: ((x - minX) / (maxX - minX)) * 100,
+        top: ((y - minY) / (maxY - minY)) * 100,
+        width: (1 / (maxX - minX)) * 100,
+        height: (1 / (maxY - minY)) * 100
+      });
+    }
+  }
+
+  return { zoom, minX, maxX, minY, maxY, tiles };
+}
+
+function tileProjection(lat: number, lng: number, tileMap: TileFallbackState) {
+  const x = lngToTileX(lng, tileMap.zoom);
+  const y = latToTileY(lat, tileMap.zoom);
+  return {
+    x: Math.min(94, Math.max(6, ((x - tileMap.minX) / (tileMap.maxX - tileMap.minX)) * 100)),
+    y: Math.min(90, Math.max(10, ((y - tileMap.minY) / (tileMap.maxY - tileMap.minY)) * 100))
+  };
+}
+
+function lngToTileX(lng: number, zoom: number) {
+  return ((lng + 180) / 360) * 2 ** zoom;
+}
+
+function latToTileY(lat: number, zoom: number) {
+  const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+  const radians = clampedLat * Math.PI / 180;
+  return ((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2) * 2 ** zoom;
 }
 
 function mapStatusText(state: MapLoadState) {
