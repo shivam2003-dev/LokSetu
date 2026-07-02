@@ -22,7 +22,7 @@ web:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-web-80-4ac9cbb6"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/web
-    tag: gcp-20260702205324-mapfix
+    tag: gcp-20260702211835-tilemap
 
 citizen:
   replicaCount: 1

@@ -1156,13 +1156,13 @@ function IssueMap({
       setMapState("fallback");
     };
     window.gm_authFailure = () => {
-      activateFallback("Google Maps rejected the browser key. Showing the live tile-map fallback.");
+      activateFallback("Google Maps rejected the browser key. Showing the live OpenStreetMap tile layer.");
       originalAuthFailure?.();
     };
     window.console.error = (...args: unknown[]) => {
       const message = args.map(String).join(" ");
       if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError/.test(message)) {
-        activateFallback("Google Maps demo-key quota or browser-key access failed. Showing the live tile-map fallback.");
+        activateFallback("Google Maps demo-key quota or browser-key access failed. Showing the live OpenStreetMap tile layer.");
       }
       originalConsoleError.apply(window.console, args);
     };
@@ -1197,12 +1197,12 @@ function IssueMap({
         setMapState("ready");
         mapErrorTimer = window.setTimeout(() => {
           if (!cancelled && mapRef.current?.querySelector(".gm-err-container, .gm-err-title, .gm-err-message")) {
-            activateFallback("Google Maps could not render in this browser session. Showing the live tile-map fallback.");
+            activateFallback("Google Maps could not render in this browser session. Showing the live OpenStreetMap tile layer.");
           }
         }, 1500);
       })
       .catch(() => {
-        activateFallback("Google Maps script failed to load. Showing the live tile-map fallback.");
+        activateFallback("Google Maps script failed to load. Showing the live OpenStreetMap tile layer.");
       });
 
     return () => {
@@ -1316,7 +1316,7 @@ function IssueMap({
       </div>
       {mapState === "fallback" ? (
         <p className="map-note">
-          {fallbackReason || "Google Maps is unavailable. Showing the live tile-map fallback with the same backend hotspot coordinates."}
+          {fallbackReason || "Google Maps is unavailable. Showing the live OpenStreetMap tile layer with the same backend hotspot coordinates."}
         </p>
       ) : null}
       <MapIntelligencePanel
@@ -1716,7 +1716,7 @@ function latToTileY(lat: number, zoom: number) {
 function mapStatusText(state: MapLoadState) {
   if (state === "ready") return "Google Maps live";
   if (state === "loading") return "Loading map";
-  return "Local map fallback";
+  return "Live tile map";
 }
 
 function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void) {
