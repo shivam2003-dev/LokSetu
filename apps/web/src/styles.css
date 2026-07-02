@@ -7465,7 +7465,7 @@ button.problem-row.selected {
 .dsi-row {
   display: grid;
   gap: 14px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .dsi-row-1 { grid-template-columns: 190px minmax(0, 1fr) 280px; }
