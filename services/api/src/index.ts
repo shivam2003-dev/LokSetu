@@ -15,11 +15,13 @@ import {
   insertSubmission,
   isDatabaseEnabled,
   listRecentBatchRuns,
+  listRecentRawIntakes,
   listSubmissions,
   upsertAuthUser,
   verifyPassword
 } from "./db.js";
-import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
+import { runBatch } from "./batch.js";
+import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
 import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
@@ -40,7 +42,7 @@ const defaultAdminPassword = process.env.APP_ADMIN_PASSWORD ?? "";
 let memorySubmissions = [...demoSubmissions];
 let demoDataEnabled = true;
 const demoSubmissionIds = new Set(demoSubmissions.map((submission) => submission.id));
-const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
+const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string; processedAt?: string }> = [];
 const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
@@ -212,6 +214,7 @@ app.use("/api", (request, response, next) => {
 });
 
 app.get("/api/client-config", (_request, response) => {
+  const mapplsMapSdkKey = process.env.PUBLIC_MAPPLS_MAP_SDK_KEY ?? process.env.MAPPLS_MAP_SDK_KEY ?? "";
   const browserMapsKey =
     process.env.PUBLIC_GOOGLE_MAPS_API_KEY ??
     process.env.GOOGLE_MAPS_BROWSER_API_KEY ??
@@ -221,10 +224,12 @@ app.get("/api/client-config", (_request, response) => {
   response.json({
     dataMode: isDatabaseEnabled() ? "postgres" : "memory",
     maps: {
-      enabled: Boolean(browserMapsKey),
+      enabled: Boolean(mapplsMapSdkKey || browserMapsKey),
       apiKey: browserMapsKey,
       mapId: process.env.GOOGLE_MAPS_MAP_ID ?? process.env.VITE_GOOGLE_MAPS_MAP_ID ?? "",
-      source: browserMapsKey ? "runtime-api" : "not-configured"
+      provider: mapplsMapSdkKey ? "mappls" : browserMapsKey ? "google" : "osm",
+      mapplsKey: mapplsMapSdkKey,
+      source: mapplsMapSdkKey ? "runtime-mappls-api" : browserMapsKey ? "runtime-api" : "not-configured"
     },
     citizenAppUrl: process.env.CITIZEN_APP_URL ?? "",
     generatedAt: new Date().toISOString()
@@ -648,6 +653,131 @@ app.get("/api/batch/status", async (_request, response) => {
     rawIntake: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length },
     recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns() : [],
     schedule: process.env.BATCH_SCHEDULE ?? "*/15 * * * *"
+  });
+});
+
+app.post("/api/batch/run", async (request, response) => {
+  const limit = Math.min(25, Math.max(1, Number(request.query.limit ?? 10)));
+  if (isDatabaseEnabled()) {
+    const run = await runBatch(limit);
+    response.json({ mode: "on-demand", run });
+    return;
+  }
+
+  const run = {
+    id: crypto.randomUUID(),
+    startedAt: new Date().toISOString(),
+    status: "running" as const,
+    processed: 0,
+    failed: 0
+  };
+  const records = memoryRawQueue.splice(0, limit);
+  for (const record of records) {
+    try {
+      const { submission } = await processIntake(record.payload as ReturnType<typeof toRawIntakePayload>, { rawIntakeId: record.id, batchId: run.id });
+      memorySubmissions.push(submission);
+      run.processed += 1;
+    } catch (error) {
+      run.failed += 1;
+      memoryRawQueue.push({ ...record, payload: record.payload });
+    }
+  }
+  const completedRun = {
+    ...run,
+    status: run.failed > 0 ? "failed" as const : "succeeded" as const,
+    finishedAt: new Date().toISOString()
+  };
+  response.json({ mode: "on-demand", run: completedRun });
+});
+
+app.get("/api/intake/audit", async (_request, response) => {
+  const submissions = await getSubmissions();
+  const rawRecords = isDatabaseEnabled()
+    ? await listRecentRawIntakes(30)
+    : memoryRawQueue
+        .slice(-30)
+        .reverse()
+        .map((record) => ({
+          id: record.id,
+          payload: record.payload as ReturnType<typeof toRawIntakePayload>,
+          status: "pending" as const,
+          attempts: 0,
+          createdAt: record.createdAt,
+          processedAt: undefined
+        }));
+  const byRawId = new Map(submissions.filter((submission) => submission.rawIntakeId).map((submission) => [submission.rawIntakeId, submission]));
+  response.json({
+    generatedAt: new Date().toISOString(),
+    processingMode: "scheduled batch with on-demand evaluator run",
+    rawStatus: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length },
+    recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns(5) : [],
+    samples: [
+      {
+        type: "text",
+        label: "School sanitation complaint",
+        href: "/demo-assets/janvaani-text-complaint.txt",
+        expected: "Education / Sanitation issue in Kalindi Nagar"
+      },
+      {
+        type: "image",
+        label: "Road damage photo prompt",
+        href: "/demo-assets/janvaani-road-damage.svg",
+        expected: "Roads issue with image-summary validation"
+      },
+      {
+        type: "voice",
+        label: "Short Hindi/English voice script",
+        href: "/demo-assets/janvaani-voice-script.txt",
+        expected: "Voice channel checks speech transcription and category routing"
+      }
+    ],
+    entries: rawRecords.map((record) => {
+      const submission = byRawId.get(record.id);
+      const payload = record.payload;
+      return {
+        rawIntakeId: record.id,
+        shortReceipt: record.id.slice(0, 8),
+        status: submission ? "processed" : record.status,
+        attempts: record.attempts,
+        submittedAt: record.createdAt,
+        processedAt: submission?.processedAt ?? record.processedAt,
+        channel: payload.channel,
+        input: {
+          language: payload.language ?? "auto",
+          text: payload.text?.slice(0, 500) ?? "",
+          hasMedia: Boolean(payload.media),
+          mediaType: payload.media?.startsWith("data:image/") ? "image" : payload.media?.startsWith("data:audio/") ? "audio" : payload.media?.startsWith("data:video/") ? "video" : "none",
+          urgency: payload.urgency,
+          rating: payload.rating,
+          privacyMode: payload.privacyMode
+        },
+        placement: {
+          state: submission?.state ?? payload.state ?? "pending",
+          district: submission?.district ?? payload.district ?? "pending",
+          ward: submission?.ward ?? payload.ward ?? "pending",
+          mpId: submission?.mpId,
+          locationLabel: submission?.locationLabel
+        },
+        ai: submission
+          ? {
+              category: submission.category,
+              detectedLanguage: submission.detectedLanguage,
+              normalizedText: submission.normalizedText,
+              transcript: submission.transcript,
+              imageSummary: submission.imageSummary,
+              isCivicIssue: submission.isCivicIssue ?? true,
+              providerMode: submission.aiProviderMode,
+              model: submission.aiModel,
+              fallbackUsed: submission.aiFallbackUsed,
+              explanation: `${submission.channel} intake was normalized as ${submission.category}, routed to ${submission.ward}, scored with urgency ${submission.urgency}/5 and rating ${submission.rating}/5, then added to project ranking evidence.`
+            }
+          : {
+              category: "pending_batch",
+              detectedLanguage: "pending",
+              explanation: "Raw intake is stored. Run on-demand pipeline to classify, transcribe/OCR media, route constituency, score, and index in RAG."
+            }
+      };
+    })
   });
 });
 

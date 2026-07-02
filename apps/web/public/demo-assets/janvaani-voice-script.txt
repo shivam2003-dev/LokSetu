@@ -1,0 +1,11 @@
+Voice test script for Apni Awaaz:
+
+Namaste, Kalindi Nagar government school ke bahar drainage block hai.
+Bachchon ko gande pani se guzarna pad raha hai.
+School toilets aur classroom ke paas safai aur repair urgent hai.
+
+Expected AI inference:
+channel=voice
+category=Education or Sanitation
+region=Kalindi Nagar, Central Delhi, Delhi
+priority=high

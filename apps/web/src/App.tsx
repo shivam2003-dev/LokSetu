@@ -22,6 +22,7 @@ import {
   Map as MapIcon,
   MapPinned,
   MapPin,
+  Menu,
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
@@ -105,6 +106,8 @@ type ClientConfig = {
     enabled: boolean;
     apiKey: string;
     mapId: string;
+    provider?: "mappls" | "google" | "osm";
+    mapplsKey?: string;
     source: string;
   };
   citizenAppUrl?: string;
@@ -118,6 +121,47 @@ type DemoDataStatus = {
   visibleRows: number;
   totalRows: number;
   label: string;
+};
+
+type BatchRun = {
+  id: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: string;
+  processed: number;
+  failed: number;
+  error?: string;
+};
+
+type IntakeAuditResponse = {
+  generatedAt: string;
+  processingMode: string;
+  rawStatus: Record<string, number>;
+  recentRuns: BatchRun[];
+  samples: Array<{ type: string; label: string; href: string; expected: string }>;
+  entries: Array<{
+    rawIntakeId: string;
+    shortReceipt: string;
+    status: string;
+    attempts: number;
+    submittedAt: string;
+    processedAt?: string;
+    channel: string;
+    input: { language: string; text: string; hasMedia: boolean; mediaType: string; urgency: number; rating: number; privacyMode: boolean };
+    placement: { state: string; district: string; ward: string; mpId?: string; locationLabel?: string };
+    ai: {
+      category: string;
+      detectedLanguage?: string;
+      normalizedText?: string;
+      transcript?: string;
+      imageSummary?: string;
+      isCivicIssue?: boolean;
+      providerMode?: string;
+      model?: string;
+      fallbackUsed?: boolean;
+      explanation: string;
+    };
+  }>;
 };
 
 type BoundaryLevel = "state" | "district" | "constituency" | "ward";
@@ -211,8 +255,14 @@ type TileFallbackState = {
 declare global {
   interface Window {
     google?: any;
+    mappls?: {
+      Map?: new (element: string | HTMLElement, options: Record<string, unknown>) => unknown;
+      Marker?: new (options: Record<string, unknown>) => unknown;
+    };
     __loksetuGoogleMapsPromise?: Promise<void>;
     __loksetuGoogleMapsLoaded?: () => void;
+    __loksetuMapplsPromise?: Promise<void>;
+    __loksetuMapplsLoaded?: () => void;
     gm_authFailure?: () => void;
   }
 }
@@ -221,6 +271,7 @@ const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
 const envGoogleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
 const envGoogleMapsMapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "").trim();
+const envMapplsMapSdkKey = (import.meta.env.VITE_MAPPLS_MAP_SDK_KEY ?? "").trim();
 const configuredCitizenAppUrl = (import.meta.env.VITE_CITIZEN_APP_URL ?? "").trim();
 const citizenAppUrl =
   configuredCitizenAppUrl ||
@@ -257,6 +308,64 @@ const activeNavIdByPage: Record<Page, string> = {
   compare: "compare",
   settings: "settings"
 };
+
+const tourStorageKey = "janvaaniTourComplete";
+const tourSteps: Array<{ page: Page; title: string; body: string; action: string }> = [
+  {
+    page: "overview",
+    title: "Start with constituency health",
+    body: "Overview gives the MP a 360 degree readout: demand, risk, projects, alerts, citizen satisfaction, and AI priority score.",
+    action: "Use this as the evaluator landing view."
+  },
+  {
+    page: "overview",
+    title: "Citizen submission starts the flow",
+    body: "Open JanVaani from the sidebar to submit a citizen issue. The API ingests it, deduplicates signals, ranks demand, and updates dashboards.",
+    action: "Click Open JanVaani for the public submission journey."
+  },
+  {
+    page: "signals",
+    title: "Demand Signals explains what citizens need",
+    body: "Signals combine citizen intake, official rows, documents, news, web sources, search trends, and connector status into ranked issues.",
+    action: "Use state, district, ward, and issue filters to show Delhi demo data."
+  },
+  {
+    page: "copilot",
+    title: "RAG answers are grounded",
+    body: "The AI Assistant has Online, Submitted Issue, and All modes. Answers cite evidence from reports, complaints, documents, weather, maps, and web signals.",
+    action: "Ask why a road, school, water, or health issue is ranked."
+  },
+  {
+    page: "recommendations",
+    title: "Recommendations become execution priorities",
+    body: "AI ranks projects by urgency, beneficiaries, budget, confidence, evidence, and constituency impact.",
+    action: "Review High, Medium, and Low priority cards."
+  },
+  {
+    page: "projects",
+    title: "Projects track delivery",
+    body: "The MP can review project cards, Kanban, Gantt timeline, expenditure, milestone status, media, documents, and AI delay alerts.",
+    action: "Select a project card to update the execution panels."
+  },
+  {
+    page: "map",
+    title: "Map shows where action is needed",
+    body: "GIS view layers roads, schools, hospitals, PHCs, complaints, projects, flood zones, density, boundaries, and demand heatmaps.",
+    action: "Click hotspots to open evidence and project details."
+  },
+  {
+    page: "reports",
+    title: "Reports package the decision",
+    body: "Generate official Monthly, Budget, Demand Signals, Infrastructure, Development, and AI Recommendation reports with exports.",
+    action: "Use export buttons for presentation-ready files."
+  },
+  {
+    page: "settings",
+    title: "Admin controls keep it governed",
+    body: "Settings cover users, roles, API keys, integrations, vector database health, indexing, audit logs, security, billing, and backups.",
+    action: "Verify connection status and data-source health here."
+  }
+];
 
 const fallbackProject: RankedProject = {
   id: "kalindi-nagar-education",
@@ -303,10 +412,12 @@ const fallbackContext: ContextResponse = {
 const fallbackClientConfig: ClientConfig = {
   dataMode: "memory",
   maps: {
-    enabled: Boolean(envGoogleMapsApiKey),
+    enabled: Boolean(envMapplsMapSdkKey || envGoogleMapsApiKey),
     apiKey: envGoogleMapsApiKey,
     mapId: envGoogleMapsMapId,
-    source: envGoogleMapsApiKey ? "vite-env" : "not-configured"
+    provider: envMapplsMapSdkKey ? "mappls" : envGoogleMapsApiKey ? "google" : "osm",
+    mapplsKey: envMapplsMapSdkKey,
+    source: envMapplsMapSdkKey ? "vite-mappls-env" : envGoogleMapsApiKey ? "vite-env" : "not-configured"
   },
   citizenAppUrl,
   generatedAt: new Date().toISOString()
@@ -358,8 +469,8 @@ async function getJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
-async function requestJson<T>(path: string): Promise<T> {
-  const response = await apiFetch(path);
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, init);
   if (response.status === 401) throw new AuthError();
   if (!response.ok) throw new Error(path);
   return response.json();
@@ -396,6 +507,9 @@ export default function App() {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPageState] = useState<Page>(() => pageFromHash());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(tourStorageKey) !== "1");
+  const [tourStep, setTourStep] = useState(0);
   const [scope, setScope] = useState<Scope>("local");
   const [state, setState] = useState("Delhi");
   const [district, setDistrict] = useState("Central Delhi");
@@ -441,7 +555,30 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   function setPage(next: Page) {
     setPageState(next);
+    setMobileNavOpen(false);
     if (window.location.hash !== `#${next}`) window.history.replaceState(null, "", `#${next}`);
+  }
+
+  function startTour() {
+    setTourStep(0);
+    setTourOpen(true);
+    setMobileNavOpen(false);
+    setPage(tourSteps[0].page);
+  }
+
+  function closeTour() {
+    localStorage.setItem(tourStorageKey, "1");
+    setTourOpen(false);
+  }
+
+  function moveTour(nextStep: number) {
+    if (nextStep >= tourSteps.length) {
+      closeTour();
+      return;
+    }
+    const boundedStep = Math.max(0, nextStep);
+    setTourStep(boundedStep);
+    setPage(tourSteps[boundedStep].page);
   }
 
   async function refreshAll() {
@@ -562,7 +699,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       <aside className="sidebar" aria-label="JanVaani navigation">
         <div className="brand">
           <div className="brand-mark">JV</div>
@@ -609,14 +746,25 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
       </aside>
+      <button className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} type="button" />
 
       <section className="workspace">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">{pageLabel(page)}</p>
-            <h2>{pageTitle(page)}</h2>
+          <div className="topbar-title-row">
+            <button className="mobile-nav-button" onClick={() => setMobileNavOpen(true)} type="button">
+              <Menu size={18} />
+              Menu
+            </button>
+            <div>
+              <p className="eyebrow">{pageLabel(page)}</p>
+              <h2>{pageTitle(page)}</h2>
+            </div>
           </div>
           <div className="topbar-actions">
+            <button className="tour-button" onClick={startTour} type="button">
+              <Star size={16} />
+              Tour
+            </button>
             <div className={`demo-data-toggle ${demoData.enabled ? "enabled" : "disabled"}`} aria-label="Demo data controls">
               <span>{demoData.label}</span>
               <small>{formatCount(demoData.visibleRows)} visible / {formatCount(demoData.demoRows)} demo</small>
@@ -665,7 +813,57 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "compare" ? <ComparePage /> : null}
         {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
+      {tourOpen ? (
+        <TourOverlay
+          current={tourStep}
+          steps={tourSteps}
+          onBack={() => moveTour(tourStep - 1)}
+          onClose={closeTour}
+          onNext={() => moveTour(tourStep + 1)}
+          onOpenCitizen={() => window.open(effectiveCitizenAppUrl, "_blank", "noopener,noreferrer")}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function TourOverlay({
+  current,
+  steps,
+  onBack,
+  onClose,
+  onNext,
+  onOpenCitizen
+}: {
+  current: number;
+  steps: typeof tourSteps;
+  onBack: () => void;
+  onClose: () => void;
+  onNext: () => void;
+  onOpenCitizen: () => void;
+}) {
+  const step = steps[current];
+  const isSubmissionStep = current === 1;
+  return (
+    <section className="tour-overlay" role="dialog" aria-modal="true" aria-label="JanVaani evaluator tour">
+      <div className="tour-card">
+        <header>
+          <span>Solution tour</span>
+          <button aria-label="Close tour" onClick={onClose} type="button"><X size={18} /></button>
+        </header>
+        <div className="tour-progress" aria-label={`Step ${current + 1} of ${steps.length}`}>
+          {steps.map((item, index) => <i className={index <= current ? "active" : ""} key={item.title} />)}
+        </div>
+        <strong>{step.title}</strong>
+        <p>{step.body}</p>
+        <mark>{step.action}</mark>
+        <footer>
+          <button disabled={current === 0} onClick={onBack} type="button">Back</button>
+          {isSubmissionStep ? <button className="secondary" onClick={onOpenCitizen} type="button">Open JanVaani</button> : null}
+          <button className="primary" onClick={onNext} type="button">{current === steps.length - 1 ? "Finish" : "Next"}</button>
+        </footer>
+      </div>
+    </section>
   );
 }
 
@@ -859,14 +1057,18 @@ function ConnectionBanner({ error }: { error: string | null }) {
 function mergeClientConfig(config: ClientConfig): ClientConfig {
   const apiKey = config.maps.apiKey || envGoogleMapsApiKey;
   const mapId = config.maps.mapId || envGoogleMapsMapId;
+  const mapplsKey = config.maps.mapplsKey || envMapplsMapSdkKey;
+  const provider = mapplsKey ? "mappls" : apiKey ? "google" : "osm";
   return {
     ...config,
     maps: {
       ...config.maps,
-      enabled: Boolean(apiKey),
+      enabled: Boolean(mapplsKey || apiKey),
       apiKey,
       mapId,
-      source: config.maps.source || (apiKey ? "runtime-api" : "not-configured")
+      provider,
+      mapplsKey,
+      source: config.maps.source || (mapplsKey ? "runtime-mappls-api" : apiKey ? "runtime-api" : "not-configured")
     },
     citizenAppUrl: config.citizenAppUrl?.trim() || citizenAppUrl
   };
@@ -1118,8 +1320,8 @@ function IssueMap({
   selectProject: (id: string) => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
-  const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
-  const [fallbackReason, setFallbackReason] = useState(maps.apiKey ? "" : "Google Maps key is not configured.");
+  const [mapState, setMapState] = useState<MapLoadState>(maps.enabled ? "idle" : "fallback");
+  const [fallbackReason, setFallbackReason] = useState(maps.enabled ? "" : "Map SDK key is not configured.");
   const [gisAction, setGisAction] = useState("Ready to run GIS analysis.");
   const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
@@ -1139,10 +1341,54 @@ function IssueMap({
   ];
 
   useEffect(() => {
-    if (!maps.apiKey || hotspots.length === 0 || !mapRef.current) {
-      setFallbackReason(!maps.apiKey ? "Google Maps key is not configured." : "No hotspot coordinates available for the current filters.");
+    if (!maps.enabled || hotspots.length === 0 || !mapRef.current) {
+      setFallbackReason(!maps.enabled ? "Map SDK key is not configured." : "No hotspot coordinates available for the current filters.");
       setMapState("fallback");
       return;
+    }
+
+    if (maps.provider === "mappls" && maps.mapplsKey) {
+      let cancelled = false;
+      const activateFallback = (reason: string) => {
+        if (cancelled) return;
+        setFallbackReason(reason);
+        if (mapRef.current) mapRef.current.replaceChildren();
+        setMapState("fallback");
+      };
+      setFallbackReason("");
+      setMapState("loading");
+      loadMapplsMaps(maps.mapplsKey)
+        .then(() => {
+          if (cancelled || !mapRef.current || !window.mappls?.Map) return;
+          mapRef.current.replaceChildren();
+          mapRef.current.id ||= `mappls-${Math.random().toString(36).slice(2)}`;
+          const center = hotspots[0] ?? { lat: 28.6139, lng: 77.2090 };
+          const map = new window.mappls.Map(mapRef.current.id, {
+            center: [center.lat, center.lng],
+            zoom: hotspots.length > 1 ? 5 : 12,
+            geolocation: false,
+            clickableIcons: false
+          });
+          if (window.mappls.Marker) {
+            hotspots.forEach((hotspot, index) => {
+              try {
+                new window.mappls!.Marker!({
+                  map,
+                  position: { lat: hotspot.lat, lng: hotspot.lng },
+                  title: `${index + 1}. ${hotspot.category} - ${hotspot.ward}`,
+                  draggable: false
+                });
+              } catch {
+                // Mappls marker API varies by SDK version. Base map remains usable.
+              }
+            });
+          }
+          setMapState("ready");
+        })
+        .catch(() => activateFallback("Mappls Map SDK failed to load. Showing the live OpenStreetMap tile layer."));
+      return () => {
+        cancelled = true;
+      };
     }
 
     let cancelled = false;
@@ -1211,7 +1457,7 @@ function IssueMap({
       window.console.error = originalConsoleError;
       window.gm_authFailure = originalAuthFailure;
     };
-  }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
+  }, [hotspots, maps.enabled, maps.provider, maps.mapplsKey, maps.apiKey, maps.mapId, selectProject]);
 
   return (
     <div className="map-stack gis-dashboard">
@@ -1220,7 +1466,7 @@ function IssueMap({
           <strong>Geospatial demand hotspots</strong>
           <span>Premium GIS control room · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {clusters.clusters.length} AI clusters</span>
         </div>
-        <small className={`map-state ${mapState}`}>{mapStatusText(mapState)}</small>
+        <small className={`map-state ${mapState}`}>{mapStatusText(mapState, maps.provider)}</small>
       </div>
       <div className="map-layout gis-layout">
         <aside className="gis-control-panel" aria-label="GIS layer controls">
@@ -1713,8 +1959,8 @@ function latToTileY(lat: number, zoom: number) {
   return ((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2) * 2 ** zoom;
 }
 
-function mapStatusText(state: MapLoadState) {
-  if (state === "ready") return "Google Maps live";
+function mapStatusText(state: MapLoadState, provider?: ClientConfig["maps"]["provider"]) {
+  if (state === "ready") return provider === "mappls" ? "Mappls live" : "Google Maps live";
   if (state === "loading") return "Loading map";
   return "Live tile map";
 }
@@ -1774,6 +2020,23 @@ function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
   });
 
   return window.__loksetuGoogleMapsPromise;
+}
+
+function loadMapplsMaps(key: string): Promise<void> {
+  if (window.mappls?.Map) return Promise.resolve();
+  if (window.__loksetuMapplsPromise) return window.__loksetuMapplsPromise;
+
+  window.__loksetuMapplsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    window.__loksetuMapplsLoaded = () => resolve();
+    script.src = `https://apis.mappls.com/advancedmaps/api/${encodeURIComponent(key)}/map_sdk?layer=vector&v=3.0&callback=__loksetuMapplsLoaded`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => reject(new Error("Mappls Maps failed to load"));
+    document.head.appendChild(script);
+  });
+
+  return window.__loksetuMapplsPromise;
 }
 
 function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[] }) {
@@ -2238,7 +2501,11 @@ function KnowledgeBasePage() {
 function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
   const [queryNotice, setQueryNotice] = useState("Query not run yet.");
   const [activeExplorerFilter, setActiveExplorerFilter] = useState("No filter selected.");
+  const [intakeAudit, setIntakeAudit] = useState<IntakeAuditResponse | null>(null);
+  const [selectedIntakeId, setSelectedIntakeId] = useState("");
+  const [pipelineNotice, setPipelineNotice] = useState("Scheduled batch mode. Use on-demand run during evaluation.");
   const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
+  const selectedIntake = intakeAudit?.entries.find((entry) => entry.rawIntakeId === selectedIntakeId) ?? intakeAudit?.entries[0];
   const sourceCards = [
     { name: "Citizen Submissions", rows: dashboard.totals.submissions, freshness: "Live", health: "Ready" },
     { name: "Ranked Projects", rows: rows.length, freshness: "Current batch", health: "Ready" },
@@ -2248,6 +2515,31 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
     { name: "RAG Evidence", rows: 942, freshness: "Indexed", health: "Ready" }
   ];
   const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "confidence", "budget_cr", "progress", "citizen_impact"];
+
+  useEffect(() => {
+    refreshIntakeAudit();
+  }, []);
+
+  async function refreshIntakeAudit() {
+    try {
+      const next = await requestJson<IntakeAuditResponse>("/api/intake/audit");
+      setIntakeAudit(next);
+      setSelectedIntakeId((current) => (next.entries.some((entry) => entry.rawIntakeId === current) ? current : next.entries[0]?.rawIntakeId ?? ""));
+    } catch (error) {
+      setPipelineNotice(error instanceof Error ? `Intake audit unavailable: ${error.message}` : "Intake audit unavailable.");
+    }
+  }
+
+  async function runPipelineNow() {
+    setPipelineNotice("Running on-demand AI pipeline...");
+    try {
+      const result = await requestJson<{ run: BatchRun }>("/api/batch/run?limit=10", { method: "POST" } as RequestInit);
+      setPipelineNotice(`On-demand run ${result.run.status}: processed ${result.run.processed}, failed ${result.run.failed}.`);
+      await refreshIntakeAudit();
+    } catch (error) {
+      setPipelineNotice(error instanceof Error ? `On-demand run failed: ${error.message}` : "On-demand run failed.");
+    }
+  }
 
   return (
     <section className="explorer-page">
@@ -2273,6 +2565,66 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
             <small>{formatCount(source.rows)} records · {source.freshness}</small>
           </article>
         ))}
+      </section>
+
+      <section className="panel intake-audit-panel">
+        <PanelTitle title="Awaaz Intake Audit Trail" icon={MessageSquareText} detail={intakeAudit?.processingMode ?? "loading"} />
+        <div className="intake-audit-actions">
+          <button className="primary" onClick={runPipelineNow} type="button">Run on-demand AI pipeline</button>
+          <button onClick={refreshIntakeAudit} type="button">Refresh intake log</button>
+          <span>{pipelineNotice}</span>
+        </div>
+        <div className="intake-audit-grid">
+          <div className="intake-list" aria-label="Latest citizen submissions">
+            {(intakeAudit?.entries ?? []).slice(0, 8).map((entry) => (
+              <button className={entry.rawIntakeId === selectedIntake?.rawIntakeId ? "active" : ""} key={entry.rawIntakeId} onClick={() => setSelectedIntakeId(entry.rawIntakeId)} type="button">
+                <strong>{entry.channel.toUpperCase()} · {entry.shortReceipt}</strong>
+                <span>{entry.status} · {entry.placement.ward}</span>
+                <small>{entry.input.mediaType !== "none" ? entry.input.mediaType : "text"} · urgency {entry.input.urgency}/5 · rating {entry.input.rating}/5</small>
+              </button>
+            ))}
+            {!intakeAudit?.entries.length ? <p className="empty-state">No submitted Awaaz records yet. Submit from the citizen app, then run pipeline.</p> : null}
+          </div>
+          <div className="intake-detail" aria-label="Selected AI inference">
+            {selectedIntake ? (
+              <>
+                <div className="intake-detail-head">
+                  <div>
+                    <span>Receipt</span>
+                    <strong>{selectedIntake.shortReceipt}</strong>
+                  </div>
+                  <mark>{selectedIntake.status}</mark>
+                </div>
+                <dl>
+                  <div><dt>AI tag</dt><dd>{selectedIntake.ai.category}</dd></div>
+                  <div><dt>Language</dt><dd>{selectedIntake.ai.detectedLanguage ?? selectedIntake.input.language}</dd></div>
+                  <div><dt>Region placed</dt><dd>{selectedIntake.placement.ward}, {selectedIntake.placement.district}, {selectedIntake.placement.state}</dd></div>
+                  <div><dt>MP route</dt><dd>{selectedIntake.placement.mpId ?? "pending"}</dd></div>
+                  <div><dt>Civic issue</dt><dd>{selectedIntake.ai.isCivicIssue === false ? "Needs review" : "Yes"}</dd></div>
+                  <div><dt>AI runtime</dt><dd>{selectedIntake.ai.providerMode ?? "pending"} · {selectedIntake.ai.model ?? "pending"}</dd></div>
+                </dl>
+                <article>
+                  <h4>AI explanation</h4>
+                  <p>{selectedIntake.ai.explanation}</p>
+                </article>
+                <article>
+                  <h4>Normalized evidence</h4>
+                  <p>{selectedIntake.ai.normalizedText || selectedIntake.ai.transcript || selectedIntake.ai.imageSummary || selectedIntake.input.text || "Pending batch inference."}</p>
+                </article>
+              </>
+            ) : null}
+          </div>
+          <div className="intake-samples" aria-label="Evaluator test samples">
+            <h4>Voice, image, text test kit</h4>
+            {(intakeAudit?.samples ?? []).map((sample) => (
+              <a href={sample.href} key={sample.href} download>
+                <strong>{sample.type}</strong>
+                <span>{sample.label}</span>
+                <small>{sample.expected}</small>
+              </a>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="explorer-main-grid">
