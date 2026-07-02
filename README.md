@@ -12,6 +12,10 @@ Production-oriented Digital Public Infrastructure for ranking constituency devel
 - Supports privacy mode with random aliases and citizen contribution scores.
 - Provides public-safe project APIs, RBAC-scoped MP queues, external X/GDELT signal enrichment, and source lineage/freshness.
 
+## Solution Submission
+
+See [solution.md](solution.md) for the evaluator-facing solution write-up, architecture summary, demo flow, AI pipeline, RAG modes, location handling, and production links.
+
 ## Local Run
 
 One-command full local stack:
