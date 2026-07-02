@@ -215,7 +215,7 @@ const citizenAppUrl =
 
 const navItems: Array<{ id: string; page: Page; label: string; hint?: string; icon: typeof Home; badge?: string }> = [
   { id: "overview", page: "overview", label: "Overview", icon: Home },
-  { id: "priorities", page: "priorities", label: "People's Priorities", icon: Droplets },
+  { id: "priorities", page: "priorities", label: "Priority Desk", icon: Droplets },
   { id: "signals", page: "signals", label: "Demand Signals", icon: DatabaseZap },
   { id: "copilot", page: "copilot", label: "AI Assistant (RAG)", icon: MessageSquareText, badge: "New" },
   { id: "recommendations", page: "recommendations", label: "Recommendations", icon: Scale },
@@ -535,7 +535,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           <div className="brand-mark">JV</div>
           <div>
             <h1>JanVaani <em>AI</em></h1>
-            <p>People&apos;s Priorities Intelligence Platform</p>
+            <p>Constituency Intelligence Platform</p>
           </div>
           <button
             aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
