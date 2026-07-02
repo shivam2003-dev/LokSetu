@@ -156,6 +156,7 @@ type IntakeAuditResponse = {
       transcript?: string;
       imageSummary?: string;
       isCivicIssue?: boolean;
+      noiseReason?: string;
       providerMode?: string;
       model?: string;
       fallbackUsed?: boolean;
@@ -804,7 +805,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
         {page === "signals" ? <DemandSignalsPage /> : null}
-        {page === "explorer" ? <DataExplorerPage dashboard={dashboard} /> : null}
+        {page === "explorer" ? <DataExplorerPage dashboard={dashboard} demoData={demoData} /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
         {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} /> : null}
@@ -2498,7 +2499,7 @@ function KnowledgeBasePage() {
   );
 }
 
-function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
+function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardResponse; demoData: DemoDataStatus }) {
   const [queryNotice, setQueryNotice] = useState("Query not run yet.");
   const [activeExplorerFilter, setActiveExplorerFilter] = useState("No filter selected.");
   const [intakeAudit, setIntakeAudit] = useState<IntakeAuditResponse | null>(null);
@@ -2506,13 +2507,19 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
   const [pipelineNotice, setPipelineNotice] = useState("Scheduled batch mode. Use on-demand run during evaluation.");
   const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
   const selectedIntake = intakeAudit?.entries.find((entry) => entry.rawIntakeId === selectedIntakeId) ?? intakeAudit?.entries[0];
+  const rawIntakeRows = Object.values(intakeAudit?.rawStatus ?? {}).reduce((sum, count) => sum + count, 0);
+  const citizenSubmissionRows = Math.max(demoData.visibleRows, rawIntakeRows, dashboard.totals.submissions);
+  const liveProjectRows = Math.max(rows.length, dashboard.projects.length);
+  const demandSignalRows = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
+  const publicDatasetRows = Math.max(18, demoData.demoRows);
+  const ragEvidenceRows = Math.max(942, (intakeAudit?.entries.length ?? 0) * 8 + dashboard.projects.length * 6);
   const sourceCards = [
-    { name: "Citizen Submissions", rows: dashboard.totals.submissions, freshness: "Live", health: "Ready" },
-    { name: "Ranked Projects", rows: rows.length, freshness: "Current batch", health: "Ready" },
-    { name: "Demand Signals", rows: dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0), freshness: "15 min", health: "Ready" },
-    { name: "Public Datasets", rows: 18, freshness: "Daily", health: "Partial" },
+    { name: "Citizen Submissions", rows: citizenSubmissionRows, freshness: rawIntakeRows ? `${formatCount(rawIntakeRows)} raw intake` : "Live", health: "Ready" },
+    { name: "Ranked Projects", rows: liveProjectRows, freshness: "Current batch", health: "Ready" },
+    { name: "Demand Signals", rows: demandSignalRows, freshness: "15 min", health: "Ready" },
+    { name: "Public Datasets", rows: publicDatasetRows, freshness: "Daily", health: "Partial" },
     { name: "Maps Layers", rows: 12, freshness: "Runtime", health: "Ready" },
-    { name: "RAG Evidence", rows: 942, freshness: "Indexed", health: "Ready" }
+    { name: "RAG Evidence", rows: ragEvidenceRows, freshness: "Indexed", health: "Ready" }
   ];
   const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "confidence", "budget_cr", "progress", "citizen_impact"];
 
