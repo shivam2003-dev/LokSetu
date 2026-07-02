@@ -92,4 +92,10 @@ export type RagAnswer = {
     embeddings: number;
   };
   retrievalMode: string;
+  orchestration?: {
+    graph: "langgraph";
+    tracing: "langsmith";
+    context: "langchain-document";
+    nodes: string[];
+  };
 };

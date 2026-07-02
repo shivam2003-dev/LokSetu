@@ -31,6 +31,12 @@ export type RagQueryResponse = {
     embeddings: number;
   };
   retrievalMode: string;
+  orchestration?: {
+    graph: "langgraph";
+    tracing: "langsmith";
+    context: "langchain-document";
+    nodes: string[];
+  };
 };
 
 export async function queryRagService(input: {
@@ -79,6 +85,12 @@ export async function ragServiceStatus() {
     mode: "pgvector-hybrid",
     productionTarget: "Vertex AI RAG Engine or Vertex AI Vector Search",
     embeddingStore: "postgres-pgvector-hnsw",
+    orchestration: {
+      graph: "langgraph",
+      tracing: "langsmith",
+      context: "langchain-document",
+      nodes: ["embed_query", "hybrid_retrieve", "rerank_context", "grounded_answer"]
+    },
     corpusDocuments: payload.stats.chunks,
     bySource: payload.documents.reduce<Record<string, number>>((acc, document) => {
       acc[document.source] = (acc[document.source] ?? 0) + 1;

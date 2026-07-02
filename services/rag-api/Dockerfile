@@ -14,6 +14,9 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/citizen/package.json apps/citizen/package.json
+COPY services/api/package.json services/api/package.json
 COPY services/rag-api/package.json services/rag-api/package.json
 RUN npm install --omit=dev
 COPY --from=build /app/services/rag-api/dist services/rag-api/dist

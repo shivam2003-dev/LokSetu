@@ -90,6 +90,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     retrieval: {
       mode: ragResponse?.retrievalMode ?? (ragUnavailable ? "not-configured" : "greeting"),
       embeddingStore: ragResponse ? "postgres-pgvector-hnsw" : "none",
+      orchestration: ragResponse?.orchestration,
       corpusDocuments: ragResponse?.index?.chunks ?? 0,
       retrieved: retrievedContext.length,
       latencyMs: ragResponse?.metrics.totalLatencyMs ?? Date.now() - started
@@ -242,6 +243,11 @@ export function copilotKnowledgeSummary() {
     rag: {
       mode: "pgvector-hybrid",
       productionTarget: "Vertex AI RAG Engine or Vertex AI Vector Search with pgvector local runtime",
+      orchestration: {
+        graph: "langgraph",
+        tracing: "langsmith",
+        context: "langchain-document"
+      },
       citationsRequired: true
     },
     currentLimitations: [

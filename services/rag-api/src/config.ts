@@ -2,6 +2,8 @@ import { ChunkingOptions } from "./types.js";
 
 export function config() {
   const embeddingProvider = process.env.RAG_EMBEDDING_PROVIDER ?? (process.env.VERTEX_AI_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT ? "gemini" : "hash");
+  const defaultSimilarityThreshold = embeddingProvider === "hash" ? 0.08 : 0.24;
+  const defaultMinimumConfidence = embeddingProvider === "hash" ? 0.1 : 0.28;
   return {
     port: Number(process.env.PORT ?? 8090),
     databaseUrl: process.env.RAG_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
@@ -17,8 +19,8 @@ export function config() {
     llmProvider: process.env.RAG_LLM_PROVIDER ?? "extractive",
     llmModel: process.env.RAG_LLM_MODEL ?? process.env.VERTEX_AI_MODEL ?? "gemini-1.5-flash",
     topK: Number(process.env.RAG_TOP_K ?? 8),
-    similarityThreshold: Number(process.env.RAG_SIMILARITY_THRESHOLD ?? 0.24),
-    minimumConfidence: Number(process.env.RAG_MINIMUM_CONFIDENCE ?? 0.28),
+    similarityThreshold: Number(process.env.RAG_SIMILARITY_THRESHOLD ?? defaultSimilarityThreshold),
+    minimumConfidence: Number(process.env.RAG_MINIMUM_CONFIDENCE ?? defaultMinimumConfidence),
     requireCitations: process.env.RAG_REQUIRE_CITATIONS !== "false",
     chunking: {
       chunkSize: Number(process.env.RAG_CHUNK_SIZE ?? 900),

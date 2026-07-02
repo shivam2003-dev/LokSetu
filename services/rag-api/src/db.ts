@@ -22,6 +22,18 @@ export async function assertReady() {
 
 export async function upsertDocument(document: RagDocument) {
   if (!pool) throw new Error("database not configured");
+  if (document.sourceUri || document.sourceUrl) {
+    await pool.query(
+      `delete from rag_documents
+       where tenant_id = $1
+         and namespace = $2
+         and source = $3
+         and coalesce(source_uri, '') = coalesce($4, '')
+         and coalesce(source_url, '') = coalesce($5, '')
+         and id <> $6`,
+      [document.tenantId, document.namespace, document.source, document.sourceUri, document.sourceUrl, document.id]
+    );
+  }
   await pool.query(
     `insert into rag_documents
       (id, tenant_id, namespace, source, source_uri, source_url, title, media_type, metadata, checksum, created_at, updated_at)

@@ -17,10 +17,13 @@
   },
   "dependencies": {
     "@google/genai": "^2.10.0",
+    "@langchain/langgraph": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "langchain": "^1.5.2",
+    "langsmith": "^0.7.14",
     "mammoth": "^1.11.0",
     "pdf-parse": "^1.1.1",
     "pg": "^8.22.0",

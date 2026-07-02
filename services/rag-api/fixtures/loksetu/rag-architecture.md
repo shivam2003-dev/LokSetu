@@ -13,6 +13,8 @@ LokSetu uses retrieval augmented generation so the Copilot can answer constituen
 
 The RAG runtime has four Kubernetes components. The API service exposes `/query`, `/ingest`, `/documents`, `/stats`, `/ready`, and `/metrics`. The ingestion worker reads configured source paths from `RAG_INGEST_PATHS` and indexes markdown, text, CSV, JSON, PDF, DOCX, filesystem, or GCS documents. The embedding worker embeds chunks that are missing vectors. The main LokSetu API calls the RAG API from the Copilot adapter and also indexes processed citizen submissions after each batch run.
 
+The query runtime is orchestrated with LangGraph. The graph has nodes for query embedding, hybrid retrieval, reranking/context construction, and grounded answer generation. Retrieved chunks are converted into LangChain `Document` objects before answer generation so metadata such as source URL, page, chunk ID, section, and confidence travels with the context. LangSmith `traceable` spans wrap the graph and each node for stage-level tracing when LangSmith environment variables are configured.
+
 ## Data model
 
 The RAG database is Postgres with pgvector. `rag_documents` stores document metadata, source URI, title, checksum, tenant, and namespace. `rag_chunks` stores semantic or fixed-size chunks plus tsvector keyword data. `rag_embeddings` stores the vector for each chunk, embedding provider, model, dimensions, and checksum. `rag_ingestion_jobs` and `rag_query_logs` are reserved for ingestion and query audit trails.
@@ -24,6 +26,8 @@ Static knowledge enters through `services/rag-api/fixtures/...` and the ingestio
 ## Chunking and retrieval
 
 Documents are parsed, normalized, chunked, and stored with stable checksums. Semantic chunking uses headings when enabled. Query retrieval runs both vector search and Postgres full-text keyword search, merges both result sets, reranks by vector score, keyword score, and recency, then filters by confidence and lightweight query relevance. Returned answers include retrieved chunks, citations, latency metrics, and index stats.
+
+The retrieval API keeps `pgvector-hybrid` as the externally visible mode for compatibility, while response metadata reports the LangGraph/LangChain/LangSmith orchestration stack and graph node order.
 
 ## AI providers
 

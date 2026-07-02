@@ -751,8 +751,9 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 300px minmax(0, 1fr);
   min-height: 100vh;
+  min-width: 0;
 }
 
 .sidebar {
@@ -966,9 +967,11 @@ button {
 .workspace {
   padding: 26px clamp(16px, 3vw, 34px) 64px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-content: start;
   max-width: 1480px;
+  min-width: 0;
   width: 100%;
 }
 
@@ -1088,7 +1091,7 @@ button {
 
 .control-strip {
   display: grid;
-  grid-template-columns: 270px repeat(4, minmax(132px, 1fr)) minmax(210px, 1.4fr) auto;
+  grid-template-columns: minmax(230px, 0.9fr) repeat(4, minmax(105px, 1fr)) minmax(150px, 1.2fr) auto;
   gap: 10px;
   align-items: center;
   background: var(--panel);
@@ -3704,25 +3707,69 @@ meter::-moz-meter-bar {
     z-index: 20;
     border-right: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 12px;
+    padding: 14px 18px;
+  }
+  .brand {
+    padding: 0 2px 12px;
+  }
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+  .brand p {
+    max-width: min(64vw, 520px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .status-pill {
     display: none;
   }
   .nav-scroll {
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    margin: 0;
-    padding: 0;
-    overflow: visible;
+    display: flex;
+    gap: 8px;
+    margin: 0 -18px;
+    padding: 0 18px 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .nav-scroll::-webkit-scrollbar {
+    display: none;
   }
   .nav-section {
-    padding: 8px;
+    display: contents;
+  }
+  .nav-section > span {
+    display: none;
   }
   .nav-item {
+    flex: 0 0 auto;
     justify-content: center;
-    min-height: 38px;
+    width: auto;
+    min-width: max-content;
+    min-height: 40px;
+    padding: 0 13px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.03);
+    scroll-snap-align: start;
+    white-space: nowrap;
   }
   .nav-item.active::before {
     display: none;
+  }
+  .sidebar-footer {
+    display: grid;
+    grid-template-columns: minmax(180px, 320px);
+    padding-top: 0;
+    border-top: 0;
+  }
+  .citizen-link {
+    min-height: 40px;
   }
   .control-strip,
   .hero-band,
@@ -3854,14 +3901,9 @@ meter::-moz-meter-bar {
     text-overflow: ellipsis;
   }
   .nav-scroll {
-    display: flex;
     gap: 8px;
     margin: 0 -12px;
     padding: 0 12px 4px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch;
   }
   .nav-section {
     display: contents;
@@ -3870,16 +3912,8 @@ meter::-moz-meter-bar {
     display: none;
   }
   .nav-item {
-    flex: 0 0 auto;
-    justify-content: center;
-    width: auto;
-    min-width: max-content;
     min-height: 40px;
     padding: 0 12px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background: rgba(255, 255, 255, 0.03);
-    scroll-snap-align: start;
-    white-space: nowrap;
   }
   .nav-item svg {
     width: 17px;
@@ -3997,15 +4031,15 @@ meter::-moz-meter-bar {
     max-width: 190px;
   }
   .topbar {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
   }
   .logout-button {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
   }
   .icon-button {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 1;
     justify-self: end;
   }
 }

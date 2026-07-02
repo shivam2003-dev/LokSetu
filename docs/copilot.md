@@ -43,7 +43,9 @@ Example response fields:
 
 ## Retrieval Design
 
-Local development uses deterministic hybrid lexical retrieval over a generated corpus. The corpus excludes raw usernames and direct citizen identifiers; citizen content uses privacy-safe aliases and aggregate snippets. This keeps the chat functional without cloud credentials and makes tests stable.
+Local development uses deterministic hybrid retrieval over a generated corpus. The corpus excludes raw usernames and direct citizen identifiers; citizen content uses privacy-safe aliases and aggregate snippets. This keeps the chat functional without cloud credentials and makes tests stable.
+
+The standalone RAG service now uses LangGraph to orchestrate the query path: embed query, retrieve from pgvector plus Postgres full-text search, rerank/filter context, and produce the grounded answer. LangChain `Document` objects carry retrieved context into answer generation, and LangSmith `traceable` spans wrap the graph and each retrieval stage when tracing is enabled.
 
 Production should replace the local retrieval adapter with Vertex AI RAG Engine or Vertex AI Vector Search:
 

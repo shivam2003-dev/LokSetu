@@ -2,9 +2,27 @@ import { expect, request, test } from "@playwright/test";
 
 const apiUrl = "http://127.0.0.1:18080";
 
+async function newApiContext() {
+  const password = process.env.TEST_APP_ACCESS_PASSWORD;
+  if (!password) return request.newContext({ baseURL: apiUrl });
+
+  const loginContext = await request.newContext({ baseURL: apiUrl });
+  const login = await loginContext.post("/api/auth/login", { data: { password } });
+  if (!login.ok()) {
+    await loginContext.dispose();
+    return request.newContext({ baseURL: apiUrl });
+  }
+  const payload = await login.json() as { token?: string };
+  await loginContext.dispose();
+  return request.newContext({
+    baseURL: apiUrl,
+    extraHTTPHeaders: payload.token ? { Authorization: `Bearer ${payload.token}` } : undefined
+  });
+}
+
 test.describe("API functional flow", () => {
   test("health, dashboard, submission queue, and batch status work", async () => {
-    const api = await request.newContext({ baseURL: apiUrl });
+    const api = await newApiContext();
 
     const health = await api.get("/healthz");
     await expect(health).toBeOK();
@@ -224,7 +242,7 @@ test.describe("API functional flow", () => {
   });
 
   test("whatsapp simulator queues multilingual intake", async () => {
-    const api = await request.newContext({ baseURL: apiUrl });
+    const api = await newApiContext();
     const response = await api.post("/api/whatsapp/simulate", {
       data: {
         from: "919999000111",

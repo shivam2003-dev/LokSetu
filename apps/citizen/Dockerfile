@@ -6,6 +6,7 @@ COPY package*.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/citizen/package.json apps/citizen/package.json
 COPY services/api/package.json services/api/package.json
+COPY services/rag-api/package.json services/rag-api/package.json
 COPY tsconfig.base.json tsconfig.base.json
 RUN npm install
 COPY apps/citizen apps/citizen

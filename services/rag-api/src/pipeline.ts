@@ -1,3 +1,6 @@
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import { Document } from "langchain";
+import { traceable } from "langsmith/traceable";
 import { config } from "./config.js";
 import { chunksNeedingEmbeddings, indexStats, keywordSearch, upsertEmbedding, vectorSearch } from "./db.js";
 import { embedText } from "./embeddings.js";
@@ -5,6 +8,34 @@ import { cacheHits, indexedChunks, indexedDocuments, retrievalMisses, stageLaten
 import { RagAnswer, RagQuery, RetrievalResult } from "./types.js";
 
 const noResultAnswer = "No indexed documents match the query.";
+const graphNodes = ["embed_query", "hybrid_retrieve", "rerank_context", "grounded_answer"];
+
+type RagConfig = ReturnType<typeof config>;
+type RagIndexStats = RagAnswer["index"];
+
+const RagGraphState = Annotation.Root({
+  input: Annotation<RagQuery>(),
+  cfg: Annotation<RagConfig>(),
+  startedAt: Annotation<number>(),
+  tenantId: Annotation<string>(),
+  namespace: Annotation<string>(),
+  topK: Annotation<number>(),
+  similarityThreshold: Annotation<number>(),
+  minimumConfidence: Annotation<number>(),
+  requireCitations: Annotation<boolean>(),
+  queryEmbedding: Annotation<number[]>(),
+  embeddingLatencyMs: Annotation<number>(),
+  vectorSearchLatencyMs: Annotation<number>(),
+  semantic: Annotation<RetrievalResult[]>({ reducer: (_left, right) => right, default: () => [] }),
+  keyword: Annotation<RetrievalResult[]>({ reducer: (_left, right) => right, default: () => [] }),
+  retrieved: Annotation<RetrievalResult[]>({ reducer: (_left, right) => right, default: () => [] }),
+  contextDocuments: Annotation<Document[]>({ reducer: (_left, right) => right, default: () => [] }),
+  stats: Annotation<RagIndexStats>(),
+  answer: Annotation<string>(),
+  llmLatencyMs: Annotation<number>()
+});
+
+type RagGraphStateType = typeof RagGraphState.State;
 
 export async function embedPendingChunks(limit = 200) {
   const cfg = config();
@@ -29,6 +60,112 @@ export async function embedPendingChunks(limit = 200) {
 }
 
 export async function queryRag(input: RagQuery): Promise<RagAnswer> {
+  return tracedRunRagGraph(input);
+}
+
+const embedQueryNode = traceable(async (state: RagGraphStateType) => {
+  const embeddingStarted = Date.now();
+  const queryEmbedding = await timeStage("embedding", () => embedText(state.input.question));
+  return {
+    queryEmbedding: queryEmbedding.embedding,
+    embeddingLatencyMs: Date.now() - embeddingStarted
+  };
+}, {
+  name: "loksetu.rag.embed_query",
+  run_type: "chain",
+  tags: ["loksetu", "rag", "langgraph", "embedding"],
+  processInputs: (inputs) => {
+    const state = inputs;
+    return { question: state.input.question.slice(0, 240), provider: state.cfg.embeddingProvider, model: state.cfg.embeddingModel };
+  },
+  processOutputs: (outputs) => ({ embeddingLatencyMs: outputs.embeddingLatencyMs })
+});
+
+const hybridRetrieveNode = traceable(async (state: RagGraphStateType) => {
+  const searchStarted = Date.now();
+  const [semantic, keyword] = await Promise.all([
+    timeStage("vector_search", () => vectorSearch({ tenantId: state.tenantId, namespace: state.namespace, embedding: state.queryEmbedding, topK: state.topK * 2, metadata: state.input.metadata ?? {} })),
+    timeStage("keyword_search", () => keywordSearch({ tenantId: state.tenantId, namespace: state.namespace, query: state.input.question, topK: state.topK * 2, metadata: state.input.metadata ?? {} }))
+  ]);
+  return {
+    semantic,
+    keyword,
+    vectorSearchLatencyMs: Date.now() - searchStarted
+  };
+}, {
+  name: "loksetu.rag.hybrid_retrieve",
+  run_type: "retriever",
+  tags: ["loksetu", "rag", "pgvector", "hybrid"],
+  processInputs: (inputs) => {
+    const state = inputs;
+    return { tenantId: state.tenantId, namespace: state.namespace, topK: state.topK, metadata: state.input.metadata ?? {} };
+  },
+  processOutputs: (outputs) => ({ semantic: outputs.semantic.length, keyword: outputs.keyword.length, vectorSearchLatencyMs: outputs.vectorSearchLatencyMs })
+});
+
+const rerankContextNode = traceable(async (state: RagGraphStateType) => {
+  const retrieved = rerank(state.semantic, state.keyword)
+    .filter((item) => item.vectorScore >= state.similarityThreshold || item.keywordScore > 0)
+    .filter((item) => item.confidence >= state.minimumConfidence)
+    .filter((item) => isRelevantToQuery(state.input.question, item, state.similarityThreshold))
+    .slice(0, state.topK);
+  const stats = await indexStats(state.tenantId, state.namespace);
+  indexedDocuments.set(stats.documents);
+  indexedChunks.set(stats.chunks);
+  return {
+    retrieved,
+    contextDocuments: toLangChainDocuments(retrieved),
+    stats
+  };
+}, {
+  name: "loksetu.rag.rerank_context",
+  run_type: "chain",
+  tags: ["loksetu", "rag", "langchain-document"],
+  processInputs: (inputs) => {
+    const state = inputs;
+    return { semantic: state.semantic.length, keyword: state.keyword.length, minimumConfidence: state.minimumConfidence };
+  },
+  processOutputs: (outputs) => ({ retrieved: outputs.retrieved.length, documents: outputs.stats.documents, chunks: outputs.stats.chunks })
+});
+
+const groundedAnswerNode = traceable(async (state: RagGraphStateType) => {
+  if (state.retrieved.length === 0 || (state.requireCitations && state.retrieved.every((item) => !item.sourceUrl && !item.sourceUri))) {
+    retrievalMisses.inc();
+    return {
+      answer: noResultAnswer,
+      llmLatencyMs: 0
+    };
+  }
+  const llmStarted = Date.now();
+  const answer = await timeStage("llm", () => groundedAnswer(state.input.question, state.contextDocuments, state.retrieved));
+  return {
+    answer,
+    llmLatencyMs: Date.now() - llmStarted
+  };
+}, {
+  name: "loksetu.rag.grounded_answer",
+  run_type: "llm",
+  tags: ["loksetu", "rag", "grounded"],
+  processInputs: (inputs) => {
+    const state = inputs;
+    return { question: state.input.question.slice(0, 240), retrieved: state.retrieved.length, llmProvider: state.cfg.llmProvider, llmModel: state.cfg.llmModel };
+  },
+  processOutputs: (outputs) => ({ answerLength: outputs.answer.length, llmLatencyMs: outputs.llmLatencyMs })
+});
+
+const ragGraph = new StateGraph(RagGraphState)
+  .addNode("embed_query", async (state: RagGraphStateType) => embedQueryNode(state))
+  .addNode("hybrid_retrieve", async (state: RagGraphStateType) => hybridRetrieveNode(state))
+  .addNode("rerank_context", async (state: RagGraphStateType) => rerankContextNode(state))
+  .addNode("grounded_answer", async (state: RagGraphStateType) => groundedAnswerNode(state))
+  .addEdge(START, "embed_query")
+  .addEdge("embed_query", "hybrid_retrieve")
+  .addEdge("hybrid_retrieve", "rerank_context")
+  .addEdge("rerank_context", "grounded_answer")
+  .addEdge("grounded_answer", END)
+  .compile();
+
+const tracedRunRagGraph = traceable(async (input: RagQuery): Promise<RagAnswer> => {
   const cfg = config();
   const started = Date.now();
   const tenantId = input.tenantId ?? cfg.tenantId;
@@ -38,49 +175,38 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
   const minimumConfidence = input.minimumConfidence ?? cfg.minimumConfidence;
   const requireCitations = input.requireCitations ?? cfg.requireCitations;
 
-  const embeddingStarted = Date.now();
-  const queryEmbedding = await timeStage("embedding", () => embedText(input.question));
-  const embeddingLatencyMs = Date.now() - embeddingStarted;
+  const state = await ragGraph.invoke({
+    input,
+    cfg,
+    startedAt: started,
+    tenantId,
+    namespace,
+    topK,
+    similarityThreshold,
+    minimumConfidence,
+    requireCitations
+  });
 
-  const searchStarted = Date.now();
-  const [semantic, keyword] = await Promise.all([
-    timeStage("vector_search", () => vectorSearch({ tenantId, namespace, embedding: queryEmbedding.embedding, topK: topK * 2, metadata: input.metadata ?? {} })),
-    timeStage("keyword_search", () => keywordSearch({ tenantId, namespace, query: input.question, topK: topK * 2, metadata: input.metadata ?? {} }))
-  ]);
-  const vectorSearchLatencyMs = Date.now() - searchStarted;
-  const retrieved = rerank(semantic, keyword)
-    .filter((item) => item.vectorScore >= similarityThreshold || item.keywordScore > 0)
-    .filter((item) => item.confidence >= minimumConfidence)
-    .filter((item) => isRelevantToQuery(input.question, item, similarityThreshold))
-    .slice(0, topK);
-  const stats = await indexStats(tenantId, namespace);
-  indexedDocuments.set(stats.documents);
-  indexedChunks.set(stats.chunks);
-
-  if (retrieved.length === 0 || (requireCitations && retrieved.every((item) => !item.sourceUrl && !item.sourceUri))) {
-    retrievalMisses.inc();
+  if (state.retrieved.length === 0 || state.answer === noResultAnswer) {
     return {
       answer: noResultAnswer,
       citations: [],
       retrieved: [],
       metrics: {
-        embeddingLatencyMs,
-        vectorSearchLatencyMs,
+        embeddingLatencyMs: state.embeddingLatencyMs,
+        vectorSearchLatencyMs: state.vectorSearchLatencyMs,
         llmLatencyMs: 0,
         totalLatencyMs: Date.now() - started
       },
-      index: stats,
-      retrievalMode: "pgvector-hybrid-no-match"
+      index: state.stats,
+      retrievalMode: "pgvector-hybrid-no-match",
+      orchestration: orchestrationMeta()
     };
   }
 
-  const llmStarted = Date.now();
-  const answer = await timeStage("llm", () => groundedAnswer(input.question, retrieved));
-  const llmLatencyMs = Date.now() - llmStarted;
-
   return {
-    answer,
-    citations: retrieved.map((item) => ({
+    answer: state.answer,
+    citations: state.retrieved.map((item) => ({
       documentId: item.documentId,
       chunkId: item.id,
       document: item.title,
@@ -89,17 +215,32 @@ export async function queryRag(input: RagQuery): Promise<RagAnswer> {
       sourceUrl: item.sourceUrl ?? item.sourceUri,
       confidence: Number(item.confidence.toFixed(4))
     })),
-    retrieved,
+    retrieved: state.retrieved,
     metrics: {
-      embeddingLatencyMs,
-      vectorSearchLatencyMs,
-      llmLatencyMs,
+      embeddingLatencyMs: state.embeddingLatencyMs,
+      vectorSearchLatencyMs: state.vectorSearchLatencyMs,
+      llmLatencyMs: state.llmLatencyMs,
       totalLatencyMs: Date.now() - started
     },
-    index: stats,
-    retrievalMode: "pgvector-hybrid"
+    index: state.stats,
+    retrievalMode: "pgvector-hybrid",
+    orchestration: orchestrationMeta()
   };
-}
+}, {
+  name: "loksetu.rag.langgraph_query",
+  run_type: "chain",
+  tags: ["loksetu", "rag", "langgraph", "langsmith", "langchain"],
+  processInputs: (inputs) => {
+    const query = inputs;
+    return { question: query.question.slice(0, 240), tenantId: query.tenantId, namespace: query.namespace, metadata: query.metadata ?? {} };
+  },
+  processOutputs: (outputs) => ({
+    retrievalMode: outputs.retrievalMode,
+    retrieved: outputs.retrieved.length,
+    citations: outputs.citations.length,
+    graph: outputs.orchestration?.graph
+  })
+});
 
 export function rerank(semantic: RetrievalResult[], keyword: RetrievalResult[]) {
   const merged = new Map<string, RetrievalResult>();
@@ -139,12 +280,14 @@ function meaningfulTokens(value: string) {
     .filter((token) => token.length > 2 && !stopwords.has(token)))];
 }
 
-async function groundedAnswer(question: string, retrieved: RetrievalResult[]) {
+async function groundedAnswer(question: string, contextDocuments: Document[], retrieved: RetrievalResult[]) {
   const cfg = config();
   if (cfg.llmProvider === "gemini" && cfg.vertexProject) {
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ vertexai: true, project: cfg.vertexProject, location: cfg.vertexLocation, apiVersion: "v1" });
-    const context = retrieved.map((item, index) => `[${index + 1}] ${item.title} page ${item.page ?? "n/a"} chunk ${item.id}\n${item.content}`).join("\n\n");
+    const context = contextDocuments.map((document, index) =>
+      `[${index + 1}] ${String(document.metadata.title)} page ${String(document.metadata.page ?? "n/a")} chunk ${String(document.metadata.chunkId)}\n${document.pageContent}`
+    ).join("\n\n");
     const prompt = [
       "Answer only from the provided retrieved context.",
       "If the context is insufficient, say: No indexed documents match the query.",
@@ -157,17 +300,50 @@ async function groundedAnswer(question: string, retrieved: RetrievalResult[]) {
       contents: prompt,
       config: { temperature: 0.1, maxOutputTokens: 700 }
     });
-    return response.text?.trim() || extractiveAnswer(retrieved);
+    return response.text?.trim() || extractiveAnswer(retrieved, question);
   }
-  return extractiveAnswer(retrieved);
+  return extractiveAnswer(retrieved, question);
 }
 
-function extractiveAnswer(retrieved: RetrievalResult[]) {
-  const facts = retrieved.slice(0, 5).flatMap((item, index) =>
+function toLangChainDocuments(retrieved: RetrievalResult[]) {
+  return retrieved.map((item) => new Document({
+    pageContent: item.content,
+    metadata: {
+      chunkId: item.id,
+      documentId: item.documentId,
+      title: item.title,
+      page: item.page,
+      section: item.section,
+      source: item.sourceUri ?? item.source,
+      sourceUrl: item.sourceUrl ?? item.sourceUri,
+      confidence: item.confidence
+    }
+  }));
+}
+
+function orchestrationMeta(): NonNullable<RagAnswer["orchestration"]> {
+  return {
+    graph: "langgraph",
+    tracing: "langsmith",
+    context: "langchain-document",
+    nodes: graphNodes
+  };
+}
+
+function extractiveAnswer(retrieved: RetrievalResult[], question = "") {
+  const queryTokens = meaningfulTokens(question);
+  const rankedSentences = retrieved.slice(0, 5).flatMap((item, index) =>
     extractSentences(item.content)
-      .slice(0, index === 0 ? 4 : 2)
-      .map((sentence) => `- [${index + 1}] ${sentence}`)
-  );
+      .map((sentence, sentenceIndex) => ({
+        sentence,
+        citationIndex: index + 1,
+        score: sentenceScore(sentence, queryTokens) + Math.max(0, 5 - index) * 0.01 - sentenceIndex * 0.001
+      }))
+  )
+    .filter((item) => queryTokens.length === 0 || item.score > 0.01)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+  const facts = rankedSentences.map((item) => `- [${item.citationIndex}] ${item.sentence}`);
   if (facts.length === 0) return noResultAnswer;
   const sourceLines = retrieved.slice(0, 5).map((item, index) =>
     `- [${index + 1}] ${item.title}${item.page ? `, page ${item.page}` : ""}`
@@ -182,13 +358,22 @@ function extractiveAnswer(retrieved: RetrievalResult[]) {
 }
 
 function extractSentences(content: string) {
-  const normalized = content.replace(/\s+/g, " ").trim();
+  const normalized = content
+    .replace(/#{1,6}\s+/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) return [];
   const sentences = normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [normalized];
   return sentences
     .map((sentence) => sentence.replace(/^#+\s*/, "").trim())
     .filter(Boolean)
     .map((sentence) => sentence.length > 360 ? sentence.slice(0, 357).trimEnd() : sentence);
+}
+
+function sentenceScore(sentence: string, queryTokens: string[]) {
+  if (queryTokens.length === 0) return 1;
+  const sentenceTokens = new Set(meaningfulTokens(sentence));
+  return queryTokens.reduce((score, token) => score + (sentenceTokens.has(token) ? 1 : 0), 0);
 }
 
 async function timeStage<T>(stage: string, fn: () => Promise<T>): Promise<T> {
