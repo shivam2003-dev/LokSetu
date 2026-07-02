@@ -43,6 +43,19 @@ const gdeltResponseSchema = z.object({
   })).optional()
 });
 
+const newsApiResponseSchema = z.object({
+  status: z.string(),
+  totalResults: z.number().optional(),
+  articles: z.array(z.object({
+    source: z.object({ id: z.string().nullable().optional(), name: z.string().optional() }).optional(),
+    author: z.string().nullable().optional(),
+    title: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    url: z.string().optional(),
+    publishedAt: z.string().optional()
+  })).optional()
+});
+
 export async function fetchXSignals(query: string, bearerToken = process.env.X_BEARER_TOKEN): Promise<ExternalSignalRun> {
   if (!bearerToken) return fallbackRun("x", query);
   const params = new URLSearchParams({
@@ -51,7 +64,8 @@ export async function fetchXSignals(query: string, bearerToken = process.env.X_B
     "tweet.fields": "created_at,lang,author_id"
   });
   const response = await fetch(`https://api.x.com/2/tweets/search/recent?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${bearerToken}` }
+    headers: { Authorization: `Bearer ${bearerToken}` },
+    signal: AbortSignal.timeout(8000)
   });
   if (!response.ok) throw new Error(`X recent search failed: ${response.status}`);
   const parsed = xResponseSchema.parse(await response.json());
@@ -74,7 +88,7 @@ export async function fetchGdeltSignals(query: string): Promise<ExternalSignalRu
     maxrecords: "10",
     sort: "hybridrel"
   });
-  const response = await fetch(`https://api.gdeltproject.org/api/v2/doc/doc?${params.toString()}`);
+  const response = await fetch(`https://api.gdeltproject.org/api/v2/doc/doc?${params.toString()}`, { signal: AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error(`GDELT DOC API failed: ${response.status}`);
   const parsed = gdeltResponseSchema.parse(await response.json());
   const signals = (parsed.articles ?? []).map((article, index) => normalizeSignal({
@@ -89,13 +103,39 @@ export async function fetchGdeltSignals(query: string): Promise<ExternalSignalRu
   return { provider: "gdelt", query, fetched: parsed.articles?.length ?? 0, accepted: signals.length, signals, mode: "live" };
 }
 
-export function fallbackRun(provider: "x" | "gdelt", query: string): ExternalSignalRun {
-  const source = provider === "x" ? "x" : "gdelt";
+export async function fetchNewsSignals(query: string, apiKey = process.env.NEWS_API_KEY): Promise<ExternalSignalRun> {
+  if (!apiKey) return fallbackRun("news", query);
+  const params = new URLSearchParams({
+    q: query,
+    language: "en",
+    pageSize: "10",
+    sortBy: "publishedAt"
+  });
+  const response = await fetch(`https://newsapi.org/v2/everything?${params.toString()}`, {
+    headers: { "X-Api-Key": apiKey },
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok) throw new Error(`NewsAPI everything failed: ${response.status}`);
+  const parsed = newsApiResponseSchema.parse(await response.json());
+  const signals = (parsed.articles ?? []).map((article, index) => normalizeSignal({
+    id: `news-${hash(article.url ?? article.title ?? String(index))}`,
+    source: "news",
+    url: article.url,
+    title: article.title ?? undefined,
+    text: [article.title, article.description].filter(Boolean).join(". ") || article.url || "Untitled news signal",
+    author: article.author ?? article.source?.name,
+    publishedAt: article.publishedAt
+  }));
+  return { provider: "news", query, fetched: parsed.articles?.length ?? 0, accepted: signals.length, signals, mode: "live" };
+}
+
+export function fallbackRun(provider: "x" | "gdelt" | "news", query: string): ExternalSignalRun {
+  const source = provider;
   const signals = [
     normalizeSignal({
       id: `${provider}-fixture-1`,
       source,
-      title: provider === "gdelt" ? "Local media reports school flooding and road damage" : undefined,
+      title: provider === "x" ? undefined : "Local media reports school flooding and road damage",
       text: "Local reports mention school flooding, broken roads, drainage overflow, and water supply problems in civic wards.",
       language: "en",
       state: "Delhi",

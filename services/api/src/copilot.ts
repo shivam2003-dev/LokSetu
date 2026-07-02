@@ -1,14 +1,17 @@
 import { buildDailyIntelligence, intelligenceSourceGroups } from "./intelligence.js";
-import { queryRagService, ragServiceStatus } from "./ragClient.js";
+import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
+import { ingestRagDocuments, queryRagService, ragServiceStatus, reindexRagDocuments } from "./ragClient.js";
 import { RankedProject, Submission } from "./types.js";
 
 export type CopilotRole = "mp" | "collector" | "citizen" | "analyst";
+export type CopilotMode = "online" | "submitted" | "all";
 
 export type CopilotQuery = {
   role: CopilotRole;
   question: string;
   language?: string;
   projectId?: string;
+  mode?: CopilotMode;
 };
 
 export const copilotAgents = [
@@ -52,14 +55,28 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
   const daily = buildDailyIntelligence(projects, submissions);
   const agent = routeAgent(query.role, question);
   const intent = classifyIntent(question);
-  const retrievalQuestion = buildRetrievalQuestion(question, intent, project, projects, submissions);
+  const mode = query.mode ?? "all";
+  const onlineRuns = intent !== "greeting" && (mode === "online" || mode === "all") ? await fetchOnlineRuns(question) : [];
+  const liveOnlineRuns = onlineRuns.filter((run) => run.mode === "live");
+  if (liveOnlineRuns.length) await indexOnlineRuns(question, liveOnlineRuns);
+  const onlineContext = liveOnlineRuns
+    .flatMap((run) => run.signals.map((signal) => `${run.provider}: ${signal.title ?? signal.text} ${signal.url ?? ""}`))
+    .slice(0, 8)
+    .join("\n");
+  const retrievalQuestion = buildRetrievalQuestion(question, intent, project, projects, submissions, mode, onlineContext);
+  const metadata = mode === "online"
+    ? { sourceType: "online_signal" }
+    : mode === "submitted"
+      ? { sourceType: "citizen_submission" }
+      : undefined;
   const ragResponse = intent === "greeting"
     ? null
     : await queryRagService({
-        question: retrievalQuestion
+        question: retrievalQuestion,
+        metadata
       });
   const ragUnavailable = !ragResponse && intent !== "greeting";
-  const directAnswer = buildDirectAnswer(query.role, intent, question, project, daily, submissions, projects);
+  const directAnswer = buildDirectAnswer(query.role, intent, question, project, daily, submissions, projects, mode, onlineContext);
   const answer = intent === "greeting"
     ? buildAnswer(query.role, intent, question, project, daily)
     : ragResponse && ragResponse.retrieved.length > 0
@@ -80,6 +97,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
   return {
     generatedAt: new Date().toISOString(),
     role: query.role,
+    mode,
     language: query.language ?? "English",
     agent,
     intent,
@@ -99,7 +117,8 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     suggestedActions: suggestedActions(query.role, intent, project),
     followUpQuestions: followUps(query.role, project),
     guardrails: [
-      "Grounded only in current LokSetu project, source, and daily intelligence data.",
+      `Retrieval mode: ${mode}. Online mode indexes public connector results when RAG service is available.`,
+      "Grounded only in current JanVaani project, source, public online, and submitted issue data.",
       "No personal citizen identity is exposed; privacy aliases are used.",
       "Funding, eligibility, and emergency guidance require official human confirmation."
     ]
@@ -122,7 +141,8 @@ function routeAgent(role: CopilotRole, question: string) {
 
 function classifyIntent(question: string) {
   const lower = question.toLowerCase();
-  if (/^(hi|hello|hey|namaste|namaskar|hola)$/i.test(lower)) return "greeting";
+  const firstLine = lower.split("\n")[0]?.trim() ?? lower;
+  if (/^(hi|hello|hey|namaste|namaskar|hola)$/i.test(firstLine)) return "greeting";
   if (/(last|latest|recent|newest).*(submitted|submission|problem|complaint|issue)|submitted problem|recent problem/.test(lower)) return "latest_submission";
   if (/(architecture|technical|how.*built|how.*build|rag|retrieval|embedding|pgvector|vertex)/.test(lower)) return "technical_rag";
   if (lower.includes("why")) return "explain_priority";
@@ -134,7 +154,65 @@ function classifyIntent(question: string) {
   return "constituency_question";
 }
 
-function buildRetrievalQuestion(question: string, intent: string, project: RankedProject | undefined, projects: RankedProject[], submissions: Submission[]) {
+async function fetchOnlineRuns(question: string) {
+  const query = `${question} India civic issue`;
+  const runs = [];
+  try {
+    runs.push(await fetchXSignals(query));
+  } catch {
+    runs.push(fallbackRun("x", query));
+  }
+  try {
+    runs.push(await fetchGdeltSignals(query));
+  } catch {
+    runs.push(fallbackRun("gdelt", query));
+  }
+  try {
+    runs.push(await fetchNewsSignals(query));
+  } catch {
+    runs.push(fallbackRun("news", query));
+  }
+  return runs.filter((run) => run.signals.length > 0);
+}
+
+async function indexOnlineRuns(question: string, runs: Awaited<ReturnType<typeof fetchOnlineRuns>>) {
+  const liveSignals = runs.flatMap((run) => run.signals.map((signal) => ({ run, signal })));
+  if (!liveSignals.length) return;
+  try {
+    await ingestRagDocuments({
+      documents: liveSignals.slice(0, 30).map(({ run, signal }) => ({
+        source: "json",
+        title: signal.title ?? `${run.provider} signal ${signal.id}`,
+        sourceUri: `janvaani://online/${run.provider}/${signal.id}`,
+        sourceUrl: signal.url,
+        mediaType: "application/json",
+        content: [
+          `Online signal provider: ${run.provider}`,
+          `Query: ${question}`,
+          `Title: ${signal.title ?? "n/a"}`,
+          `Text: ${signal.text}`,
+          `Location: ${[signal.ward, signal.district, signal.state].filter(Boolean).join(", ")}`,
+          `Published: ${signal.publishedAt ?? "unknown"}`
+        ].join("\n"),
+        metadata: {
+          connector: run.provider,
+          sourceType: "online_signal",
+          provider: run.provider,
+          mode: "online",
+          state: signal.state,
+          district: signal.district,
+          ward: signal.ward,
+          query: question
+        }
+      }))
+    });
+    await reindexRagDocuments(100);
+  } catch {
+    // RAG service is optional in local development; direct online context still grounds fallback answers.
+  }
+}
+
+function buildRetrievalQuestion(question: string, intent: string, project: RankedProject | undefined, projects: RankedProject[], submissions: Submission[], mode: CopilotMode, onlineContext: string) {
   const latestSubmissions = [...submissions]
     .sort((a, b) => Date.parse(b.processedAt ?? b.createdAt) - Date.parse(a.processedAt ?? a.createdAt))
     .slice(0, 5)
@@ -149,20 +227,30 @@ function buildRetrievalQuestion(question: string, intent: string, project: Ranke
   if (intent === "latest_submission") {
     return [
       question,
+      `Retrieval mode: ${mode}`,
       "Find the newest recent latest citizen submission problem complaint issue in the indexed LokSetu citizen signal documents.",
       latestSubmissions
     ].filter(Boolean).join("\n\n");
   }
   if (intent === "ranked_priorities" || intent === "briefing") {
-    return [question, "Use ranked priorities, top issues, citizen feedback summary, current queue, and latest processed submissions.", topProjects, latestSubmissions].join("\n\n");
+    return [question, `Retrieval mode: ${mode}`, "Use ranked priorities, top issues, citizen feedback summary, current queue, and latest processed submissions.", topProjects, latestSubmissions, onlineContext].filter(Boolean).join("\n\n");
   }
   if (intent === "technical_rag") {
     return `${question}\n\nUse LokSetu RAG architecture, pgvector, Gemini embeddings, Vertex AI, ingestion worker, embedding worker, RAG API, Copilot adapter, GitOps, observability, and deployment details.`;
   }
-  return [question, selectedProject].filter(Boolean).join("\n\n");
+  return [question, `Retrieval mode: ${mode}`, selectedProject, mode !== "submitted" ? onlineContext : ""].filter(Boolean).join("\n\n");
 }
 
-function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string, project: RankedProject | undefined, daily: ReturnType<typeof buildDailyIntelligence>, submissions: Submission[], projects: RankedProject[]) {
+function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string, project: RankedProject | undefined, daily: ReturnType<typeof buildDailyIntelligence>, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string) {
+  if (mode === "online" && onlineContext) {
+    return [
+      "Online mode summary from public connectors:",
+      ...onlineContext.split("\n").slice(0, 5).map((item) => `- ${item}`)
+    ].join("\n");
+  }
+  if (mode === "online") {
+    return "No live online connector results were available for this query. Add valid connector credentials or switch to submitted issue mode to search the local JanVaani corpus.";
+  }
   if (intent === "latest_submission") {
     const latest = [...submissions].sort((a, b) => Date.parse(b.processedAt ?? b.createdAt) - Date.parse(a.processedAt ?? a.createdAt))[0];
     if (!latest) return "No processed citizen submissions are available yet. If a report was just submitted, it may still be in the next batch queue.";

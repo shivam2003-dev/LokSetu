@@ -65,6 +65,42 @@ export async function queryRagService(input: {
   return response.json() as Promise<RagQueryResponse>;
 }
 
+export async function ingestRagDocuments(input: {
+  documents: Array<{
+    source: "pdf" | "docx" | "txt" | "markdown" | "csv" | "json" | "gcs" | "filesystem";
+    sourceUri?: string;
+    sourceUrl?: string;
+    title?: string;
+    mediaType?: string;
+    content?: string;
+    metadata?: Record<string, unknown>;
+  }>;
+}) {
+  const baseUrl = process.env.RAG_API_URL?.replace(/\/$/, "");
+  if (!baseUrl || input.documents.length === 0) return null;
+  const response = await fetch(`${baseUrl}/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (!response.ok) throw new Error(`RAG service ingest failed: ${response.status}`);
+  return response.json() as Promise<{ status: string; documents: number; chunks: number }>;
+}
+
+export async function reindexRagDocuments(limit = 100) {
+  const baseUrl = process.env.RAG_API_URL?.replace(/\/$/, "");
+  if (!baseUrl) return null;
+  const response = await fetch(`${baseUrl}/reindex`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (!response.ok) throw new Error(`RAG service reindex failed: ${response.status}`);
+  return response.json() as Promise<{ status: string; embedded: number }>;
+}
+
 export async function ragServiceStatus() {
   const baseUrl = process.env.RAG_API_URL?.replace(/\/$/, "");
   if (!baseUrl) {

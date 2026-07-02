@@ -14,6 +14,7 @@ Express API for intake, public project data, role-scoped MP queues, external sig
 - `VERTEX_AI_PROJECT_ID`, `VERTEX_AI_LOCATION`, `VERTEX_AI_MODEL`, `VERTEX_AI_DISABLED`: Vertex AI path.
 - `GOOGLE_MAPS_API_KEY`: backend reverse geocoding.
 - `X_BEARER_TOKEN`: optional X recent-search ingestion.
+- `NEWS_API_KEY`: optional NewsAPI.org ingestion for server-side news signals.
 
 ## Testing
 ```bash
