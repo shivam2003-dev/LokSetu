@@ -223,9 +223,9 @@ function applyFilters(submissions: Submission[], filters: DashboardFilters): Sub
         .toLowerCase()
         .includes(query);
 
-    if (filters.scope === "global") return queryMatch;
-    if (filters.scope === "mp") return mpMatch && queryMatch;
-    return localMatch && districtMatch && stateMatch && queryMatch;
+    if (!stateMatch || !districtMatch || !localMatch || !queryMatch) return false;
+    if (filters.scope === "mp") return mpMatch;
+    return true;
   });
 }
 

@@ -38,7 +38,7 @@ api:
     cloud.google.com/neg: '{"exposed_ports":{"8080":{"name":"k8s1-33b19180-people-priority-people-priority-api-8080-d3b4a98a"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/api
-    tag: gcp-20260702191256-delhi-demo
+    tag: gcp-20260702191927-filterfix
   database:
     existingSecret: loksetu-db
     secretKey: DATABASE_URL
