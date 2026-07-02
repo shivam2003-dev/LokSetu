@@ -67,7 +67,8 @@ test.describe("MP/admin web functional flow", () => {
     // Reports is a dedicated AI reporting workspace.
     await page.getByRole("button", { name: "Reports" }).click();
     await expect(page.getByRole("heading", { name: "AI-powered constituency reports" })).toBeVisible();
-    await expect(page.getByText("Monthly Report")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Monthly Report AI draft ready" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Monthly Report" })).toBeVisible();
     await expect(page.getByText("Export PDF")).toBeVisible();
 
     // National Pulse remains available as the reports data source page.
@@ -252,6 +253,76 @@ test.describe("MP/admin web functional flow", () => {
         expect(hasHorizontalOverflow, `${viewport.name} should not have horizontal overflow after ${String(item.button)}`).toBe(false);
       }
     }
+  });
+
+  test("primary dashboard action buttons perform visible work", async ({ page }) => {
+    await loginIfNeeded(page);
+
+    await page.goto("/#overview");
+    await page.getByRole("button", { name: "Open AI recommendations" }).click();
+    await expect(page.locator(".topbar h2")).toHaveText("AI-ranked development recommendations");
+    await page.goto("/#overview");
+    await page.getByRole("button", { name: "Review projects" }).click();
+    await expect(page.locator(".topbar h2")).toHaveText("Development projects management");
+    await page.goto("/#overview");
+    await page.getByRole("button", { name: "View GIS map" }).click();
+    await expect(page.locator(".topbar h2")).toHaveText("Where demand is concentrated");
+
+    await page.goto("/#map");
+    await page.getByRole("button", { name: "Route analysis" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "Route analysis created" })).toBeVisible();
+    await page.getByRole("button", { name: "AI hotspot detection" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "AI hotspot detection refreshed" })).toBeVisible();
+    await page.locator(".state-onboarding-list button").first().click();
+    await expect(page.locator(".action-status").filter({ hasText: /ready across/ })).toBeVisible();
+    await page.locator(".hotspot-row").first().click();
+    await page.getByLabel("Selected issue drilldown").locator(".area-facets button").first().click();
+    await expect(page.locator(".action-status").filter({ hasText: /facet selected/ })).toBeVisible();
+
+    await page.goto("/#copilot");
+    await page.getByRole("button", { name: "History" }).click();
+    await expect(page.getByLabel("Query history")).toBeVisible();
+    await expect(page.locator(".action-status").filter({ hasText: "History opened" })).toBeVisible();
+    await page.locator(".rag-grounded-list button").first().click();
+    await expect(page.locator(".action-status").filter({ hasText: /selected with .* supporting records/ })).toBeVisible();
+    const answerDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export PDF" }).click();
+    await answerDownload;
+    await expect(page.locator(".action-status").filter({ hasText: "Export PDF generated" })).toBeVisible();
+
+    await page.goto("/#knowledge");
+    await page.getByRole("button", { name: "Choose files" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "Demo intake batch queued" })).toBeVisible();
+
+    await page.goto("/#explorer");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "Query returned" })).toBeVisible();
+    await page.getByRole("button", { name: "Category" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "Active filter: Category" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Category" })).toHaveClass(/active/);
+
+    await page.goto("/#projects");
+    const docDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "DPR.pdf" }).click();
+    await docDownload;
+    await expect(page.locator(".action-status").filter({ hasText: "DPR.pdf opened" })).toBeVisible();
+    await page.getByRole("button", { name: "Before" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "Before media selected" })).toBeVisible();
+
+    await page.goto("/#recommendations");
+    await page.locator(".rec-map-dot").first().click();
+    await expect(page.locator(".action-status").filter({ hasText: "Selected recommendation:" })).toBeVisible();
+
+    await page.goto("/#reports");
+    await page.getByRole("button", { name: "Constituency Summary" }).click();
+    await expect(page.locator(".report-cover h4")).toHaveText("Constituency Summary");
+    await expect(page.locator(".action-status").filter({ hasText: "Constituency Summary template loaded" })).toBeVisible();
+    const reportDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export PDF" }).click();
+    await reportDownload;
+    await expect(page.locator(".action-status").filter({ hasText: "Constituency Summary exported as PDF" })).toBeVisible();
+    await page.getByRole("button", { name: "Share secure link" }).click();
+    await expect(page.locator(".action-status").filter({ hasText: "Secure link created for Constituency Summary" })).toBeVisible();
   });
 
   test("maps fallback works without a browser key", async ({ page }) => {

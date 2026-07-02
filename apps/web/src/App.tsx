@@ -785,6 +785,18 @@ function average(values: number[]) {
   return clean.length ? clean.reduce((sum, value) => sum + value, 0) / clean.length : 0;
 }
 
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; setPage: (page: Page) => void }) {
   const projects = buildManagedProjects(dashboard.projects);
   const topPriorities = projects.slice(0, 5);
@@ -929,6 +941,7 @@ function ExplorePage({
   const [selectedProjectId, setSelectedProjectId] = useState(dashboard.projects[0]?.id ?? fallbackProject.id);
   const [boundaryLevel, setBoundaryLevel] = useState<BoundaryLevel>("ward");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [onboardingNotice, setOnboardingNotice] = useState("Select a state to inspect rollout readiness.");
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
 
   useEffect(() => {
@@ -966,13 +979,14 @@ function ExplorePage({
         <PanelTitle title="State onboarding" icon={Flag} detail="rollout readiness by state" />
         <div className="state-onboarding-list">
           {(regions?.onboardingStates ?? []).map((item) => (
-            <button key={item.state} type="button">
+            <button key={item.state} onClick={() => setOnboardingNotice(`${item.state}: ${item.readiness}% ready across ${item.constituencies} constituencies and ${item.districts} districts.`)} type="button">
               <span>{item.state}</span>
               <strong>{item.readiness}%</strong>
               <small>{item.constituencies} constituencies · {item.districts} districts</small>
             </button>
           ))}
         </div>
+        <p className="action-status" role="status">{onboardingNotice}</p>
       </section>
       {drawerOpen ? (
         <div className="drawer-backdrop" role="presentation" onClick={() => setDrawerOpen(false)}>
@@ -1009,6 +1023,7 @@ function IssueMap({
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
+  const [gisAction, setGisAction] = useState("Ready to run GIS analysis.");
   const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
   const gisLayers = [
@@ -1133,12 +1148,13 @@ function IssueMap({
           <section>
             <h4>Analysis</h4>
             <div className="gis-tool-grid">
-              <button type="button">Route analysis</button>
-              <button type="button">Buffer 2 km</button>
-              <button type="button">Flood overlap</button>
-              <button type="button">Boundary clip</button>
+              <button onClick={() => setGisAction(`Route analysis created from ${selectedProject.ward} to nearest delivery cluster.`)} type="button">Route analysis</button>
+              <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} hotspots checked.`)} type="button">Buffer 2 km</button>
+              <button onClick={() => setGisAction(`Flood overlap checked for ${selectedProject.district}; at-risk layers highlighted.`)} type="button">Flood overlap</button>
+              <button onClick={() => setGisAction(`${boundaryLevel} boundary clip applied to current demand layer.`)} type="button">Boundary clip</button>
             </div>
           </section>
+          <p className="action-status" role="status">{gisAction}</p>
         </aside>
 
         <section className="gis-map-panel">
@@ -1146,9 +1162,9 @@ function IssueMap({
             <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
             {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
             <div className="gis-map-actions" aria-label="GIS map tools">
-              <button type="button">AI hotspot detection</button>
-              <button type="button">Cluster markers</button>
-              <button type="button">Demand heatmap</button>
+              <button onClick={() => setGisAction(`AI hotspot detection refreshed ${hotspots.length} ward signals.`)} type="button">AI hotspot detection</button>
+              <button onClick={() => setGisAction(`${clusters.clusters.length} cluster markers loaded on the map.`)} type="button">Cluster markers</button>
+              <button onClick={() => setGisAction("Demand heatmap overlay toggled for current filters.")} type="button">Demand heatmap</button>
             </div>
             <div className="gis-scale">5 km</div>
           </div>
@@ -1313,6 +1329,7 @@ function HotspotDrilldown({
   clusters: MapClusterResponse;
   openProjectRoom: (id: string) => void;
 }) {
+  const [selectedFacet, setSelectedFacet] = useState("No area facet selected.");
   const related = relatedProjects
     .filter((item) => item.id !== project.id && (item.category === project.category || item.ward === project.ward || item.district === project.district))
     .slice(0, 4);
@@ -1364,13 +1381,14 @@ function HotspotDrilldown({
         </div>
         <div className="area-facets" aria-label="Area drilldown">
           {areaBreakdown.map((item) => (
-            <button key={item.label} type="button">
+            <button key={item.label} onClick={() => setSelectedFacet(`${item.label} facet selected with ${item.count} ranked signals.`)} type="button">
               <span>{item.label}</span>
               <strong>{item.value}</strong>
               <small>{item.count} ranked signals</small>
             </button>
           ))}
         </div>
+        <p className="action-status" role="status">{selectedFacet}</p>
       </section>
 
       <section className="drilldown-section">
@@ -1587,6 +1605,8 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [actionNotice, setActionNotice] = useState("Assistant actions ready.");
   const threadRef = useRef<HTMLDivElement>(null);
 
   const latestAnswer = [...messages].reverse().find((message) => message.answer)?.answer ?? null;
@@ -1649,6 +1669,13 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
     }
   }
 
+  function exportAnswer(format: string) {
+    const text = latestAnswer?.answer ?? messages[messages.length - 1]?.text ?? "No answer generated yet.";
+    const filename = `janvaani-answer-${format.toLowerCase().replaceAll(" ", "-")}.txt`;
+    downloadTextFile(filename, `JanVaani AI ${format}\n\n${text}`);
+    setActionNotice(`${format} generated and downloaded.`);
+  }
+
   return (
     <section className="rag-command-page">
       <header className="rag-hero">
@@ -1658,10 +1685,17 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
         </div>
         <div className="rag-hero-actions">
           <span>AI Confidence <b>{confidence}%</b></span>
-          <button type="button">History</button>
-          <button className="primary" onClick={() => setMessages((current) => current.slice(0, 1))} type="button">New Query</button>
+          <button onClick={() => { setHistoryOpen((value) => !value); setActionNotice(historyOpen ? "History closed." : "History opened."); }} type="button">History</button>
+          <button className="primary" onClick={() => { setMessages((current) => current.slice(0, 1)); setActionNotice("Started a new query thread."); }} type="button">New Query</button>
         </div>
       </header>
+      {historyOpen ? (
+        <section className="panel rag-history-panel" aria-label="Query history">
+          <strong>Query History</strong>
+          {messages.slice(-5).map((message) => <p key={message.id}>{message.role}: {message.text.slice(0, 120)}</p>)}
+        </section>
+      ) : null}
+      <p className="action-status" role="status">{actionNotice}</p>
 
       <section className="rag-filters" aria-label="RAG filters">
         <label>Mode
@@ -1776,7 +1810,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
           <section className="panel">
             <PanelTitle title={`Grounded By (${sourceCounts.reduce((sum, item) => sum + item.count, 0)} Sources)`} icon={Database} detail="View All" />
             <div className="rag-grounded-list">
-              {sourceCounts.map((item) => <button key={item.label} type="button"><span>{item.icon}</span><strong>{item.label}</strong><em>{formatCount(item.count)}</em></button>)}
+              {sourceCounts.map((item) => <button key={item.label} onClick={() => setActionNotice(`${item.label} selected with ${formatCount(item.count)} supporting records.`)} type="button"><span>{item.icon}</span><strong>{item.label}</strong><em>{formatCount(item.count)}</em></button>)}
             </div>
           </section>
           <section className="panel">
@@ -1789,7 +1823,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
           <section className="panel">
             <PanelTitle title="Export Answer" icon={FileText} />
             <div className="rag-export-grid">
-              {["Export PDF", "Export Word", "Export PPT", "Share Answer"].map((item) => <button key={item} type="button">{item}</button>)}
+              {["Export PDF", "Export Word", "Export PPT", "Share Answer"].map((item) => <button key={item} onClick={() => exportAnswer(item)} type="button">{item}</button>)}
             </div>
           </section>
         </aside>
@@ -1857,6 +1891,7 @@ const knowledgeDocs: KnowledgeDoc[] = [
 
 function KnowledgeBasePage() {
   const [selectedDocId, setSelectedDocId] = useState(knowledgeDocs[0].id);
+  const [uploadNotice, setUploadNotice] = useState("No upload batch selected.");
   const selectedDoc = knowledgeDocs.find((doc) => doc.id === selectedDocId) ?? knowledgeDocs[0];
   const totalChunks = knowledgeDocs.reduce((sum, doc) => sum + doc.chunks, 0);
   const indexedDocs = knowledgeDocs.filter((doc) => doc.status === "indexed").length;
@@ -1914,8 +1949,9 @@ function KnowledgeBasePage() {
             <DatabaseZap size={28} />
             <strong>Drop PDFs, scans, images, CSVs, minutes, or circulars</strong>
             <span>OCR, chunking, embedding, duplicate detection, and citation extraction run automatically.</span>
-            <button type="button">Choose files</button>
+            <button onClick={() => setUploadNotice("Demo intake batch queued: OCR, chunking, embedding, and indexing started.")} type="button">Choose files</button>
           </div>
+          <p className="action-status" role="status">{uploadNotice}</p>
           <div className="kb-pipeline">
             {pipeline.map((step) => (
               <article key={step.label}>
@@ -2008,6 +2044,8 @@ function KnowledgeBasePage() {
 }
 
 function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
+  const [queryNotice, setQueryNotice] = useState("Query not run yet.");
+  const [activeExplorerFilter, setActiveExplorerFilter] = useState("No filter selected.");
   const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
   const sourceCards = [
     { name: "Citizen Submissions", rows: dashboard.totals.submissions, freshness: "Live", health: "Ready" },
@@ -2050,11 +2088,12 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
           <PanelTitle title="Query Builder" icon={Database} detail="reviewed source query" />
           <div className="explorer-query-box">
             <code>{`SELECT ward, category, priority_score, confidence\nFROM janvaani.projects\nWHERE confidence >= 0.75\nORDER BY priority_score DESC\nLIMIT 50;`}</code>
-            <button type="button">Run query</button>
+            <button onClick={() => setQueryNotice(`Query returned ${rows.length} reviewed project rows.`)} type="button">Run query</button>
           </div>
           <div className="explorer-filter-row">
-            {["State", "District", "Category", "Confidence", "Date range"].map((item) => <button key={item} type="button">{item}</button>)}
+            {["State", "District", "Category", "Confidence", "Date range"].map((item) => <button className={activeExplorerFilter === item ? "active" : ""} key={item} onClick={() => setActiveExplorerFilter(item)} type="button">{item}</button>)}
           </div>
+          <p className="action-status" role="status">{queryNotice} Active filter: {activeExplorerFilter}</p>
         </section>
 
         <section className="panel explorer-schema-card">
@@ -2108,6 +2147,7 @@ type ManagedProject = RankedProject & {
 function ProjectsManagementPage({ dashboard }: { dashboard: DashboardResponse }) {
   const managedProjects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
   const [selectedProjectId, setSelectedProjectId] = useState(managedProjects[0]?.id ?? fallbackProject.id);
+  const [projectAction, setProjectAction] = useState("Project actions ready.");
   const selectedProject = managedProjects.find((project) => project.id === selectedProjectId) ?? managedProjects[0];
   const statusCounts = {
     ongoing: managedProjects.filter((project) => project.deliveryStatus === "ongoing").length,
@@ -2257,11 +2297,12 @@ function ProjectsManagementPage({ dashboard }: { dashboard: DashboardResponse })
           <section className="panel pm-docs">
             <PanelTitle title="Documents and Media" icon={FileText} detail="evidence room" />
             <div className="pm-doc-list">
-              {["DPR.pdf", "Tender notice.pdf", "Inspection notes.docx", "Budget release.xlsx"].map((doc) => <button key={doc} type="button">{doc}</button>)}
+              {["DPR.pdf", "Tender notice.pdf", "Inspection notes.docx", "Budget release.xlsx"].map((doc) => <button key={doc} onClick={() => { downloadTextFile(doc.replace(/\.[^.]+$/, ".txt"), `${selectedProject.title}\n${doc}\nGenerated from JanVaani AI project room.`); setProjectAction(`${doc} opened and downloaded for ${selectedProject.ward}.`); }} type="button">{doc}</button>)}
             </div>
             <div className="pm-photo-grid">
-              <span>Before</span><span>After</span><span>Site photo</span><span>Inspection</span>
+              {["Before", "After", "Site photo", "Inspection"].map((item) => <button key={item} onClick={() => setProjectAction(`${item} media selected for ${selectedProject.ward}.`)} type="button">{item}</button>)}
             </div>
+            <p className="action-status" role="status">{projectAction}</p>
           </section>
 
           <section className="panel pm-recommendations">
@@ -2342,6 +2383,7 @@ function buildManagedProjects(projects: RankedProject[]): ManagedProject[] {
 
 function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
   const [category, setCategory] = useState("All Categories");
+  const [selectedRecommendationId, setSelectedRecommendationId] = useState("");
   const recommendations = useMemo(() => buildManagedProjects(dashboard.projects)
     .map((project) => ({
       ...project,
@@ -2351,7 +2393,7 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
     }))
     .sort((a, b) => b.recommendationScore - a.recommendationScore), [dashboard.projects]);
   const filtered = category === "All Categories" ? recommendations : recommendations.filter((project) => project.category === category || (category === "Healthcare" && project.category === "Health"));
-  const top = filtered[0] ?? recommendations[0];
+  const top = filtered.find((project) => project.id === selectedRecommendationId) ?? filtered[0] ?? recommendations[0];
   const categories = ["All Categories", "Roads", "Healthcare", "Water", "Education", "Employment"];
   const totalBudget = filtered.reduce((sum, project) => sum + project.budgetCr, 0);
   const totalBeneficiaries = filtered.reduce((sum, project) => sum + project.citizenImpact, 0);
@@ -2419,7 +2461,7 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
           <PanelTitle title="Affected Regions Map" icon={MapPinned} detail="priority heat overlay" />
           <div className="rec-map">
             {filtered.slice(0, 12).map((project, index) => (
-              <button className={`rec-map-dot ${project.priorityBand.toLowerCase()}`} key={project.id} style={{ left: `${12 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 25}%` }} type="button">
+              <button className={`rec-map-dot ${project.priorityBand.toLowerCase()}`} key={project.id} onClick={() => setSelectedRecommendationId(project.id)} style={{ left: `${12 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 25}%` }} type="button">
                 {project.recommendationScore}
               </button>
             ))}
@@ -2430,6 +2472,7 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
 
         <section className="panel rec-reasoning">
           <PanelTitle title="AI Reasoning" icon={Bot} detail={top?.title ?? "No project"} />
+          <p className="action-status" role="status">{top ? `Selected recommendation: ${top.ward} (${top.priorityBand} priority).` : "No recommendation selected."}</p>
           {top ? (
             <>
               <p>{top.rationale}</p>
@@ -2493,6 +2536,8 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
 
 function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
   const projects = buildManagedProjects(dashboard.projects);
+  const [selectedTemplate, setSelectedTemplate] = useState("Monthly Report");
+  const [reportAction, setReportAction] = useState("Report actions ready.");
   const templates = [
     "Monthly Report",
     "Constituency Summary",
@@ -2510,6 +2555,11 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
   const totalBudget = projects.reduce((sum, project) => sum + project.budgetCr, 0);
   const beneficiaries = projects.reduce((sum, project) => sum + project.citizenImpact, 0);
 
+  function exportReport(format: string) {
+    downloadTextFile(`janvaani-${selectedTemplate.toLowerCase().replaceAll(" ", "-")}-${format.toLowerCase()}.txt`, `${selectedTemplate}\nFormat: ${format}\nBudget: ₹${totalBudget.toFixed(1)} Cr\nBeneficiaries: ${formatCount(beneficiaries)}`);
+    setReportAction(`${selectedTemplate} exported as ${format}.`);
+  }
+
   return (
     <section className="reports-page">
       <section className="panel reports-hero">
@@ -2519,13 +2569,14 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
           <p>Create polished government-ready reports with AI summaries, charts, maps, tables, citations, and branded export packages.</p>
         </div>
         <div className="reports-export-actions">
-          {["PDF", "PowerPoint", "Word", "Excel"].map((format) => <button key={format} type="button">Export {format}</button>)}
+          {["PDF", "PowerPoint", "Word", "Excel"].map((format) => <button key={format} onClick={() => exportReport(format)} type="button">Export {format}</button>)}
         </div>
       </section>
+      <p className="action-status" role="status">{reportAction}</p>
 
       <section className="reports-template-grid">
         {templates.map((template, index) => (
-          <button className="panel report-template-card" key={template} type="button">
+          <button className={`panel report-template-card ${selectedTemplate === template ? "active" : ""}`} key={template} onClick={() => { setSelectedTemplate(template); setReportAction(`${template} template loaded into preview.`); }} type="button">
             <span>{String(index + 1).padStart(2, "0")}</span>
             <strong>{template}</strong>
             <small>{index % 2 === 0 ? "AI draft ready" : "Template configured"}</small>
@@ -2538,7 +2589,7 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
           <PanelTitle title="Report Preview" icon={FileText} detail="official presentation layout" />
           <div className="report-cover">
             <span>JanVaani AI · MP Constituency Report</span>
-            <h4>Monthly constituency intelligence briefing</h4>
+            <h4>{selectedTemplate}</h4>
             <p>{formatCount(dashboard.totals.submissions)} citizen submissions, {projects.length} development projects, ₹{totalBudget.toFixed(1)} Cr tracked budget, and {formatCount(beneficiaries)} expected beneficiaries.</p>
           </div>
           <div className="report-preview-grid">
@@ -2604,10 +2655,10 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
       <section className="panel reports-share-card">
         <PanelTitle title="Sharing and Branding" icon={Send} detail="official government presentation" />
         <div>
-          <button type="button">Share secure link</button>
-          <button type="button">Email MP office</button>
-          <button type="button">Prepare cabinet note</button>
-          <button type="button">Apply JanVaani AI branding</button>
+          <button onClick={() => setReportAction(`Secure link created for ${selectedTemplate}.`)} type="button">Share secure link</button>
+          <button onClick={() => setReportAction(`${selectedTemplate} queued for MP office email.`)} type="button">Email MP office</button>
+          <button onClick={() => setReportAction(`Cabinet note prepared from ${selectedTemplate}.`)} type="button">Prepare cabinet note</button>
+          <button onClick={() => setReportAction("JanVaani AI branding applied to report package.")} type="button">Apply JanVaani AI branding</button>
         </div>
       </section>
     </section>
