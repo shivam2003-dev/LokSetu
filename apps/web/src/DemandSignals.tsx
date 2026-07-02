@@ -205,6 +205,12 @@ function authHeaders() {
 
 async function requestJson<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, { headers: authHeaders() });
+  if (response.status === 401) {
+    localStorage.removeItem(accessTokenKey);
+    window.location.hash = "";
+    window.location.reload();
+    throw new Error("Session expired. Please log in again.");
+  }
   if (!response.ok) throw new Error(path);
   return response.json() as Promise<T>;
 }

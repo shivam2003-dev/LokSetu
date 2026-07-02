@@ -167,6 +167,10 @@ export default function App() {
           privacyMode: true
         })
       });
+      if (response.status === 401) {
+        logout();
+        return;
+      }
       if (!response.ok) throw new Error("submit failed");
       const payload = await response.json();
       setReceipt({
@@ -207,6 +211,10 @@ export default function App() {
     try {
       const response = await apiFetch(`/api/citizen/receipts/${encodeURIComponent(cleanReceipt)}`);
       const payload = await response.json();
+      if (response.status === 401) {
+        logout();
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "Receipt lookup failed");
       setReceiptLookup(payload);
     } catch (lookupError) {

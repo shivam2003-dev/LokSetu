@@ -125,6 +125,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.api.auth.existingSecret | quote }}
                   key: {{ .Values.api.auth.secretKey | quote }}
+            - name: APP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.auth.existingSecret | quote }}
+                  key: {{ .Values.api.auth.adminUsernameKey | quote }}
+            - name: APP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.auth.existingSecret | quote }}
+                  key: {{ .Values.api.auth.adminPasswordKey | quote }}
             {{- end }}
           {{- if .Values.api.boundaries.configMapName }}
           volumeMounts:

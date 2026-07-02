@@ -7,13 +7,17 @@ import { z } from "zod";
 import { areaMappings, demoSubmissions, mpProfiles, seedUsers, sourceSnapshots } from "./data.js";
 import {
   countRawIntakesByStatus,
+  ensureAuthUser,
+  findAuthUserByUsername,
   findRawIntakesByReceiptPrefix,
   initDatabase,
   insertRawIntake,
   insertSubmission,
   isDatabaseEnabled,
   listRecentBatchRuns,
-  listSubmissions
+  listSubmissions,
+  upsertAuthUser,
+  verifyPassword
 } from "./db.js";
 import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
@@ -31,6 +35,8 @@ const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
 const accessPassword = process.env.APP_ACCESS_PASSWORD ?? "";
 const authSecret = process.env.APP_AUTH_SECRET ?? accessPassword;
+const defaultAdminUsername = process.env.APP_ADMIN_USERNAME ?? "";
+const defaultAdminPassword = process.env.APP_ADMIN_PASSWORD ?? "";
 let memorySubmissions = [...demoSubmissions];
 let demoDataEnabled = true;
 const demoSubmissionIds = new Set(demoSubmissions.map((submission) => submission.id));
@@ -82,7 +88,16 @@ const copilotQuerySchema = z.object({
 
 const receiptIdSchema = z.string().trim().toLowerCase().regex(/^[a-f0-9-]{8,36}$/);
 const loginSchema = z.object({
+  username: z.string().trim().min(1).max(80).optional(),
   password: z.string().min(1)
+});
+
+const adminUserCreateSchema = z.object({
+  actorId: z.string().default("admin-user-shivam"),
+  username: z.string().trim().min(3).max(80),
+  password: z.string().min(4).max(200),
+  role: z.enum(["mp", "ward_staff", "district_admin", "state_admin"]).default("district_admin"),
+  displayName: z.string().trim().min(2).max(120)
 });
 
 const mapBoundaryQuerySchema = z.object({
@@ -157,18 +172,30 @@ app.get("/healthz", (_request, response) => {
   });
 });
 
-app.post("/api/auth/login", (request, response) => {
+app.post("/api/auth/login", async (request, response) => {
   if (!accessPassword) {
     response.json({ token: "", expiresAt: "", disabled: true });
     return;
   }
   const parsed = loginSchema.safeParse(request.body);
-  if (!parsed.success || !constantTimeEqual(parsed.data.password, accessPassword)) {
+  if (!parsed.success) {
+    response.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+  const loginUsername = parsed.data.username?.trim();
+  const authUser = loginUsername ? await findAuthUserByUsername(loginUsername) : null;
+  const passwordMatchesUser = authUser ? verifyPassword(parsed.data.password, authUser.passwordHash) : false;
+  const passwordOnlyFallback = !loginUsername && constantTimeEqual(parsed.data.password, accessPassword);
+  if (!passwordMatchesUser && !passwordOnlyFallback) {
     response.status(401).json({ error: "Invalid password" });
     return;
   }
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
-  response.json({ token: signAccessToken(expiresAt), expiresAt });
+  response.json({
+    token: signAccessToken(expiresAt, authUser?.username ?? "password-access"),
+    expiresAt,
+    user: authUser ? { id: authUser.id, username: authUser.username, role: authUser.role, displayName: authUser.displayName } : undefined
+  });
 });
 
 app.use("/api", (request, response, next) => {
@@ -266,6 +293,30 @@ app.get("/api/users", (_request, response) => {
     users: seedUsers.map(publicUser),
     roles: ["citizen", "mp", "ward_staff", "district_admin", "state_admin"],
     areaMappings: memoryAreaMappings
+  });
+});
+
+app.post("/api/admin/users", async (request, response) => {
+  const parsed = adminUserCreateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+  const actor = getActor(parsed.data.actorId);
+  if (!actor || !["district_admin", "state_admin"].includes(actor.role)) {
+    response.status(403).json({ error: "Only district/state admins can create users" });
+    return;
+  }
+  const user = await upsertAuthUser({
+    username: parsed.data.username,
+    password: parsed.data.password,
+    role: parsed.data.role,
+    displayName: parsed.data.displayName
+  });
+  response.status(201).json({
+    user: user
+      ? { id: user.id, username: user.username, role: user.role, displayName: user.displayName, createdAt: user.createdAt }
+      : { username: parsed.data.username, role: parsed.data.role, displayName: parsed.data.displayName }
   });
 });
 
@@ -787,6 +838,16 @@ app.post("/api/whatsapp/simulate", async (request, response) => {
 
 initDatabase()
   .then(() => {
+    if (!defaultAdminUsername || !defaultAdminPassword) return;
+    return ensureAuthUser({
+      id: `admin-user-${defaultAdminUsername.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      username: defaultAdminUsername,
+      password: defaultAdminPassword,
+      role: "state_admin",
+      displayName: "Platform Admin"
+    });
+  })
+  .then(() => {
     app.listen(port, () => {
       logger.info({ port, database: isDatabaseEnabled() ? "postgres" : "memory", ai: aiMode }, "api listening");
     });
@@ -930,6 +991,7 @@ function publicUser(user: UserProfile) {
   return {
     id: user.id,
     role: user.role,
+    username: user.username,
     displayName: user.displayName,
     privacyMode: user.privacyMode,
     mpId: user.mpId,
@@ -938,8 +1000,8 @@ function publicUser(user: UserProfile) {
   };
 }
 
-function signAccessToken(expiresAt: string) {
-  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", exp: expiresAt })).toString("base64url");
+function signAccessToken(expiresAt: string, username = "password-access") {
+  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, exp: expiresAt })).toString("base64url");
   const signature = createHmac("sha256", authSecret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }

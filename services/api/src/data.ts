@@ -70,6 +70,15 @@ export const mpProfiles = [
 
 export const seedUsers: UserProfile[] = [
   {
+    id: "admin-user-shivam",
+    role: "state_admin",
+    username: "shivam",
+    displayName: "Shivam Kumar",
+    privacyMode: false,
+    location: { state: "Delhi", district: "Central Delhi", ward: "Kalindi Nagar" },
+    contributionScore: 100
+  },
+  {
     id: "u-kalindi-01",
     role: "citizen",
     username: "school-parent",

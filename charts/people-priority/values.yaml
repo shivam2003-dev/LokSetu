@@ -69,6 +69,8 @@ api:
     existingSecret: ""
     passwordKey: password
     secretKey: token-secret
+    adminUsernameKey: admin-username
+    adminPasswordKey: admin-password
   resources:
     requests:
       cpu: 150m

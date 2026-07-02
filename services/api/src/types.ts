@@ -19,6 +19,15 @@ export type UserProfile = {
   contributionScore: number;
 };
 
+export type AuthUser = {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: UserRole;
+  displayName: string;
+  createdAt: string;
+};
+
 export type AreaMapping = {
   id: string;
   state: string;

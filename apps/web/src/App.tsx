@@ -1,11 +1,15 @@
 import {
+  ArrowRight,
+  BarChart3,
   Bot,
   Briefcase,
+  Building2,
   Construction,
   CheckCircle2,
   Database,
   DatabaseZap,
   Droplets,
+  EyeOff,
   FileText,
   Flag,
   Globe2,
@@ -14,7 +18,7 @@ import {
   Home,
   Languages,
   Lock,
-  LockKeyhole,
+  Mail,
   Map as MapIcon,
   MapPinned,
   MapPin,
@@ -25,7 +29,9 @@ import {
   Scale,
   Search,
   Send,
+  ShieldCheck,
   Star,
+  Target,
   Trash2,
   TrendingUp,
   Users,
@@ -334,15 +340,18 @@ function pageFromHash(): Page {
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
     const response = await apiFetch(path);
+    if (response.status === 401) throw new AuthError();
     if (!response.ok) throw new Error(path);
     return response.json();
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
     return fallback;
   }
 }
 
 async function requestJson<T>(path: string): Promise<T> {
   const response = await apiFetch(path);
+  if (response.status === 401) throw new AuthError();
   if (!response.ok) throw new Error(path);
   return response.json();
 }
@@ -456,6 +465,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       setConnectionError(null);
       setNotice("Live");
     } catch (error) {
+      if (error instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setApiConnected(false);
       setConnectionError(error instanceof Error ? error.message : "API unavailable");
       setNotice("Disconnected");
@@ -471,6 +484,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       setConnectionError(null);
       setNotice("Live");
     } catch (error) {
+      if (error instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setApiConnected(false);
       setConnectionError(error instanceof Error ? error.message : "API unavailable");
       setNotice("Disconnected");
@@ -480,11 +497,16 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   async function updateDemoData(action: "load" | "disable") {
     try {
       const response = await apiFetch(`/api/demo-data/${action}`, { method: "POST" });
+      if (response.status === 401) throw new AuthError();
       if (!response.ok) throw new Error(`Demo data ${action} failed`);
       const nextDemoData = await response.json() as DemoDataStatus;
       setDemoData(nextDemoData);
       await refreshAll();
     } catch (error) {
+      if (error instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setConnectionError(error instanceof Error ? error.message : "Demo data update failed");
       setNotice("Disconnected");
     }
@@ -649,7 +671,14 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   });
 }
 
+class AuthError extends Error {
+  constructor() {
+    super("Session expired. Please log in again.");
+  }
+}
+
 function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -662,7 +691,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ username, password })
       });
       const payload = await response.json() as { token?: string; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Login failed");
@@ -676,26 +705,84 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-panel">
-        <div className="brand-lock">
-          <span>JV</span>
-          <LockKeyhole size={22} />
+      <section className="login-showcase" aria-label="JanVaani AI platform introduction">
+        <div className="login-brand-row">
+          <span className="login-brand-mark" aria-hidden="true" />
+          <div>
+            <h1>JanVaani <em>AI</em></h1>
+            <p>People's Priorities. Smart Governance.</p>
+          </div>
         </div>
-        <p className="eyebrow">Access Required</p>
-        <h1>JanVaani AI Login</h1>
-        <p>Enter the deployment password before using AI, submission, map, or dashboard APIs.</p>
+        <div className="login-copy-block">
+          <h2>AI-Powered Intelligence for People-First Governance</h2>
+          <p>Turning citizen voices, public data, and AI insights into better decisions and stronger communities.</p>
+        </div>
+        <div className="login-benefits">
+          {[
+            { icon: Users, title: "Understand People's Priorities", detail: "Collect and analyze multilingual citizen feedback from multiple channels." },
+            { icon: BarChart3, title: "Data-Driven Decisions", detail: "Leverage AI and real-time data to identify what matters most." },
+            { icon: Target, title: "Plan. Act. Impact.", detail: "Prioritize projects, allocate resources, and track real impact on the ground." },
+            { icon: ShieldCheck, title: "Transparent & Accountable", detail: "Evidence-based insights with full transparency and citizen trust." }
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <article key={item.title}>
+                <span><Icon size={22} /></span>
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <small className="login-image-credit">Image: Wikimedia Commons / Pinakpani, CC BY-SA 4.0</small>
+      </section>
+
+      <section className="login-panel" aria-label="Admin sign in">
+        <div className="login-card-emblem"><Building2 size={42} /></div>
+        <h2>Welcome Back</h2>
+        <p>Sign in to continue to JanVaani AI</p>
         <form onSubmit={login}>
           <label>
-            Password
-            <input autoFocus onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
+            Email or Mobile Number
+            <span className="login-input-wrap">
+              <Mail size={21} />
+              <input autoFocus autoComplete="username" onChange={(event) => setUsername(event.target.value)} placeholder="Enter your email or mobile number" type="text" value={username} />
+            </span>
           </label>
+          <label>
+            Password
+            <span className="login-input-wrap">
+              <Lock size={21} />
+              <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" type="password" value={password} />
+              <EyeOff size={21} />
+            </span>
+          </label>
+          <div className="login-row">
+            <label className="remember-row"><input defaultChecked type="checkbox" /> Remember me</label>
+            <button className="link-button" type="button">Forgot Password?</button>
+          </div>
           {error ? <div className="login-error">{error}</div> : null}
-          <button className="primary" disabled={busy || !password.trim()} type="submit">
-            {busy ? <RefreshCw className="spin" size={16} /> : <Lock size={16} />}
-            Login
+          <button className="login-submit" disabled={busy || !username.trim() || !password.trim()} type="submit">
+            {busy ? <RefreshCw className="spin" size={18} /> : null}
+            Sign In
+            <ArrowRight size={22} />
           </button>
         </form>
+        <div className="login-divider"><span>or continue with</span></div>
+        <div className="sso-grid">
+          {["MP SSO", "Google", "Microsoft", "Apple"].map((item) => (
+            <button disabled key={item} type="button">{item}</button>
+          ))}
+        </div>
+        <p className="login-admin-note">Don't have an account? <button type="button">Contact Administrator</button></p>
       </section>
+      <footer className="login-security-strip" aria-label="Security posture">
+        <span><ShieldCheck size={17} /> Secure & Encrypted</span>
+        <span><Lock size={17} /> Data Privacy Compliant</span>
+        <span><Building2 size={17} /> Government Grade Security</span>
+      </footer>
     </main>
   );
 }

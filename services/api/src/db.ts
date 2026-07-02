@@ -1,6 +1,7 @@
 import { Pool } from "pg";
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { seedSubmissions } from "./data.js";
-import { BatchRun, RawIntakePayload, RawIntakeRecord, Submission } from "./types.js";
+import { AuthUser, BatchRun, RawIntakePayload, RawIntakeRecord, Submission, UserRole } from "./types.js";
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
@@ -40,6 +41,17 @@ export async function initDatabase(): Promise<void> {
       processed integer not null default 0,
       failed integer not null default 0,
       error text
+    )
+  `);
+
+  await pool.query(`
+    create table if not exists app_users (
+      id text primary key,
+      username text not null unique,
+      password_hash text not null,
+      role text not null,
+      display_name text not null,
+      created_at timestamptz not null
     )
   `);
 
@@ -220,8 +232,117 @@ export async function listRecentBatchRuns(limit = 10): Promise<BatchRun[]> {
   }));
 }
 
+export async function ensureAuthUser(input: {
+  id: string;
+  username: string;
+  password: string;
+  role: UserRole;
+  displayName: string;
+}): Promise<void> {
+  if (!pool || !input.password.trim()) return;
+  const existing = await findAuthUserByUsername(input.username);
+  if (existing) return;
+  await pool.query(
+    `insert into app_users (id, username, password_hash, role, display_name, created_at)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (username) do nothing`,
+    [input.id, input.username, hashPassword(input.password), input.role, input.displayName, new Date().toISOString()]
+  );
+}
+
+export async function upsertAuthUser(input: {
+  username: string;
+  password: string;
+  role: UserRole;
+  displayName: string;
+}): Promise<AuthUser | null> {
+  const now = new Date().toISOString();
+  const record: AuthUser = {
+    id: crypto.randomUUID(),
+    username: input.username,
+    passwordHash: hashPassword(input.password),
+    role: input.role,
+    displayName: input.displayName,
+    createdAt: now
+  };
+  if (!pool) return record;
+  const result = await pool.query<{
+    id: string;
+    username: string;
+    password_hash: string;
+    role: UserRole;
+    display_name: string;
+    created_at: Date;
+  }>(
+    `insert into app_users (id, username, password_hash, role, display_name, created_at)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (username) do update set
+       password_hash = excluded.password_hash,
+       role = excluded.role,
+       display_name = excluded.display_name
+     returning id, username, password_hash, role, display_name, created_at`,
+    [record.id, record.username, record.passwordHash, record.role, record.displayName, record.createdAt]
+  );
+  return authUserFromRow(result.rows[0]);
+}
+
+export async function findAuthUserByUsername(username: string): Promise<AuthUser | null> {
+  if (!pool) return null;
+  const result = await pool.query<{
+    id: string;
+    username: string;
+    password_hash: string;
+    role: UserRole;
+    display_name: string;
+    created_at: Date;
+  }>(
+    `select id, username, password_hash, role, display_name, created_at
+     from app_users
+     where lower(username) = lower($1)
+     limit 1`,
+    [username.trim()]
+  );
+  return authUserFromRow(result.rows[0]);
+}
+
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const digest = pbkdf2Sync(password, salt, 120_000, 32, "sha256").toString("hex");
+  return `pbkdf2_sha256$120000$${salt}$${digest}`;
+}
+
+export function verifyPassword(password: string, passwordHash: string): boolean {
+  const [scheme, iterationsText, salt, digest] = passwordHash.split("$");
+  if (scheme !== "pbkdf2_sha256" || !iterationsText || !salt || !digest) return false;
+  const iterations = Number(iterationsText);
+  if (!Number.isFinite(iterations) || iterations < 1) return false;
+  const candidate = pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("hex");
+  const candidateBuffer = Buffer.from(candidate, "hex");
+  const digestBuffer = Buffer.from(digest, "hex");
+  return candidateBuffer.length === digestBuffer.length && timingSafeEqual(candidateBuffer, digestBuffer);
+}
+
 export function isDatabaseEnabled(): boolean {
   return Boolean(pool);
+}
+
+function authUserFromRow(row?: {
+  id: string;
+  username: string;
+  password_hash: string;
+  role: UserRole;
+  display_name: string;
+  created_at: Date;
+}): AuthUser | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    passwordHash: row.password_hash,
+    role: row.role,
+    displayName: row.display_name,
+    createdAt: row.created_at.toISOString()
+  };
 }
 
 function rawRecordFromRow(row: {
