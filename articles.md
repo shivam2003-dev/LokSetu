@@ -67,7 +67,7 @@ This makes JanVaani AI useful beyond a dashboard demo. It gives administrators a
 
 JanVaani AI is built to align with the recommended AI, cloud, mapping, and public-data ecosystem.
 
-Gemini API and Vertex AI power issue classification, image understanding, voice-derived analysis, recommendations, RAG answers, report summaries, and AI explanations. Cloud Speech-to-Text and Translation API provide the production path for multilingual voice intake. Dialogflow, WhatsApp Business API, and SMS gateways can extend Apni Awaaz to low-connectivity and conversational access.
+Gemini API and Vertex AI power issue classification, image understanding, voice-derived analysis, recommendations, RAG answers, report summaries, and AI explanations. Sarvam/Bhashini-ready preprocessing, Cloud Speech-to-Text, and Translation API provide the multilingual voice intake path. Dialogflow, WhatsApp Business API, and SMS gateways can extend Apni Awaaz to low-connectivity and conversational access.
 
 For vision, Gemini multimodal or Vertex AI Vision can inspect citizen-uploaded photos and distinguish real infrastructure problems from non-civic images. For maps, Mappls, Google Maps Platform, OpenStreetMap fallback, and future Earth Engine integration support location placement, demand heatmaps, satellite overlays, and flood or environmental signals.
 

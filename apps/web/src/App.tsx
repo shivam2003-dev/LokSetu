@@ -2063,17 +2063,24 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
   const [error, setError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState("Assistant actions ready.");
+  const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
 
   const latestAnswer = [...messages].reverse().find((message) => message.answer)?.answer ?? null;
   const confidence = latestAnswer?.confidence ?? 97;
   const sourceCounts = buildGroundingSources(latestAnswer, ragStatus);
-  const evidenceItems = (latestAnswer?.citations.length ? latestAnswer.citations : latestAnswer?.retrievedContext.map((item) => ({
-    type: item.sourceType,
-    id: item.id,
-    title: item.title,
-    snippet: item.snippet
-  })) ?? []).slice(0, 5);
+  const evidenceItems = (
+    latestAnswer?.evidence.length
+      ? latestAnswer.evidence.map((item, index) => ({ type: item.type, id: `evidence-${index}`, title: item.type, snippet: item.text }))
+      : latestAnswer?.citations.length
+        ? latestAnswer.citations
+        : latestAnswer?.retrievedContext.map((item) => ({
+            type: item.sourceType,
+            id: item.id,
+            title: item.title,
+            snippet: item.snippet
+          })) ?? []
+  ).slice(0, 5);
   const selectedProject = projectId ? projects.find((project) => project.id === projectId) : projects[0];
   const relatedProjects = projects.slice(0, 3);
 
@@ -2086,6 +2093,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
     if (!cleanQuestion || busy) return;
     setBusy(true);
     setError("");
+    setStreamingSteps(["Understanding question and filters"]);
     const userMessage = { id: `user-${Date.now()}`, role: "user" as const, text: cleanQuestion };
     setMessages((current) => [...current, userMessage]);
     if (cleanQuestion === question.trim()) setQuestion("");
@@ -2094,6 +2102,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
       `Filters: state=${stateFilter}; district=${districtFilter}; constituency=${constituencyFilter}; timeRange=${timeRange}; topic=${topic}; mode=${mode}.`
     ].join("\n");
     try {
+      setStreamingSteps((steps) => [...steps, mode === "online" ? "Fetching live web/news/social signals" : mode === "submitted" ? "Searching submitted citizen issues" : "Searching submitted issues and online signals"]);
       const response = await apiFetch("/api/copilot/query", {
         method: "POST",
         body: JSON.stringify({ role, mode, language, question: groundedQuestion, projectId: projectId || undefined })
@@ -2108,7 +2117,9 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
         }
         throw new Error(message);
       }
+      setStreamingSteps((steps) => [...steps, "Grounding answer with citations and evidence"]);
       const payload = await response.json() as CopilotAnswer;
+      setStreamingSteps((steps) => [...steps, "Answer ready"]);
       setMessages((current) => [
         ...current,
         {
@@ -2122,7 +2133,14 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
       setError(queryError instanceof Error ? queryError.message : "Copilot query failed");
     } finally {
       setBusy(false);
+      window.setTimeout(() => setStreamingSteps([]), 1800);
     }
+  }
+
+  function askFollowUp(prompt: string) {
+    setQuestion(prompt);
+    setActionNotice(`Running follow-up: ${prompt}`);
+    askCopilot(prompt);
   }
 
   function exportAnswer(format: string) {
@@ -2196,9 +2214,14 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
           </form>
           <div className="prompt-strip rag-prompts">
             <span>Suggested Questions:</span>
-            {prompts.map((prompt) => <button key={prompt} onClick={() => askCopilot(prompt)} type="button">{prompt}</button>)}
+            {prompts.map((prompt) => <button disabled={busy} key={prompt} onClick={() => askFollowUp(prompt)} type="button">{prompt}</button>)}
           </div>
           {error ? <div className="error-state">{error}</div> : null}
+          {streamingSteps.length ? (
+            <div className="rag-stream-status" role="status" aria-live="polite">
+              {streamingSteps.map((step, index) => <span key={`${step}-${index}`}>{step}</span>)}
+            </div>
+          ) : null}
 
           <section className="panel rag-answer-card" aria-label="AI answer">
             <header>
@@ -2257,7 +2280,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
             </section>
             <section className="panel">
               <PanelTitle title="Ask Follow-up" icon={MessageSquareText} />
-              <div className="rag-followups">{(latestAnswer?.followUpQuestions ?? prompts).slice(0, 4).map((item) => <button key={item} onClick={() => askCopilot(item)} type="button">{item}</button>)}</div>
+              <div className="rag-followups">{(latestAnswer?.followUpQuestions ?? prompts).slice(0, 4).map((item) => <button disabled={busy} key={item} onClick={() => askFollowUp(item)} type="button">{item}</button>)}</div>
             </section>
           </section>
         </main>
@@ -2289,8 +2312,12 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
 }
 
 function buildGroundingSources(answer: CopilotAnswer | null, ragStatus: RagStatusResponse | null) {
-  if (answer?.citations.length || answer?.retrievedContext.length) {
-    const counts = [...answer.citations.map((item) => item.type), ...answer.retrievedContext.map((item) => item.sourceType)]
+  if (answer?.citations.length || answer?.retrievedContext.length || answer?.evidence.length) {
+    const counts = [
+      ...answer.citations.map((item) => item.type),
+      ...answer.retrievedContext.map((item) => item.sourceType),
+      ...answer.evidence.map((item) => item.type)
+    ]
       .reduce<Record<string, number>>((acc, item) => {
         acc[item] = (acc[item] ?? 0) + 1;
         return acc;

@@ -6966,6 +6966,27 @@ button.problem-row.selected {
   font-weight: 850;
 }
 
+.rag-stream-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(109, 93, 252, 0.28);
+  border-radius: 10px;
+  background: rgba(109, 93, 252, 0.07);
+  padding: 10px 12px;
+  color: var(--indigo-600);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rag-stream-status span {
+  border-radius: 999px;
+  background: #fff;
+  padding: 5px 9px;
+  box-shadow: 0 1px 4px rgba(20, 28, 45, 0.08);
+}
+
 .rag-answer-card,
 .rag-evidence-list,
 .rag-map-card,

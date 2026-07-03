@@ -25,6 +25,7 @@ import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayloa
 import { buildDashboard } from "./pipeline.js";
 import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
+import { indicRuntimeMode } from "./indicLanguage.js";
 import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
@@ -382,10 +383,11 @@ app.get("/api/ai-ops", (_request, response) => {
   response.json({
     provider: aiMode === "openai-compatible" ? "OpenAI-compatible Gemini" : "Vertex AI Gemini",
     mode: aiMode,
+    indicLanguageMode: indicRuntimeMode(),
     tasks: [
-      "text: language detection, translation, civic category",
+      "text: Sarvam/Bhashini-ready language detection and translation, then Gemini civic category",
       "image: civic-issue validation and caption (Gemini vision)",
-      "voice: speech transcription and category (Gemini multimodal)",
+      "voice: Sarvam/Bhashini-ready transcription and translation, then Gemini classification",
       "dedupe and theme clustering",
       "evidence-grounded MP summaries"
     ],

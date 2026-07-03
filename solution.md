@@ -14,7 +14,7 @@ JanVaani AI is a constituency intelligence platform for MPs. Citizens use Apni A
 
 ### Technologies Used
 
-Gemini API and Vertex AI for text, image, voice-derived analysis, issue classification, noise detection, explanations, recommendations, and RAG answers. Cloud Speech-to-Text, Translation API, and Dialogflow are the production path for multilingual voice and conversational intake. Gemini multimodal / Vertex AI Vision analyze citizen photos. Google Maps, Mappls, OSM fallback, and future Earth Engine support location placement, hotspots, satellite and flood layers. Postgres with pgvector stores submissions, raw intake, RAG evidence, and audit trails. Express API, React/Vite web apps, Kubernetes, Helm, Argo CD, and GCP/GKE provide deployable infrastructure. BigQuery can join census, NFHS, IMD, CPCB, data.gov.in, and state datasets. WhatsApp/SMS/Flutter extensions support low-connectivity access.
+Gemini API and Vertex AI for text, image, voice-derived analysis, issue classification, noise detection, explanations, recommendations, and RAG answers. Sarvam/Bhashini-ready preprocessing, Cloud Speech-to-Text, Translation API, and Dialogflow form the multilingual voice and conversational intake path. Gemini multimodal / Vertex AI Vision analyze citizen photos. Google Maps, Mappls, OSM fallback, and future Earth Engine support location placement, hotspots, satellite and flood layers. Postgres with pgvector stores submissions, raw intake, RAG evidence, and audit trails. Express API, React/Vite web apps, Kubernetes, Helm, Argo CD, and GCP/GKE provide deployable infrastructure. BigQuery can join census, NFHS, IMD, CPCB, data.gov.in, and state datasets. WhatsApp/SMS/Flutter extensions support low-connectivity access.
 
 ### Presentation Upload
 
@@ -40,7 +40,7 @@ JanVaani AI addresses this by creating one auditable operating layer for:
 3. The citizen submits text, voice, or image evidence.
 4. The API stores the raw record in `raw_intake` and returns a receipt.
 5. The scheduled batch or on-demand evaluator run processes pending intake.
-6. Vertex/Gemini or deterministic fallback analyzes the content:
+6. Vertex/Gemini analyzes the content, with optional Sarvam/Bhashini preprocessing for Indic language text and voice:
    - language
    - normalized issue text
    - civic issue detection
@@ -88,7 +88,7 @@ JanVaani AI is designed around the recommended Google Cloud and public-data stac
 | Area | Recommended tools | How JanVaani AI uses them |
 | --- | --- | --- |
 | AI/ML and generative AI | Gemini API, Vertex AI, Google AI Studio | Gemini/Vertex analyzes text, voice-derived text, and images; classifies issue category; detects noisy/private inputs; writes normalized summaries; generates explanations, recommendations, report summaries, and RAG answers. |
-| Language and voice | Cloud Speech-to-Text, Text-to-Speech, Dialogflow, Translation API | Apni Awaaz supports voice intake. The production path can use Speech-to-Text for citizen recordings, Translation API for multilingual normalization, and Dialogflow/SMS/WhatsApp flows for low-literacy conversational reporting. |
+| Language and voice | Sarvam AI, Bhashini, Cloud Speech-to-Text, Text-to-Speech, Dialogflow, Translation API | Apni Awaaz supports voice intake. The AI path can use Sarvam/Bhashini for Indic ASR and translation, Speech-to-Text for citizen recordings, Translation API for multilingual normalization, and Dialogflow/SMS/WhatsApp flows for low-literacy conversational reporting. |
 | Vision | Gemini multimodal, Vertex AI Vision, MediaPipe | Citizen-uploaded photos are analyzed to identify civic infrastructure issues such as potholes, damaged roads, flooding, broken public facilities, smoke, or non-civic/private images that should be held for review. |
 | Geospatial and mapping | Google Maps Platform, Earth Engine | GPS is required before submission. Reverse geocoding places issues into state, district, locality, and MP route. The Map View shows hotspots, demand heatmaps, boundaries, clusters, and layers. Earth Engine can extend this with satellite imagery, flood zones, crop/land signals, and environmental change detection. |
 | Data and backend | BigQuery, Firebase, Cloud Run, Cloud Functions, Cloud SQL/Postgres | The current implementation uses Express, Postgres/pgvector, Kubernetes, and Argo CD. BigQuery can be used for large-scale joins across census, NFHS, weather, public works, and demand signals. Cloud Run/Functions are a natural deployment option for batch workers and lightweight ingestion jobs. |

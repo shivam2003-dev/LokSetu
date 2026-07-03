@@ -52,8 +52,52 @@ spec:
               value: {{ .Values.api.env.VERTEX_AI_LOCATION | quote }}
             - name: VERTEX_AI_MODEL
               value: {{ .Values.api.env.VERTEX_AI_MODEL | quote }}
+            {{- with .Values.api.env.VERTEX_AI_FALLBACK_MODELS }}
+            - name: VERTEX_AI_FALLBACK_MODELS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.AI_RETRY_ATTEMPTS }}
+            - name: AI_RETRY_ATTEMPTS
+              value: {{ . | quote }}
+            {{- end }}
             - name: VERTEX_AI_DISABLED
               value: {{ .Values.api.env.VERTEX_AI_DISABLED | quote }}
+            {{- with .Values.api.env.INDIC_LANGUAGE_PROVIDER_ORDER }}
+            - name: INDIC_LANGUAGE_PROVIDER_ORDER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.INDIC_AI_RETRY_ATTEMPTS }}
+            - name: INDIC_AI_RETRY_ATTEMPTS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.SARVAM_API_BASE_URL }}
+            - name: SARVAM_API_BASE_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.SARVAM_TRANSLATE_MODEL }}
+            - name: SARVAM_TRANSLATE_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.SARVAM_SPEECH_MODEL }}
+            - name: SARVAM_SPEECH_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.BHASHINI_PIPELINE_COMPUTE_URL }}
+            - name: BHASHINI_PIPELINE_COMPUTE_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.BHASHINI_AUTH_HEADER }}
+            - name: BHASHINI_AUTH_HEADER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.BHASHINI_TRANSLATION_SERVICE_ID }}
+            - name: BHASHINI_TRANSLATION_SERVICE_ID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.env.BHASHINI_ASR_SERVICE_ID }}
+            - name: BHASHINI_ASR_SERVICE_ID
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.api.env.OPENAI_COMPATIBLE_BASE_URL }}
             - name: OPENAI_COMPATIBLE_BASE_URL
               value: {{ . | quote }}

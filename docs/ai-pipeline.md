@@ -1,13 +1,21 @@
-# AI Pipeline — Vertex AI (Gemini) intelligence layer
+# AI Pipeline — Indic AI + Vertex AI intelligence layer
 
 LokSetu turns raw citizen input (photo / voice / text / WhatsApp) into a
-normalized, categorized, location-routed civic submission. All AI runs on
-**Google Vertex AI** through the `@google/genai` SDK. One model family —
-**Gemini 2.x** — covers every modality. Processing is AI-only: if configured
-models fail after retries, the raw intake is marked failed for retry instead of
-being converted into a deterministic placeholder.
+normalized, categorized, location-routed civic submission. The core classifier
+runs on **Google Vertex AI Gemini** through the `@google/genai` SDK. Optional
+Indic-language preprocessing can run before Gemini:
 
-Source: `services/api/src/vertexAi.ts`, `services/api/src/geo.ts`,
+- **Sarvam AI** for Indian-language text language identification,
+  translation, and Saaras speech-to-text / speech-translate.
+- **Bhashini-compatible pipeline API** for ASR + translation where a government
+  pipeline key is available.
+
+Processing is AI-only: if configured models fail after retries, the raw intake is
+marked failed for retry instead of being converted into a deterministic
+placeholder.
+
+Source: `services/api/src/indicLanguage.ts`, `services/api/src/vertexAi.ts`,
+`services/api/src/geo.ts`,
 `services/api/src/index.ts` (`processIntake`).
 
 ---
@@ -30,10 +38,11 @@ location resolution.
 ## 2. Per-modality processing
 
 ### Text → `analyzeWithVertexAi(text, language?)`
-Gemini returns strict JSON `{ detectedLanguage, normalizedText, category,
-confidence }`:
-- **Language detection** of any Indian language.
-- **Translation / normalization** to concise English (analysis language).
+When `SARVAM_API_KEY` or Bhashini config is available, LokSetu first normalizes
+Indian-language text to concise English. Gemini then returns strict JSON
+`{ detectedLanguage, normalizedText, category, confidence }`:
+- **Language detection** by Sarvam/Bhashini where configured, otherwise Gemini.
+- **Translation / normalization** to concise English.
 - **Civic category** constrained to the enum
   `Education | Roads | Health | Water | Civic Services`.
 
@@ -48,10 +57,15 @@ confidence }`:
   generated *from the image*, so a photo alone is enough to file a report.
 
 ### Voice → `transcribeWithVertexAi(base64, mimeType, language?)`
-Gemini multimodal transcribes the audio and returns
-`{ transcript, normalizedText, category, mediaSummary, detectedLanguage,
-confidence }`. The original-language transcript is retained as evidence; the
-English `normalizedText` feeds ranking.
+Voice now uses a provider chain:
+
+1. Sarvam Saaras speech-to-text / speech-translate if `SARVAM_API_KEY` exists.
+2. Bhashini-compatible ASR + translation if `BHASHINI_*` env is configured.
+3. Vertex Gemini multimodal if no Indic provider is configured or if the Indic
+   provider fails.
+
+The transcript is retained as evidence; English `normalizedText` feeds Gemini
+classification and ranking.
 
 ### Analysis / clustering → `pipeline.ts`
 `buildDashboard()` clusters submissions by `state::district::ward::category`,
@@ -83,6 +97,15 @@ polygons.
 | `VERTEX_AI_MODEL`                           | Gemini model id                          | `gemini-2.0-flash` |
 | `VERTEX_AI_FALLBACK_MODELS`                 | Comma-separated backup Gemini models     | built-in backups |
 | `AI_RETRY_ATTEMPTS`                         | Attempts per configured model            | `2`              |
+| `INDIC_LANGUAGE_PROVIDER_ORDER`             | Indic preprocessor order                 | `sarvam,bhashini` |
+| `INDIC_AI_RETRY_ATTEMPTS`                   | Sarvam/Bhashini retry attempts           | `AI_RETRY_ATTEMPTS` |
+| `SARVAM_API_KEY`                            | Sarvam Indic language API key            | —                |
+| `SARVAM_API_BASE_URL`                       | Sarvam API base URL                      | `https://api.sarvam.ai` |
+| `SARVAM_TRANSLATE_MODEL`                    | Sarvam translation model                 | `sarvam-translate:v1` |
+| `SARVAM_SPEECH_MODEL`                       | Sarvam speech model                      | `saaras:v3`      |
+| `BHASHINI_PIPELINE_COMPUTE_URL`             | Bhashini pipeline compute URL            | —                |
+| `BHASHINI_AUTH_HEADER` / `BHASHINI_AUTH_VALUE` | Bhashini auth header/value             | —                |
+| `BHASHINI_ASR_SERVICE_ID` / `BHASHINI_TRANSLATION_SERVICE_ID` | Optional Bhashini service IDs | — |
 | `VERTEX_AI_DISABLED`                        | Disable Vertex route for tests           | —                |
 | `GOOGLE_MAPS_API_KEY`                       | Reverse-geocode receipt labels           | —                |
 | `GOOGLE_APPLICATION_CREDENTIALS`            | Service-account key for Vertex auth      | —                |
@@ -112,7 +135,7 @@ Identity service account with the **Vertex AI User** role.
 | Now (Gemini multimodal)        | Production-grade alternative                              |
 | ------------------------------ | -------------------------------------------------------- |
 | Gemini vision for images       | **Cloud Vision API** — OCR, SafeSearch, label detection  |
-| Gemini multimodal for voice    | **Vertex AI Speech-to-Text "Chirp 2"** — long/streaming  |
+| Gemini multimodal for voice    | **Sarvam Saaras**, **Bhashini ASR**, or **Cloud Speech-to-Text Chirp** |
 | Nearest-ward heuristic         | **BigQuery GIS** + official ward/constituency polygons   |
 | `gemini-2.0-flash`             | `gemini-2.x-pro` for higher-accuracy summarization       |
 | In-process intake              | **Pub/Sub + Dataflow** async pipeline at India scale     |

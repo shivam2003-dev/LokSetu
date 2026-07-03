@@ -15,6 +15,8 @@
  * deterministic "processed" records when model inference fails.
  */
 
+import { normalizeIndicText, transcribeIndicAudio } from "./indicLanguage.js";
+
 export type VertexTextAnalysis = {
   detectedLanguage: string;
   normalizedText: string;
@@ -90,6 +92,9 @@ export function aiRuntimeMode(): "vertex" | "openai-compatible" | "unconfigured"
 export async function analyzeWithVertexAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
   const { model, enabled } = vertexConfig();
   if (!enabled) return analyzeWithCompatibleAi(text, declaredLanguage);
+  const indic = await normalizeIndicText(text, declaredLanguage);
+  const analysisText = indic?.normalizedText || text;
+  const analysisLanguage = indic?.detectedLanguage || declaredLanguage;
 
   return withModelRetries("Vertex text analysis", vertexModelCandidates(model), async (candidateModel) => {
     const ai = await geminiClient();
@@ -101,7 +106,10 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       "isCivicIssue=false for private/non-public issues, spam, jokes, vague text with no actionable public problem, or problems inside private rooms/hotels/homes.",
       "noiseReason is short and empty only when isCivicIssue=true.",
       `Declared language: ${declaredLanguage ?? "unknown"}.`,
-      `Submission: ${text}`
+      `Detected/normalized language context: ${analysisLanguage ?? "unknown"}.`,
+      indic ? `Indic AI normalized English: ${indic.normalizedText}` : "",
+      indic?.transcript ? `Original transcript/text: ${indic.transcript}` : "",
+      `Submission: ${analysisText}`
     ].join("\n");
 
     const result = await ai.models.generateContent({
@@ -111,14 +119,14 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
     });
     const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexTextAnalysis>;
     return {
-      detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
-      normalizedText: cleanText(parsed.normalizedText) || text.trim(),
-      category: asCategory(parsed.category) ?? fallbackCategory(text),
+      detectedLanguage: indic?.detectedLanguage || cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
+      normalizedText: cleanText(parsed.normalizedText) || analysisText.trim(),
+      category: asCategory(parsed.category) ?? fallbackCategory(analysisText),
       confidence: clampConfidence(parsed.confidence),
-      isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(text),
-      noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(text),
+      isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(analysisText),
+      noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(analysisText),
       providerMode: "vertex",
-      model: candidateModel,
+      model: indic ? `${indic.model}+${candidateModel}` : candidateModel,
       fallbackUsed: false
     };
   });
@@ -127,6 +135,9 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
 async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
   const { apiKey, baseUrl, model, enabled } = compatibleConfig();
   if (!enabled || !apiKey) throw new AiInferenceError("AI model provider is not configured. Configure Vertex AI or an OpenAI-compatible Gemini key.");
+  const indic = await normalizeIndicText(text, declaredLanguage);
+  const analysisText = indic?.normalizedText || text;
+  const analysisLanguage = indic?.detectedLanguage || declaredLanguage;
 
   return withModelRetries("Compatible text analysis", compatibleModelCandidates(model), async (candidateModel) => {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -151,7 +162,13 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
           },
           {
             role: "user",
-            content: `Declared language: ${declaredLanguage ?? "unknown"}\nSubmission: ${text}`
+            content: [
+              `Declared language: ${declaredLanguage ?? "unknown"}`,
+              `Detected/normalized language context: ${analysisLanguage ?? "unknown"}`,
+              indic ? `Indic AI normalized English: ${indic.normalizedText}` : "",
+              indic?.transcript ? `Original transcript/text: ${indic.transcript}` : "",
+              `Submission: ${analysisText}`
+            ].filter(Boolean).join("\n")
           }
         ]
       })
@@ -160,14 +177,14 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
     const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const parsed = JSON.parse(payload.choices?.[0]?.message?.content ?? "{}") as Partial<VertexTextAnalysis>;
     return {
-      detectedLanguage: cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
-      normalizedText: cleanText(parsed.normalizedText) || text.trim(),
-      category: asCategory(parsed.category) ?? fallbackCategory(text),
+      detectedLanguage: indic?.detectedLanguage || cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
+      normalizedText: cleanText(parsed.normalizedText) || analysisText.trim(),
+      category: asCategory(parsed.category) ?? fallbackCategory(analysisText),
       confidence: clampConfidence(parsed.confidence),
-      isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(text),
-      noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(text),
+      isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(analysisText),
+      noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(analysisText),
       providerMode: "openai-compatible",
-      model: candidateModel,
+      model: indic ? `${indic.model}+${candidateModel}` : candidateModel,
       fallbackUsed: false
     };
   });
@@ -232,6 +249,22 @@ export async function transcribeWithVertexAi(
 ): Promise<VertexMediaAnalysis> {
   const { model, enabled } = vertexConfig();
   if (!enabled) throw new AiInferenceError("Voice analysis requires Vertex/Gemini multimodal configuration.");
+  const indic = await transcribeIndicAudio(base64, mimeType, declaredLanguage);
+  if (indic?.normalizedText) {
+    const classified = await analyzeWithVertexAi(indic.normalizedText, indic.detectedLanguage);
+    return {
+      isCivicIssue: classified.isCivicIssue !== false,
+      category: classified.category,
+      normalizedText: classified.normalizedText || indic.normalizedText,
+      mediaSummary: indic.mediaSummary || indic.transcript || classified.normalizedText,
+      detectedLanguage: indic.detectedLanguage || classified.detectedLanguage,
+      confidence: indic.confidence ?? classified.confidence,
+      noiseReason: classified.noiseReason,
+      providerMode: "vertex",
+      model: `${indic.model}+${classified.model}`,
+      fallbackUsed: false
+    };
+  }
 
   return withModelRetries("Vertex voice analysis", vertexModelCandidates(model), async (candidateModel) => {
     const ai = await geminiClient();
