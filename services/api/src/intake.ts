@@ -72,10 +72,10 @@ export async function processIntake(
     imageSummary = result.mediaSummary;
     isCivicIssue = result.isCivicIssue;
   } else if (media?.kind === "audio") {
-    const result = await transcribeWithVertexAi(media.base64, media.mimeType, input.language);
+    const result = await transcribeWithVertexAi(media.base64, media.mimeType, input.language, input.text);
     analysis = result;
     mediaType = "audio";
-    transcript = result.mediaSummary;
+    transcript = result.transcript ?? result.mediaSummary;
     isCivicIssue = result.isCivicIssue;
   } else if (media?.kind === "video") {
     analysis = await analyzeWithVertexAi(input.text || "Citizen uploaded a video showing a local civic development issue.", input.language);

@@ -68,7 +68,47 @@ try {
   assert.equal(compatible.submission.aiFallbackUsed, false);
   assert.equal(compatible.submission.detectedLanguage, "Hindi");
 
-  console.log(JSON.stringify({ ok: true, aiRuntimeMetadata: ["ai-required", "openai-compatible"] }));
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                detectedLanguage: "unknown",
+                normalizedText: "The streetlights on my road are not working.",
+                category: "Power",
+                confidence: 0.88,
+                isCivicIssue: false,
+                noiseReason: "Issue text is too short to route."
+              })
+            }
+          }
+        ]
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+
+  const shortCivic = await processIntake({
+    channel: "text",
+    language: "Hindi",
+    userId: "ai-test-short-civic",
+    username: "short-civic-user",
+    privacyMode: true,
+    state: "Delhi",
+    district: "Central Delhi",
+    ward: "Kalindi Nagar",
+    urgency: 4,
+    rating: 5,
+    text: "मेरी सड़क की लाइट काम नहीं कर रही है."
+  });
+
+  assert.equal(shortCivic.submission.detectedLanguage, "Hindi");
+  assert.equal(shortCivic.submission.category, "Power");
+  assert.equal(shortCivic.submission.isCivicIssue, true);
+  assert.equal(shortCivic.submission.noiseReason, undefined);
+
+  console.log(JSON.stringify({ ok: true, aiRuntimeMetadata: ["ai-required", "openai-compatible", "short-civic-guard"] }));
 } finally {
   globalThis.fetch = originalFetch;
   process.env = originalEnv;

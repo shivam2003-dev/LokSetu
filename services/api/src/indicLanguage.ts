@@ -156,7 +156,9 @@ async function normalizeTextWithSarvam(text: string, declaredLanguage?: string):
 async function transcribeAudioWithSarvam(base64: string, mimeType: string, declaredLanguage?: string): Promise<IndicNormalization> {
   const { speechModel, translateModel } = sarvamConfig();
   const declaredCode = languageCodeFromDeclared(declaredLanguage) ?? "unknown";
-  const transcription = await sarvamSpeechToText(base64, mimeType, "transcribe", declaredCode);
+  const transcription = declaredCode === "unknown"
+    ? await sarvamSpeechToText(base64, mimeType, "translate", declaredCode)
+    : await sarvamSpeechToText(base64, mimeType, "transcribe", declaredCode);
   const transcript = extractSarvamSpeechText(transcription);
   const detectedCode = transcription.language_code || transcription.language || (declaredCode === "unknown" ? undefined : declaredCode);
   let normalizedText = transcript && !isEnglishCode(detectedCode) ? await translateSarvamText(transcript, detectedCode ?? "auto") : transcript;
@@ -212,12 +214,10 @@ async function sarvamSpeechToText(base64: string, mimeType: string, mode: "trans
   const { baseUrl, speechModel } = sarvamConfig();
   const body = new FormData();
   body.set("file", new Blob([Buffer.from(base64, "base64")], { type: mimeType }), fileNameForMime(mimeType));
-  if (mode === "transcribe") {
-    body.set("model", speechModel);
-    body.set("mode", "transcribe");
-    if (languageCode !== "unknown") body.set("language_code", languageCode);
-  }
-  return sarvamJson<SarvamSpeechResponse>(`${baseUrl}/${mode === "translate" ? "speech-to-text-translate" : "speech-to-text"}`, {
+  body.set("model", speechModel);
+  body.set("mode", mode);
+  if (languageCode !== "unknown") body.set("language_code", languageCode);
+  return sarvamJson<SarvamSpeechResponse>(`${baseUrl}/speech-to-text`, {
     method: "POST",
     headers: sarvamAuthHeaders(),
     body

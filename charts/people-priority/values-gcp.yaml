@@ -30,7 +30,7 @@ citizen:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-citize-8-e0ef404d"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/citizen
-    tag: gcp-20260703003431-awaazapibase
+    tag: gcp-20260703213626-langselect-amd64
 
 api:
   replicaCount: 1
@@ -38,7 +38,7 @@ api:
     cloud.google.com/neg: '{"exposed_ports":{"8080":{"name":"k8s1-33b19180-people-priority-people-priority-api-8080-d3b4a98a"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/api
-    tag: gcp-20260703134638-indic-amd64
+    tag: gcp-20260703213532-sarvamvoice-amd64
   database:
     existingSecret: loksetu-db
     secretKey: DATABASE_URL
@@ -60,11 +60,16 @@ api:
     VERTEX_AI_DISABLED: "false"
     INDIC_LANGUAGE_PROVIDER_ORDER: "sarvam,bhashini"
     INDIC_AI_RETRY_ATTEMPTS: "2"
+    SARVAM_SPEECH_MODEL: saaras:v3
+    SARVAM_TRANSLATE_MODEL: sarvam-translate:v1
     OPENAI_COMPATIBLE_BASE_URL: ""
     OPENAI_COMPATIBLE_MODEL: ""
     BATCH_SCHEDULE: "*/15 * * * *"
     RAG_API_URL: http://people-priority-rag-api:8090
   extraSecretEnv:
+    - name: SARVAM_API_KEY
+      secretName: loksetu-sarvam
+      secretKey: api-key
     - name: NEWS_API_KEY
       secretName: loksetu-external-signals
       secretKey: news-api-key

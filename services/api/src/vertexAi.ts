@@ -34,6 +34,8 @@ export type VertexMediaAnalysis = VertexTextAnalysis & {
   isCivicIssue: boolean;
   /** Human-readable one-line description of what the AI saw or heard. */
   mediaSummary: string;
+  /** Original-language voice transcript when the model returns one. */
+  transcript?: string;
 };
 
 const categories = [
@@ -104,6 +106,7 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       `Allowed category values: ${categories.join(", ")}.`,
       "normalizedText must be concise English that preserves the citizen's problem.",
       "isCivicIssue=false for private/non-public issues, spam, jokes, vague text with no actionable public problem, or problems inside private rooms/hotels/homes.",
+      "Do not set isCivicIssue=false just because the complaint is short if it includes a public civic problem such as roads, streetlights, school toilets, water, drainage, garbage, health, power, disaster relief, or network access.",
       "noiseReason is short and empty only when isCivicIssue=true.",
       `Declared language: ${declaredLanguage ?? "unknown"}.`,
       `Detected/normalized language context: ${analysisLanguage ?? "unknown"}.`,
@@ -118,13 +121,16 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       config: { temperature: 0.1, maxOutputTokens: 512, responseMimeType: "application/json" }
     });
     const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexTextAnalysis>;
+    const normalizedText = cleanText(parsed.normalizedText) || analysisText.trim();
+    const noiseReason = cleanText(parsed.noiseReason) || fallbackNoiseReason(analysisText);
+    const isCivicIssue = shouldTreatAsCivicIssue(parsed.isCivicIssue, normalizedText, noiseReason);
     return {
-      detectedLanguage: indic?.detectedLanguage || cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
-      normalizedText: cleanText(parsed.normalizedText) || analysisText.trim(),
+      detectedLanguage: effectiveLanguage(indic?.detectedLanguage || parsed.detectedLanguage, declaredLanguage, text, normalizedText),
+      normalizedText,
       category: asCategory(parsed.category) ?? fallbackCategory(analysisText),
       confidence: clampConfidence(parsed.confidence),
-      isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(analysisText),
-      noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(analysisText),
+      isCivicIssue,
+      noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "vertex",
       model: indic ? `${indic.model}+${candidateModel}` : candidateModel,
       fallbackUsed: false
@@ -157,7 +163,8 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
               "You analyze citizen civic-development submissions for an Indian constituency platform.",
               "Return only JSON with detectedLanguage, normalizedText, category, confidence, isCivicIssue, noiseReason.",
               `Allowed categories: ${categories.join(", ")}.`,
-              "isCivicIssue=false for private/non-public, spam, unreadable, or vague non-actionable reports."
+              "isCivicIssue=false for private/non-public, spam, unreadable, or vague non-actionable reports.",
+              "Do not reject short but actionable civic complaints about roads, streetlights, schools, water, drainage, sanitation, power, disaster relief, health, or network access."
             ].join(" ")
           },
           {
@@ -176,13 +183,16 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
     if (!response.ok) throw new Error(`compatible AI failed: ${response.status}`);
     const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const parsed = JSON.parse(payload.choices?.[0]?.message?.content ?? "{}") as Partial<VertexTextAnalysis>;
+    const normalizedText = cleanText(parsed.normalizedText) || analysisText.trim();
+    const noiseReason = cleanText(parsed.noiseReason) || fallbackNoiseReason(analysisText);
+    const isCivicIssue = shouldTreatAsCivicIssue(parsed.isCivicIssue, normalizedText, noiseReason);
     return {
-      detectedLanguage: indic?.detectedLanguage || cleanText(parsed.detectedLanguage) || fallbackLanguage(text, declaredLanguage),
-      normalizedText: cleanText(parsed.normalizedText) || analysisText.trim(),
+      detectedLanguage: effectiveLanguage(indic?.detectedLanguage || parsed.detectedLanguage, declaredLanguage, text, normalizedText),
+      normalizedText,
       category: asCategory(parsed.category) ?? fallbackCategory(analysisText),
       confidence: clampConfidence(parsed.confidence),
-      isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(analysisText),
-      noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(analysisText),
+      isCivicIssue,
+      noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "openai-compatible",
       model: indic ? `${indic.model}+${candidateModel}` : candidateModel,
       fallbackUsed: false
@@ -245,21 +255,27 @@ export async function analyzeImageWithVertexAi(
 export async function transcribeWithVertexAi(
   base64: string,
   mimeType: string,
-  declaredLanguage?: string
+  declaredLanguage?: string,
+  contextText?: string
 ): Promise<VertexMediaAnalysis> {
   const { model, enabled } = vertexConfig();
   if (!enabled) throw new AiInferenceError("Voice analysis requires Vertex/Gemini multimodal configuration.");
   const indic = await transcribeIndicAudio(base64, mimeType, declaredLanguage);
   if (indic?.normalizedText) {
-    const classified = await analyzeWithVertexAi(indic.normalizedText, indic.detectedLanguage);
+    const classified = await analyzeWithVertexAi([indic.normalizedText, contextText].filter(Boolean).join("\n"), indic.detectedLanguage);
+    const normalizedText = classified.normalizedText || indic.normalizedText;
+    const issueText = [normalizedText, indic.transcript, contextText].filter(Boolean).join(" ");
+    const noiseReason = classified.noiseReason;
+    const isCivicIssue = shouldTreatAsCivicIssue(classified.isCivicIssue, issueText, noiseReason);
     return {
-      isCivicIssue: classified.isCivicIssue !== false,
+      isCivicIssue,
       category: classified.category,
-      normalizedText: classified.normalizedText || indic.normalizedText,
+      normalizedText,
       mediaSummary: indic.mediaSummary || indic.transcript || classified.normalizedText,
-      detectedLanguage: indic.detectedLanguage || classified.detectedLanguage,
+      transcript: indic.transcript,
+      detectedLanguage: effectiveLanguage(indic.detectedLanguage || classified.detectedLanguage, declaredLanguage, indic.transcript, normalizedText),
       confidence: indic.confidence ?? classified.confidence,
-      noiseReason: classified.noiseReason,
+      noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "vertex",
       model: `${indic.model}+${classified.model}`,
       fallbackUsed: false
@@ -270,14 +286,18 @@ export async function transcribeWithVertexAi(
     const ai = await geminiClient();
     const prompt = [
       "You transcribe and analyze a voice note a citizen recorded about a local civic problem in India.",
-      "The audio may be in Hindi, Tamil, Bangla, Marathi, English or another Indian language.",
-      "Return only JSON: { transcript, normalizedText, category, mediaSummary, detectedLanguage, confidence }.",
+      "The audio may be in Hindi, Tamil, Bangla, Marathi, Punjabi, Gujarati, Telugu, Kannada, Malayalam, Odia, Urdu, English or another Indian language.",
+      "Return only JSON: { transcript, normalizedText, category, mediaSummary, detectedLanguage, confidence, isCivicIssue, noiseReason }.",
       "transcript = faithful transcription in the original language.",
       "normalizedText = concise English version of the problem.",
+      "detectedLanguage must be a real language name inferred from the audio/transcript/script. Never return unknown if the speech is understandable.",
       `category must be one of: ${categories.join(", ")}.`,
       "mediaSummary = one short English line summarizing the request.",
-      `Citizen's declared language: ${declaredLanguage ?? "unknown"}.`
-    ].join("\n");
+      "isCivicIssue=false only for private/non-public issues, spam, jokes, silence, or unintelligible audio.",
+      "Do not reject short but actionable public complaints. Streetlights not working, road damage, water leaks, school toilets, overflowing drains, garbage, power cuts, disaster relief, health access, and network outages are civic issues even if short.",
+      `Citizen's declared language: ${declaredLanguage ?? "auto"}.`,
+      contextText?.trim() ? `Citizen typed note with the voice recording: ${contextText.trim()}` : ""
+    ].filter(Boolean).join("\n");
 
     const result = await ai.models.generateContent({
       model: candidateModel,
@@ -286,14 +306,19 @@ export async function transcribeWithVertexAi(
     });
     const parsed = JSON.parse(result.text ?? "{}") as Partial<VertexMediaAnalysis> & { transcript?: string };
     const transcript = cleanText(parsed.transcript);
-    const normalized = cleanText(parsed.normalizedText) || transcript || "Citizen voice report.";
+    const normalized = cleanText(parsed.normalizedText) || cleanText(contextText) || transcript || "Citizen voice report.";
+    const issueText = [normalized, transcript, contextText].filter(Boolean).join(" ");
+    const noiseReason = cleanText(parsed.noiseReason) || fallbackNoiseReason(issueText);
+    const isCivicIssue = shouldTreatAsCivicIssue(parsed.isCivicIssue, issueText, noiseReason);
     return {
-      isCivicIssue: true,
+      isCivicIssue,
       category: asCategory(parsed.category) ?? fallbackCategory(normalized),
       normalizedText: normalized,
       mediaSummary: cleanText(parsed.mediaSummary) || transcript || "Voice note from a citizen.",
-      detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
+      transcript,
+      detectedLanguage: effectiveLanguage(parsed.detectedLanguage, declaredLanguage, transcript, normalized),
       confidence: clampConfidence(parsed.confidence),
+      noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "vertex",
       model: candidateModel,
       fallbackUsed: false
@@ -346,11 +371,86 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function effectiveLanguage(modelLanguage: unknown, declaredLanguage: string | undefined, ...texts: Array<string | undefined>): string {
+  const cleaned = cleanText(modelLanguage);
+  if (cleaned && !isUnknownLanguage(cleaned)) return normalizeLanguageName(cleaned);
+  const declared = cleanDeclaredLanguage(declaredLanguage);
+  if (declared) return declared;
+  return fallbackLanguage(texts.filter(Boolean).join(" "));
+}
+
+function cleanDeclaredLanguage(language?: string): string | undefined {
+  const cleaned = cleanText(language);
+  if (!cleaned || isUnknownLanguage(cleaned)) return undefined;
+  return normalizeLanguageName(cleaned);
+}
+
+function isUnknownLanguage(language: string): boolean {
+  return /^(auto|unknown|undetected|not sure|n\/a|na|null|none|auto-detected indian language)$/i.test(language.trim());
+}
+
+function normalizeLanguageName(language: string): string {
+  const normalized = language.trim();
+  const aliases: Record<string, string> = {
+    assamese: "Assamese",
+    bangla: "Bangla",
+    bengali: "Bangla",
+    bodo: "Bodo",
+    dogri: "Dogri",
+    english: "English",
+    gujarati: "Gujarati",
+    hindi: "Hindi",
+    kannada: "Kannada",
+    kashmiri: "Kashmiri",
+    konkani: "Konkani",
+    maithili: "Maithili",
+    malayalam: "Malayalam",
+    manipuri: "Manipuri",
+    marathi: "Marathi",
+    nepali: "Nepali",
+    odia: "Odia",
+    oriya: "Odia",
+    punjabi: "Punjabi",
+    sanskrit: "Sanskrit",
+    santali: "Santali",
+    sindhi: "Sindhi",
+    tamil: "Tamil",
+    telugu: "Telugu",
+    urdu: "Urdu"
+  };
+  return aliases[normalized.toLowerCase()] ?? normalized;
+}
+
+function shouldTreatAsCivicIssue(modelValue: unknown, text: string, noiseReason?: string): boolean {
+  if (modelValue === true) return true;
+  const actionable = hasActionableCivicSignal(text);
+  if (modelValue === false && !(actionable && isWeakNoiseReason(noiseReason))) return false;
+  return !fallbackNoiseReason(text) || actionable;
+}
+
+function hasActionableCivicSignal(text: string): boolean {
+  return fallbackCategory(text) !== "Civic Services" ||
+    /(public|municipal|government|ward|road|school|hospital|clinic|water|drain|garbage|streetlight|electricity|network|relief|complaint|समस्या|सड़क|स्कूल|पानी|नाली|कचरा|बिजली)/i.test(text);
+}
+
+function isWeakNoiseReason(noiseReason?: string): boolean {
+  return !noiseReason || /(too short|short|vague|unclear|not enough|insufficient|route)/i.test(noiseReason);
+}
+
 function fallbackLanguage(text: string, declaredLanguage?: string): string {
+  const declared = cleanDeclaredLanguage(declaredLanguage);
+  if (declared) return declared;
   if (/[஀-௿]/.test(text)) return "Tamil";
   if (/[ঀ-৿]/.test(text)) return "Bangla";
-  if (/[ऀ-ॿ]/.test(text)) return declaredLanguage === "Marathi" ? "Marathi" : "Hindi";
-  return declaredLanguage || "English";
+  if (/[ऀ-ॿ]/.test(text)) return "Hindi";
+  if (/[਀-੿]/.test(text)) return "Punjabi";
+  if (/[઀-૿]/.test(text)) return "Gujarati";
+  if (/[ఀ-౿]/.test(text)) return "Telugu";
+  if (/[ಀ-೿]/.test(text)) return "Kannada";
+  if (/[ഀ-ൿ]/.test(text)) return "Malayalam";
+  if (/[଀-୿]/.test(text)) return "Odia";
+  if (/[؀-ۿ]/.test(text)) return "Urdu";
+  return "English";
 }
 
 function fallbackCategory(text: string): Category {

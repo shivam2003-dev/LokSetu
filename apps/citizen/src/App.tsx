@@ -57,10 +57,38 @@ const channels: Array<{ id: Channel; icon: typeof Camera; en: string; hi: string
   { id: "text", icon: Type, en: "Type", hi: "लिखें", hint: "Write the problem" }
 ];
 
+const languageOptions = [
+  "auto",
+  "Hindi",
+  "English",
+  "Bangla",
+  "Tamil",
+  "Telugu",
+  "Marathi",
+  "Gujarati",
+  "Kannada",
+  "Malayalam",
+  "Punjabi",
+  "Odia",
+  "Urdu",
+  "Assamese",
+  "Bodo",
+  "Dogri",
+  "Konkani",
+  "Kashmiri",
+  "Maithili",
+  "Manipuri",
+  "Nepali",
+  "Sanskrit",
+  "Santali",
+  "Sindhi"
+];
+
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenKey) ?? "");
   const [step, setStep] = useState<Step>("choose");
   const [channel, setChannel] = useState<Channel>("photo");
+  const [language, setLanguage] = useState("auto");
   const [text, setText] = useState("");
   const [media, setMedia] = useState<string | null>(null);
   const [mediaName, setMediaName] = useState("");
@@ -167,6 +195,7 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           channel,
+          language: language === "auto" ? undefined : language,
           text: text.trim() || undefined,
           media: media || undefined,
           lat: geo.lat,
@@ -338,6 +367,17 @@ export default function App() {
             <button className="back" onClick={() => setStep("choose")} type="button">
               <ArrowLeft size={18} /> Back
             </button>
+
+            <label className="note language-select">
+              Language
+              <select onChange={(event) => setLanguage(event.target.value)} value={language}>
+                {languageOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {item === "auto" ? "Auto-detect language" : item}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {channel === "photo" ? (
               <div className="block">
