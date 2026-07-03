@@ -82,6 +82,7 @@ type SarvamSpeechResponse = {
   translated_text?: string;
   language_code?: string;
   language?: string;
+  language_probability?: number;
   confidence?: number;
 };
 
@@ -156,16 +157,18 @@ async function normalizeTextWithSarvam(text: string, declaredLanguage?: string):
 async function transcribeAudioWithSarvam(base64: string, mimeType: string, declaredLanguage?: string): Promise<IndicNormalization> {
   const { speechModel, translateModel } = sarvamConfig();
   const declaredCode = languageCodeFromDeclared(declaredLanguage) ?? "unknown";
-  const transcription = declaredCode === "unknown"
-    ? await sarvamSpeechToText(base64, mimeType, "translate", declaredCode)
-    : await sarvamSpeechToText(base64, mimeType, "transcribe", declaredCode);
+  const transcription = await sarvamSpeechToText(base64, mimeType, "transcribe", declaredCode);
   const transcript = extractSarvamSpeechText(transcription);
   const detectedCode = transcription.language_code || transcription.language || (declaredCode === "unknown" ? undefined : declaredCode);
-  let normalizedText = transcript && !isEnglishCode(detectedCode) ? await translateSarvamText(transcript, detectedCode ?? "auto") : transcript;
+  let normalizedText = transcript && isEnglishCode(detectedCode) ? transcript : "";
 
-  if (!normalizedText || normalizedText === transcript) {
+  if (!normalizedText) {
     const translated = await sarvamSpeechToText(base64, mimeType, "translate", declaredCode);
     normalizedText = extractSarvamSpeechText(translated) || normalizedText || transcript;
+  }
+
+  if ((!normalizedText || normalizedText === transcript) && transcript && !isEnglishCode(detectedCode)) {
+    normalizedText = await translateSarvamText(transcript, detectedCode ?? "auto");
   }
 
   return {
@@ -176,7 +179,7 @@ async function transcribeAudioWithSarvam(base64: string, mimeType: string, decla
     transcript,
     mediaSummary: transcript ? `Voice transcript: ${transcript}` : "Voice note transcribed by Sarvam.",
     model: `sarvam:${speechModel}+${translateModel}`,
-    confidence: transcription.confidence
+    confidence: transcription.confidence ?? transcription.language_probability
   };
 }
 

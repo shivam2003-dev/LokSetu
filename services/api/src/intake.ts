@@ -164,9 +164,14 @@ export function extractWhatsAppMessages(body: unknown): RawIntakePayload[] {
 }
 
 function parseDataUrl(media: string): { mimeType: string; base64: string; kind: "image" | "audio" | "video" | "other" } | null {
-  const match = /^data:([^;]+);base64,(.+)$/s.exec(media.trim());
-  if (!match) return null;
-  const mimeType = match[1];
+  const trimmed = media.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex === -1) return null;
+  const metadata = trimmed.slice(5, commaIndex).split(";").filter(Boolean);
+  const mimeType = metadata[0] || "application/octet-stream";
+  if (!metadata.some((item) => item.toLowerCase() === "base64")) return null;
+  const base64 = trimmed.slice(commaIndex + 1);
   const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : mimeType.startsWith("video/") ? "video" : "other";
-  return { mimeType, base64: match[2], kind };
+  return { mimeType, base64, kind };
 }
