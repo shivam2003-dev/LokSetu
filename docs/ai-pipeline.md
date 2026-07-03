@@ -3,8 +3,9 @@
 LokSetu turns raw citizen input (photo / voice / text / WhatsApp) into a
 normalized, categorized, location-routed civic submission. All AI runs on
 **Google Vertex AI** through the `@google/genai` SDK. One model family —
-**Gemini 2.x** — covers every modality, with deterministic offline fallbacks so
-the platform stays demoable without cloud credentials.
+**Gemini 2.x** — covers every modality. Processing is AI-only: if configured
+models fail after retries, the raw intake is marked failed for retry instead of
+being converted into a deterministic placeholder.
 
 Source: `services/api/src/vertexAi.ts`, `services/api/src/geo.ts`,
 `services/api/src/index.ts` (`processIntake`).
@@ -77,10 +78,12 @@ polygons.
 
 | Variable                                    | Purpose                                  | Default          |
 | ------------------------------------------- | ---------------------------------------- | ---------------- |
-| `VERTEX_AI_PROJECT_ID` / `GOOGLE_CLOUD_PROJECT` | Enables Vertex AI (else fallback mode)   | —                |
+| `VERTEX_AI_PROJECT_ID` / `GOOGLE_CLOUD_PROJECT` | Enables Vertex AI model inference        | —                |
 | `VERTEX_AI_LOCATION`                        | Vertex region                            | `us-central1`    |
 | `VERTEX_AI_MODEL`                           | Gemini model id                          | `gemini-2.0-flash` |
-| `VERTEX_AI_DISABLED`                        | Force offline fallback (`true`)          | —                |
+| `VERTEX_AI_FALLBACK_MODELS`                 | Comma-separated backup Gemini models     | built-in backups |
+| `AI_RETRY_ATTEMPTS`                         | Attempts per configured model            | `2`              |
+| `VERTEX_AI_DISABLED`                        | Disable Vertex route for tests           | —                |
 | `GOOGLE_MAPS_API_KEY`                       | Reverse-geocode receipt labels           | —                |
 | `GOOGLE_APPLICATION_CREDENTIALS`            | Service-account key for Vertex auth      | —                |
 
@@ -98,8 +101,9 @@ Identity service account with the **Vertex AI User** role.
 - **Privacy aliases** applied before any public/MP display (`privacyMode`).
 - **Human-in-the-loop** — AI ranks and summarizes; fund movement always needs
   human approval.
-- **Graceful degradation** — every AI call falls back deterministically; the API
-  never hard-fails on a model error.
+- **AI-only processing** — model failures do not create fake processed records.
+  The batch marks raw intake failed so operators can retry after Vertex/Gemini
+  recovers or after a backup model is configured.
 
 ---
 

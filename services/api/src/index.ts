@@ -733,11 +733,12 @@ app.get("/api/intake/audit", async (_request, response) => {
     ],
     entries: rawRecords.map((record) => {
       const submission = byRawId.get(record.id);
+      const legacyFallback = Boolean(submission?.aiFallbackUsed);
       const payload = record.payload;
       return {
         rawIntakeId: record.id,
         shortReceipt: record.id.slice(0, 8),
-        status: submission ? "processed" : record.status,
+        status: submission ? (legacyFallback ? "ai_retry_required" : "processed") : record.status,
         attempts: record.attempts,
         submittedAt: record.createdAt,
         processedAt: submission?.processedAt ?? record.processedAt,
@@ -759,7 +760,21 @@ app.get("/api/intake/audit", async (_request, response) => {
           locationLabel: submission?.locationLabel
         },
         ai: submission
-          ? {
+          ? legacyFallback
+            ? {
+                category: "AI retry required",
+                detectedLanguage: submission.detectedLanguage,
+                normalizedText: "Model inference pending. Previous deterministic placeholder suppressed.",
+                transcript: submission.transcript,
+                imageSummary: submission.imageSummary,
+                isCivicIssue: false,
+                noiseReason: "AI model retry required",
+                providerMode: "vertex",
+                model: "Gemini retry required",
+                fallbackUsed: false,
+                explanation: "This record was created before AI-only processing enforcement. Run the pipeline again after Vertex/Gemini succeeds; deterministic offline output is not used for ranking."
+              }
+            : {
               category: submission.category,
               detectedLanguage: submission.detectedLanguage,
               normalizedText: submission.normalizedText,
@@ -789,7 +804,7 @@ function auditExplanation(submission: Awaited<ReturnType<typeof getSubmissions>>
       : `${submission.channel} intake`;
   const area = [submission.ward, submission.district, submission.state].filter(Boolean).join(", ");
   const route = submission.mpId === "unassigned" ? "held for constituency review" : `routed to ${submission.mpId}`;
-  const confidence = submission.aiFallbackUsed ? "offline fallback rules" : `${submission.aiProviderMode ?? "AI"} model`;
+  const confidence = submission.aiFallbackUsed ? "AI retry required" : `${submission.aiProviderMode ?? "AI"} model`;
   if (submission.isCivicIssue === false) {
     return `${media} was held for review as non-addressable or noisy input. Reason: ${submission.noiseReason ?? "AI could not confirm a public civic issue"}. It was placed in ${area} from captured location but not treated as normal ranked demand.`;
   }

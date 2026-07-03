@@ -119,7 +119,7 @@ flowchart LR
 
 Recommended environments:
 
-- **dev**: lower-cost GKE node pool, fallback AI allowed.
+- **dev**: lower-cost GKE node pool, AI retry failures visible in intake audit.
 - **staging**: production-like Cloud SQL, Vertex AI, Pub/Sub, and BigQuery.
 - **prod**: private cluster, HA Cloud SQL, autoscaling node pools, Cloud Armor, monitored SLOs.
 

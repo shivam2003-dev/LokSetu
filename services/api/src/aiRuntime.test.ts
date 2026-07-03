@@ -7,22 +7,22 @@ const originalEnv = { ...process.env };
 try {
   process.env.AI_DISABLED = "true";
   delete process.env.OPENAI_COMPATIBLE_API_KEY;
-  const fallback = await processIntake({
-    channel: "text",
-    userId: "ai-test-fallback",
-    username: "fallback-user",
-    privacyMode: true,
-    state: "Delhi",
-    district: "Central Delhi",
-    ward: "Kalindi Nagar",
-    urgency: 4,
-    rating: 5,
-    text: "The school toilet is broken and classrooms flood after rain."
-  });
-
-  assert.equal(fallback.submission.aiProviderMode, "fallback");
-  assert.equal(fallback.submission.aiModel, "deterministic-offline-rules");
-  assert.equal(fallback.submission.aiFallbackUsed, true);
+  await assert.rejects(
+    () =>
+      processIntake({
+        channel: "text",
+        userId: "ai-test-no-fallback",
+        username: "no-fallback-user",
+        privacyMode: true,
+        state: "Delhi",
+        district: "Central Delhi",
+        ward: "Kalindi Nagar",
+        urgency: 4,
+        rating: 5,
+        text: "The school toilet is broken and classrooms flood after rain."
+      }),
+    /AI model provider is not configured/
+  );
 
   process.env.AI_DISABLED = "false";
   delete process.env.VERTEX_AI_PROJECT_ID;
@@ -68,7 +68,7 @@ try {
   assert.equal(compatible.submission.aiFallbackUsed, false);
   assert.equal(compatible.submission.detectedLanguage, "Hindi");
 
-  console.log(JSON.stringify({ ok: true, aiRuntimeMetadata: ["fallback", "openai-compatible"] }));
+  console.log(JSON.stringify({ ok: true, aiRuntimeMetadata: ["ai-required", "openai-compatible"] }));
 } finally {
   globalThis.fetch = originalFetch;
   process.env = originalEnv;

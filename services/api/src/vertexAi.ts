@@ -10,8 +10,9 @@
  *   - voice  -> Vertex AI Speech-to-Text "Chirp 2" for long/streamed audio
  *   - image  -> Cloud Vision API (OCR / SafeSearch / label detection)
  *
- * Every call degrades gracefully to a deterministic offline fallback so the
- * platform stays demoable without cloud credentials.
+ * AI-only runtime: request processing retries configured Gemini/Vertex models
+ * and optional OpenAI-compatible Gemini routes. It does not synthesize
+ * deterministic "processed" records when model inference fails.
  */
 
 export type VertexTextAnalysis = {
@@ -68,14 +69,18 @@ function compatibleConfig() {
   return { apiKey, baseUrl, model, enabled };
 }
 
-function fallbackMeta() {
-  return { providerMode: "fallback" as const, model: "deterministic-offline-rules", fallbackUsed: true };
+export class AiInferenceError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "AiInferenceError";
+    this.cause = options?.cause;
+  }
 }
 
-export function aiRuntimeMode(): "vertex" | "openai-compatible" | "fallback" {
+export function aiRuntimeMode(): "vertex" | "openai-compatible" | "unconfigured" {
   if (vertexConfig().enabled) return "vertex";
   if (compatibleConfig().enabled) return "openai-compatible";
-  return "fallback";
+  return "unconfigured";
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +91,7 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
   const { model, enabled } = vertexConfig();
   if (!enabled) return analyzeWithCompatibleAi(text, declaredLanguage);
 
-  try {
+  return withModelRetries("Vertex text analysis", vertexModelCandidates(model), async (candidateModel) => {
     const ai = await geminiClient();
     const prompt = [
       "You analyze a citizen civic-development submission for an Indian constituency platform.",
@@ -100,7 +105,7 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
     ].join("\n");
 
     const result = await ai.models.generateContent({
-      model,
+      model: candidateModel,
       contents: prompt,
       config: { temperature: 0.1, maxOutputTokens: 512, responseMimeType: "application/json" }
     });
@@ -113,19 +118,17 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(text),
       noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(text),
       providerMode: "vertex",
-      model,
+      model: candidateModel,
       fallbackUsed: false
     };
-  } catch {
-    return fallbackAnalysis(text, declaredLanguage);
-  }
+  });
 }
 
 async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string): Promise<VertexTextAnalysis> {
   const { apiKey, baseUrl, model, enabled } = compatibleConfig();
-  if (!enabled || !apiKey) return fallbackAnalysis(text, declaredLanguage);
+  if (!enabled || !apiKey) throw new AiInferenceError("AI model provider is not configured. Configure Vertex AI or an OpenAI-compatible Gemini key.");
 
-  try {
+  return withModelRetries("Compatible text analysis", compatibleModelCandidates(model), async (candidateModel) => {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
@@ -133,7 +136,7 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model,
+        model: candidateModel,
         temperature: 0.1,
         response_format: { type: "json_object" },
         messages: [
@@ -164,12 +167,10 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
       isCivicIssue: parsed.isCivicIssue !== false && !fallbackNoiseReason(text),
       noiseReason: cleanText(parsed.noiseReason) || fallbackNoiseReason(text),
       providerMode: "openai-compatible",
-      model,
+      model: candidateModel,
       fallbackUsed: false
     };
-  } catch {
-    return fallbackAnalysis(text, declaredLanguage);
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -182,9 +183,9 @@ export async function analyzeImageWithVertexAi(
   declaredLanguage?: string
 ): Promise<VertexMediaAnalysis> {
   const { model, enabled } = vertexConfig();
-  if (!enabled) return fallbackImageAnalysis();
+  if (!enabled) throw new AiInferenceError("Image analysis requires Vertex/Gemini multimodal configuration.");
 
-  try {
+  return withModelRetries("Vertex image analysis", vertexModelCandidates(model), async (candidateModel) => {
     const ai = await geminiClient();
     const prompt = [
       "You are a civic-issue validator for an Indian constituency platform.",
@@ -200,7 +201,7 @@ export async function analyzeImageWithVertexAi(
     ].join("\n");
 
     const result = await ai.models.generateContent({
-      model,
+      model: candidateModel,
       contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64 } }] }],
       config: { temperature: 0.1, maxOutputTokens: 512, responseMimeType: "application/json" }
     });
@@ -214,12 +215,10 @@ export async function analyzeImageWithVertexAi(
       detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
       confidence: clampConfidence(parsed.confidence),
       providerMode: "vertex",
-      model,
+      model: candidateModel,
       fallbackUsed: false
     };
-  } catch {
-    return fallbackImageAnalysis();
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -232,9 +231,9 @@ export async function transcribeWithVertexAi(
   declaredLanguage?: string
 ): Promise<VertexMediaAnalysis> {
   const { model, enabled } = vertexConfig();
-  if (!enabled) return fallbackAudioAnalysis();
+  if (!enabled) throw new AiInferenceError("Voice analysis requires Vertex/Gemini multimodal configuration.");
 
-  try {
+  return withModelRetries("Vertex voice analysis", vertexModelCandidates(model), async (candidateModel) => {
     const ai = await geminiClient();
     const prompt = [
       "You transcribe and analyze a voice note a citizen recorded about a local civic problem in India.",
@@ -248,7 +247,7 @@ export async function transcribeWithVertexAi(
     ].join("\n");
 
     const result = await ai.models.generateContent({
-      model,
+      model: candidateModel,
       contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64 } }] }],
       config: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: "application/json" }
     });
@@ -263,52 +262,55 @@ export async function transcribeWithVertexAi(
       detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
       confidence: clampConfidence(parsed.confidence),
       providerMode: "vertex",
-      model,
+      model: candidateModel,
       fallbackUsed: false
     };
-  } catch {
-    return fallbackAudioAnalysis();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Parsing helpers and low-risk hints. These never replace failed AI inference.
+// ---------------------------------------------------------------------------
+
+async function withModelRetries<T>(label: string, models: string[], run: (model: string) => Promise<T>): Promise<T> {
+  const attempts = Math.max(1, Number(process.env.AI_RETRY_ATTEMPTS ?? 2));
+  let lastError: unknown;
+  for (const model of models) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await run(model);
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) await delay(250 * attempt);
+      }
+    }
   }
+  throw new AiInferenceError(`${label} failed after ${models.length * attempts} attempt(s) across ${models.join(", ")}.`, { cause: lastError });
 }
 
-// ---------------------------------------------------------------------------
-// Fallbacks (offline / no-credentials mode)
-// ---------------------------------------------------------------------------
-
-export function fallbackAnalysis(text: string, declaredLanguage?: string): VertexTextAnalysis {
-  return {
-    detectedLanguage: fallbackLanguage(text, declaredLanguage),
-    normalizedText: text.trim(),
-    category: fallbackCategory(text),
-    confidence: fallbackNoiseReason(text) ? 0.28 : 0.62,
-    isCivicIssue: !fallbackNoiseReason(text),
-    noiseReason: fallbackNoiseReason(text),
-    ...fallbackMeta()
-  };
+function vertexModelCandidates(primary: string): string[] {
+  return uniqueModels([
+    primary,
+    ...splitModels(process.env.VERTEX_AI_FALLBACK_MODELS),
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash"
+  ]);
 }
 
-function fallbackImageAnalysis(): VertexMediaAnalysis {
-  return {
-    isCivicIssue: true,
-    category: "Civic Services",
-    normalizedText: "Citizen-reported civic issue from photo (offline analysis).",
-    mediaSummary: "Photo received. Enable Vertex AI for automatic validation.",
-    detectedLanguage: "English",
-    confidence: 0.5,
-    ...fallbackMeta()
-  };
+function compatibleModelCandidates(primary: string): string[] {
+  return uniqueModels([primary, ...splitModels(process.env.OPENAI_COMPATIBLE_FALLBACK_MODELS)]);
 }
 
-function fallbackAudioAnalysis(): VertexMediaAnalysis {
-  return {
-    isCivicIssue: true,
-    category: "Civic Services",
-    normalizedText: "Citizen voice report (offline mode, transcription pending).",
-    mediaSummary: "Voice note received. Enable Vertex AI for automatic transcription.",
-    detectedLanguage: "English",
-    confidence: 0.5,
-    ...fallbackMeta()
-  };
+function splitModels(value: string | undefined): string[] {
+  return (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function uniqueModels(models: string[]): string[] {
+  return [...new Set(models.filter(Boolean))];
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function fallbackLanguage(text: string, declaredLanguage?: string): string {
