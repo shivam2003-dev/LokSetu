@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Apni Awaaz citizen app functional flow", () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ context, page }) => {
+    await context.grantPermissions(["geolocation"]);
+    await context.setGeolocation({ latitude: 28.62, longitude: 77.3 });
     await loginIfNeeded(page);
   });
 
@@ -21,14 +23,14 @@ test.describe("Apni Awaaz citizen app functional flow", () => {
 
 async function loginIfNeeded(page: import("@playwright/test").Page) {
   await page.goto("/");
-  const password = page.getByLabel("Password");
-  if (await password.isVisible()) {
-    await password.fill(testAccessPassword());
-    await page.getByRole("button", { name: "Login" }).click();
+  const aadhaarNumber = page.getByLabel("Aadhaar number");
+  if (await aadhaarNumber.isVisible()) {
+    await aadhaarNumber.fill(testAadhaarNumber());
+    await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByText("Apni Awaaz")).toBeVisible();
   }
 }
 
-function testAccessPassword() {
-  return process.env.TEST_APP_ACCESS_PASSWORD ?? process.env.APP_ACCESS_PASSWORD ?? "functional-test";
+function testAadhaarNumber() {
+  return process.env.TEST_AADHAAR_NUMBER ?? "2345 6789 0123";
 }

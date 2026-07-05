@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
+const citizenIdentityKey = "loksetuCitizenIdentity";
 
 type Channel = "photo" | "voice" | "text";
 type Step = "choose" | "capture" | "sending" | "done";
@@ -33,6 +34,8 @@ type Receipt = {
   status: string;
   nextStep: string;
   area: string;
+  aadhaarMasked?: string;
+  aadhaarVerified?: boolean;
 };
 
 type ReceiptLookup = {
@@ -48,7 +51,21 @@ type ReceiptLookup = {
   state?: string;
   mpId?: string;
   batchId?: string;
+  aadhaarMasked?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: string;
+  citizenScore?: number;
+  submissionQualityScore?: number;
+  rewardPoints?: number;
+  rewardBand?: string;
+  rewardReasons?: string[];
   privacy: string;
+};
+
+type CitizenIdentity = {
+  aadhaarMasked: string;
+  aadhaarVerified: boolean;
+  identityMode: string;
 };
 
 const channels: Array<{ id: Channel; icon: typeof Camera; en: string; hi: string; hint: string }> = [
@@ -86,6 +103,7 @@ const languageOptions = [
 
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenKey) ?? "");
+  const [citizenIdentity, setCitizenIdentity] = useState<CitizenIdentity | null>(() => readStoredCitizenIdentity());
   const [step, setStep] = useState<Step>("choose");
   const [channel, setChannel] = useState<Channel>("photo");
   const [language, setLanguage] = useState("auto");
@@ -214,7 +232,9 @@ export default function App() {
         rawIntakeId: payload.rawIntakeId,
         status: payload.status,
         nextStep: payload.nextStep,
-        area: geo.label
+        area: geo.label,
+        aadhaarMasked: payload.aadhaarMasked,
+        aadhaarVerified: payload.aadhaarVerified
       });
       setReceiptSearch(payload.rawIntakeId.slice(0, 8));
       setStep("done");
@@ -264,14 +284,18 @@ export default function App() {
     return status.replace(/_/g, " ");
   }
 
-  function handleLogin(token: string) {
+  function handleLogin(token: string, identity: CitizenIdentity) {
     localStorage.setItem(accessTokenKey, token);
+    localStorage.setItem(citizenIdentityKey, JSON.stringify(identity));
     setAccessToken(token);
+    setCitizenIdentity(identity);
   }
 
   function logout() {
     localStorage.removeItem(accessTokenKey);
+    localStorage.removeItem(citizenIdentityKey);
     setAccessToken("");
+    setCitizenIdentity(null);
   }
 
   if (!accessToken) return <LoginPage onLogin={handleLogin} />;
@@ -326,6 +350,11 @@ export default function App() {
             <p className="trust">
               <ShieldCheck size={15} /> Your name stays private. AI removes personal details before your MP sees it.
             </p>
+            {citizenIdentity ? (
+              <p className="identity-note">
+                <ShieldCheck size={15} /> Aadhaar {citizenIdentity.aadhaarMasked} · format only
+              </p>
+            ) : null}
             <section className="track-card">
               <form className="track-form" onSubmit={searchReceipt}>
                 <label>
@@ -356,6 +385,9 @@ export default function App() {
                   </div>
                   <p>{receiptLookup.nextStep}</p>
                   {receiptLookup.category ? <small>{receiptLookup.category} · {receiptLookup.ward}</small> : null}
+                  {typeof receiptLookup.citizenScore === "number" ? (
+                    <small>Reward {receiptLookup.citizenScore}/100 · quality {receiptLookup.submissionQualityScore ?? receiptLookup.citizenScore}/100</small>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -478,7 +510,7 @@ export default function App() {
                 <span>
                   <Languages size={13} /> AI batch
                 </span>
-                <strong>Queued for processing</strong>
+                <strong>Reward pending</strong>
               </div>
               <div>
                 <span>Area</span>
@@ -487,6 +519,10 @@ export default function App() {
               <div>
                 <span>Receipt ID</span>
                 <strong className="score">{receipt.rawIntakeId.slice(0, 8)}</strong>
+              </div>
+              <div>
+                <span>Aadhaar</span>
+                <strong>{receipt.aadhaarMasked ?? citizenIdentity?.aadhaarMasked ?? "format checked"}</strong>
               </div>
             </div>
             <form className="track-form done-track" onSubmit={searchReceipt}>
@@ -516,6 +552,9 @@ export default function App() {
                 </div>
                 <p>{receiptLookup.nextStep}</p>
                 {receiptLookup.category ? <small>{receiptLookup.category} · {receiptLookup.ward}</small> : null}
+                {typeof receiptLookup.citizenScore === "number" ? (
+                  <small>Reward {receiptLookup.citizenScore}/100 · quality {receiptLookup.submissionQualityScore ?? receiptLookup.citizenScore}/100</small>
+                ) : null}
               </div>
             ) : null}
             <button className="submit" onClick={reset} type="button">
@@ -539,26 +578,31 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   });
 }
 
-function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
-  const [password, setPassword] = useState("");
+function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIdentity) => void }) {
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const aadhaarDigits = cleanAadhaar(aadhaarNumber);
 
   async function login(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (aadhaarDigits.length !== 12) {
+      setError("Enter a 12-digit Aadhaar number.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${apiBase}/api/auth/login`, {
+      const response = await fetch(`${apiBase}/api/citizen/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ aadhaarNumber: aadhaarDigits })
       });
-      const payload = await response.json() as { token?: string; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Login failed");
-      onLogin(payload.token || "auth-disabled");
+      const payload = await response.json() as { token?: string; citizen?: CitizenIdentity; error?: string };
+      if (!response.ok || !payload.token || !payload.citizen) throw new Error(payload.error ?? "Aadhaar access failed");
+      onLogin(payload.token, payload.citizen);
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "Login failed");
+      setError(loginError instanceof Error ? loginError.message : "Aadhaar access failed");
     } finally {
       setBusy(false);
     }
@@ -568,20 +612,46 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
     <div className="screen auth-screen">
       <main className="auth-card">
         <span className="logo-mark">आ</span>
-        <h1>Apni Awaaz Login</h1>
-        <p>Access is restricted to control AI and cloud usage.</p>
+        <h1>Apni Awaaz</h1>
+        <p>Aadhaar access uses 12-digit format check only.</p>
         <form onSubmit={login}>
           <label>
-            Password
-            <input autoFocus onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
+            Aadhaar number
+            <input
+              autoComplete="off"
+              autoFocus
+              inputMode="numeric"
+              maxLength={14}
+              onChange={(event) => setAadhaarNumber(formatAadhaar(event.target.value))}
+              placeholder="2345 6789 0123"
+              type="text"
+              value={aadhaarNumber}
+            />
           </label>
           {error ? <p className="lookup-error">{error}</p> : null}
-          <button className="submit" disabled={busy || !password.trim()} type="submit">
+          <button className="submit" disabled={busy || aadhaarDigits.length !== 12} type="submit">
             {busy ? <Loader2 className="spin" size={18} /> : <ShieldCheck size={18} />}
-            Login
+            Continue
           </button>
         </form>
       </main>
     </div>
   );
+}
+
+function cleanAadhaar(value: string) {
+  return value.replace(/\D/g, "").slice(0, 12);
+}
+
+function formatAadhaar(value: string) {
+  return cleanAadhaar(value).replace(/(\d{4})(?=\d)/g, "$1 ").trim();
+}
+
+function readStoredCitizenIdentity(): CitizenIdentity | null {
+  try {
+    const stored = localStorage.getItem(citizenIdentityKey);
+    return stored ? JSON.parse(stored) as CitizenIdentity : null;
+  } catch {
+    return null;
+  }
 }

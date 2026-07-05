@@ -1,5 +1,5 @@
 import { areaMappings, civicDatasets, mpProfiles, sourceSnapshots } from "./data.js";
-import { DashboardFilters, RankedProject, Submission } from "./types.js";
+import { AadhaarIdentityMode, DashboardFilters, RankedProject, RewardBand, Submission } from "./types.js";
 import { VertexTextAnalysis } from "./vertexAi.js";
 
 const categoryTerms: Record<string, string[]> = {
@@ -36,6 +36,11 @@ type SubmissionInput = {
   urgency: number;
   rating: number;
   text: string;
+  aadhaarHash?: string;
+  aadhaarMasked?: string;
+  aadhaarLast4?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: AadhaarIdentityMode;
   // Multimodal + location enrichment (optional)
   mediaType?: Submission["mediaType"];
   lat?: number;
@@ -65,6 +70,7 @@ export function normalizeSubmission(input: SubmissionInput, analysis: VertexText
       : analysis.category === "Civic Services" && ruleCategory !== "Civic Services"
         ? ruleCategory
         : analysis.category;
+  const reward = calculateCitizenReward(text, input, analysis);
 
   return {
     ...input,
@@ -79,7 +85,11 @@ export function normalizeSubmission(input: SubmissionInput, analysis: VertexText
     rating,
     urgency,
     mediaType: input.mediaType ?? "none",
-    citizenScore: input.isCivicIssue === false ? 5 : calculateCitizenScore(text, urgency, rating, analysis.confidence),
+    citizenScore: reward.points,
+    submissionQualityScore: reward.qualityScore,
+    rewardPoints: reward.points,
+    rewardBand: reward.band,
+    rewardReasons: reward.reasons,
     createdAt: new Date().toISOString()
   };
 }
@@ -142,7 +152,11 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
   const sources = sourceSnapshots.filter(
     (source) => source.state === state && source.district === district && source.ward === ward
   );
-  const demandScore = Math.min(40, Math.round((items.length / Math.max(1, totalSubmissions)) * 130));
+  const averageCitizenScore = Math.round(average(items.map((item) => item.citizenScore)));
+  const averageSubmissionQuality = Math.round(average(items.map((item) => item.submissionQualityScore ?? item.citizenScore)));
+  const rewardedCitizenCount = new Set(items.map((item) => item.aadhaarHash ?? item.userId)).size;
+  const qualityMultiplier = 0.75 + averageSubmissionQuality / 200;
+  const demandScore = Math.min(40, Math.round((items.length / Math.max(1, totalSubmissions)) * 130 * qualityMultiplier));
   const needScore = Math.round((civic?.gapScore ?? 0.45) * 35);
   const urgencyScore = Math.round((average(items.map((item) => item.urgency)) / 5) * 15);
   const equityScore = Math.round((civic?.equityScore ?? 0.5) * 15);
@@ -169,12 +183,22 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
     needScore,
     urgencyScore: Math.min(15, urgencyScore + ratingBoost),
     equityScore,
+    averageCitizenScore,
+    averageSubmissionQuality,
+    rewardedCitizenCount,
     languageMix: [...new Set(items.map((item) => item.detectedLanguage || item.language))],
     recentCitizenAliases: [...new Set(items.map((item) => item.displayName))].slice(0, 4),
     rationale: rationale(category, civic?.indicators ?? [], demandCount),
-    evidence: [`${demandCount} similar requests`, `${averageRating}/5 citizen rating`, ...(civic?.indicators ?? ["Official dataset match pending"])],
+    evidence: [
+      `${demandCount} similar requests`,
+      `${averageRating}/5 citizen rating`,
+      `${averageSubmissionQuality}/100 average submission quality`,
+      `${rewardedCitizenCount} rewarded citizen ${rewardedCitizenCount === 1 ? "identity" : "identities"}`,
+      ...(civic?.indicators ?? ["Official dataset match pending"])
+    ],
     safeguards: [
       "Personal identity removed from MP view",
+      "Aadhaar stored as HMAC hash plus masked last four only",
       "Duplicate campaign and bot pattern checks applied",
       "Vertex AI output stored with normalized text and detected language",
       "Human approval required before allocation"
@@ -271,10 +295,61 @@ function randomAlias(seed: string): string {
   return `Local Voice ${String(hash).padStart(3, "0")}`;
 }
 
-function calculateCitizenScore(text: string, urgency: number, rating: number, confidence: number): number {
-  const detailScore = Math.min(30, Math.round(text.trim().length / 8));
-  const urgencyScore = urgency * 8;
-  const ratingScore = rating * 4;
-  const aiScore = Math.round(confidence * 10);
-  return Math.min(100, 20 + detailScore + urgencyScore + ratingScore + aiScore);
+function calculateCitizenReward(text: string, input: SubmissionInput, analysis: VertexTextAnalysis): {
+  qualityScore: number;
+  points: number;
+  band: RewardBand;
+  reasons: string[];
+} {
+  if (input.isCivicIssue === false) {
+    return {
+      qualityScore: 5,
+      points: 5,
+      band: "needs_detail",
+      reasons: [input.noiseReason ?? analysis.noiseReason ?? "AI could not confirm an addressable public civic issue."]
+    };
+  }
+  const fallbackQuality = fallbackQualityScore(text, input, analysis.confidence);
+  const aiQuality = typeof analysis.qualityScore === "number" && Number.isFinite(analysis.qualityScore)
+    ? Math.max(0, Math.min(100, Math.round(analysis.qualityScore)))
+    : undefined;
+  const qualityScore = aiQuality === undefined ? fallbackQuality : Math.round(aiQuality * 0.8 + fallbackQuality * 0.2);
+  const points = Math.max(10, Math.min(100, qualityScore));
+  return {
+    qualityScore,
+    points,
+    band: rewardBand(points),
+    reasons: rewardReasons(text, input, analysis, qualityScore)
+  };
+}
+
+function fallbackQualityScore(text: string, input: SubmissionInput, confidence: number): number {
+  const clean = text.trim();
+  const detailScore = Math.min(34, Math.round(clean.length / 6));
+  const evidenceScore = input.mediaType && input.mediaType !== "none" ? 18 : 0;
+  const locationScore = input.lat && input.lng ? 14 : input.ward ? 9 : 0;
+  const urgencyScore = input.urgency * 4;
+  const ratingScore = input.rating * 2;
+  const aiConfidenceScore = Math.round(confidence * 14);
+  return Math.max(10, Math.min(100, 10 + detailScore + evidenceScore + locationScore + urgencyScore + ratingScore + aiConfidenceScore));
+}
+
+function rewardBand(points: number): RewardBand {
+  if (points >= 85) return "excellent";
+  if (points >= 70) return "strong";
+  if (points >= 45) return "useful";
+  return "needs_detail";
+}
+
+function rewardReasons(text: string, input: SubmissionInput, analysis: VertexTextAnalysis, qualityScore: number): string[] {
+  const aiReasons = analysis.qualitySignals?.map((item) => item.trim()).filter(Boolean).slice(0, 3) ?? [];
+  if (aiReasons.length) return aiReasons;
+  const reasons = [];
+  if (text.trim().length >= 120) reasons.push("Detailed description gives field teams useful context.");
+  else if (text.trim().length >= 40) reasons.push("Clear issue summary included.");
+  else reasons.push("More detail would improve the reward score.");
+  if (input.mediaType && input.mediaType !== "none") reasons.push("Media evidence attached.");
+  if (input.lat && input.lng) reasons.push("Precise location captured.");
+  if (qualityScore >= 70) reasons.push("AI marked this as actionable for routing.");
+  return reasons.slice(0, 4);
 }

@@ -22,6 +22,8 @@ export type VertexTextAnalysis = {
   normalizedText: string;
   category: string;
   confidence: number;
+  qualityScore?: number;
+  qualitySignals?: string[];
   isCivicIssue?: boolean;
   noiseReason?: string;
   providerMode: "vertex" | "openai-compatible" | "fallback";
@@ -102,9 +104,11 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
     const ai = await geminiClient();
     const prompt = [
       "You analyze a citizen civic-development submission for an Indian constituency platform.",
-      "Return only JSON: { detectedLanguage, normalizedText, category, confidence, isCivicIssue, noiseReason }.",
+      "Return only JSON: { detectedLanguage, normalizedText, category, confidence, qualityScore, qualitySignals, isCivicIssue, noiseReason }.",
       `Allowed category values: ${categories.join(", ")}.`,
       "normalizedText must be concise English that preserves the citizen's problem.",
+      "qualityScore is 0-100 for reward points: reward clear public problem, precise location/context, evidence, urgency, beneficiaries, and actionable detail. Penalize vague, abusive, duplicate-looking, or private/non-civic submissions.",
+      "qualitySignals is 2-4 short reasons for the qualityScore.",
       "isCivicIssue=false for private/non-public issues, spam, jokes, vague text with no actionable public problem, or problems inside private rooms/hotels/homes.",
       "Do not set isCivicIssue=false just because the complaint is short if it includes a public civic problem such as roads, streetlights, school toilets, water, drainage, garbage, health, power, disaster relief, or network access.",
       "noiseReason is short and empty only when isCivicIssue=true.",
@@ -129,6 +133,8 @@ export async function analyzeWithVertexAi(text: string, declaredLanguage?: strin
       normalizedText,
       category: asCategory(parsed.category) ?? fallbackCategory(analysisText),
       confidence: clampConfidence(parsed.confidence),
+      qualityScore: clampQualityScore(parsed.qualityScore),
+      qualitySignals: cleanQualitySignals(parsed.qualitySignals),
       isCivicIssue,
       noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "vertex",
@@ -161,8 +167,10 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
             role: "system",
             content: [
               "You analyze citizen civic-development submissions for an Indian constituency platform.",
-              "Return only JSON with detectedLanguage, normalizedText, category, confidence, isCivicIssue, noiseReason.",
+              "Return only JSON with detectedLanguage, normalizedText, category, confidence, qualityScore, qualitySignals, isCivicIssue, noiseReason.",
               `Allowed categories: ${categories.join(", ")}.`,
+              "qualityScore is 0-100 for reward points based on clarity, evidence, location/context, urgency, beneficiaries, and actionability.",
+              "qualitySignals is 2-4 short reasons for the qualityScore.",
               "isCivicIssue=false for private/non-public, spam, unreadable, or vague non-actionable reports.",
               "Do not reject short but actionable civic complaints about roads, streetlights, schools, water, drainage, sanitation, power, disaster relief, health, or network access."
             ].join(" ")
@@ -191,6 +199,8 @@ async function analyzeWithCompatibleAi(text: string, declaredLanguage?: string):
       normalizedText,
       category: asCategory(parsed.category) ?? fallbackCategory(analysisText),
       confidence: clampConfidence(parsed.confidence),
+      qualityScore: clampQualityScore(parsed.qualityScore),
+      qualitySignals: cleanQualitySignals(parsed.qualitySignals),
       isCivicIssue,
       noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "openai-compatible",
@@ -217,11 +227,13 @@ export async function analyzeImageWithVertexAi(
     const prompt = [
       "You are a civic-issue validator for an Indian constituency platform.",
       "Look at the photo a citizen uploaded about a local development problem.",
-      "Return only JSON: { isCivicIssue, category, normalizedText, mediaSummary, detectedLanguage, confidence }.",
+      "Return only JSON: { isCivicIssue, category, normalizedText, mediaSummary, detectedLanguage, confidence, qualityScore, qualitySignals }.",
       "isCivicIssue = true only if the image shows a genuine public/development problem",
       "(broken road, pothole, garbage, broken school/toilet, water leak, drainage, streetlight, etc).",
       "isCivicIssue = false for selfies, memes, unrelated, or unreadable/blurry images.",
       `category must be one of: ${categories.join(", ")}.`,
+      "qualityScore is 0-100 for reward points based on visible evidence, clarity, public actionability, severity, and usefulness for field verification.",
+      "qualitySignals is 2-4 short reasons for the qualityScore.",
       "normalizedText = concise English problem statement a citizen would write for this photo.",
       "mediaSummary = short factual description of what is visible.",
       `Citizen's declared language: ${declaredLanguage ?? "unknown"}.`
@@ -241,6 +253,8 @@ export async function analyzeImageWithVertexAi(
       mediaSummary: cleanText(parsed.mediaSummary) || "Photo of a local civic issue.",
       detectedLanguage: cleanText(parsed.detectedLanguage) || declaredLanguage || "English",
       confidence: clampConfidence(parsed.confidence),
+      qualityScore: clampQualityScore(parsed.qualityScore),
+      qualitySignals: cleanQualitySignals(parsed.qualitySignals),
       providerMode: "vertex",
       model: candidateModel,
       fallbackUsed: false
@@ -275,6 +289,8 @@ export async function transcribeWithVertexAi(
       transcript: indic.transcript,
       detectedLanguage: effectiveLanguage(indic.detectedLanguage || classified.detectedLanguage, declaredLanguage, indic.transcript, normalizedText),
       confidence: indic.confidence ?? classified.confidence,
+      qualityScore: classified.qualityScore,
+      qualitySignals: classified.qualitySignals,
       noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "vertex",
       model: `${indic.model}+${classified.model}`,
@@ -287,11 +303,13 @@ export async function transcribeWithVertexAi(
     const prompt = [
       "You transcribe and analyze a voice note a citizen recorded about a local civic problem in India.",
       "The audio may be in Hindi, Tamil, Bangla, Marathi, Punjabi, Gujarati, Telugu, Kannada, Malayalam, Odia, Urdu, English or another Indian language.",
-      "Return only JSON: { transcript, normalizedText, category, mediaSummary, detectedLanguage, confidence, isCivicIssue, noiseReason }.",
+      "Return only JSON: { transcript, normalizedText, category, mediaSummary, detectedLanguage, confidence, qualityScore, qualitySignals, isCivicIssue, noiseReason }.",
       "transcript = faithful transcription in the original language.",
       "normalizedText = concise English version of the problem.",
       "detectedLanguage must be a real language name inferred from the audio/transcript/script. Never return unknown if the speech is understandable.",
       `category must be one of: ${categories.join(", ")}.`,
+      "qualityScore is 0-100 for reward points based on clarity, useful evidence, location/context, urgency, beneficiaries, and actionability.",
+      "qualitySignals is 2-4 short reasons for the qualityScore.",
       "mediaSummary = one short English line summarizing the request.",
       "isCivicIssue=false only for private/non-public issues, spam, jokes, silence, or unintelligible audio.",
       "Do not reject short but actionable public complaints. Streetlights not working, road damage, water leaks, school toilets, overflowing drains, garbage, power cuts, disaster relief, health access, and network outages are civic issues even if short.",
@@ -318,6 +336,8 @@ export async function transcribeWithVertexAi(
       transcript,
       detectedLanguage: effectiveLanguage(parsed.detectedLanguage, declaredLanguage, transcript, normalized),
       confidence: clampConfidence(parsed.confidence),
+      qualityScore: clampQualityScore(parsed.qualityScore),
+      qualitySignals: cleanQualitySignals(parsed.qualitySignals),
       noiseReason: isCivicIssue ? undefined : noiseReason,
       providerMode: "vertex",
       model: candidateModel,
@@ -489,4 +509,18 @@ function cleanText(value: unknown): string {
 function clampConfidence(value: unknown): number {
   if (typeof value !== "number" || Number.isNaN(value)) return 0.7;
   return Math.max(0, Math.min(1, Number(value.toFixed(2))));
+}
+
+function clampQualityScore(value: unknown): number | undefined {
+  if (typeof value !== "number" || Number.isNaN(value)) return undefined;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function cleanQualitySignals(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const signals = value
+    .map((item) => cleanText(item))
+    .filter(Boolean)
+    .slice(0, 4);
+  return signals.length ? signals : undefined;
 }

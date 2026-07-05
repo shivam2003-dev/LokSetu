@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { buildAadhaarIdentity } from "./citizenIdentity.js";
 import { resolveLocation } from "./geo.js";
 import { normalizeSubmission } from "./pipeline.js";
-import { RawIntakePayload, Submission } from "./types.js";
+import { AadhaarIdentity, RawIntakePayload, Submission } from "./types.js";
 import {
   analyzeImageWithVertexAi,
   analyzeWithVertexAi,
@@ -24,6 +25,7 @@ export const intakeSchema = z
     lng: z.coerce.number().min(-180).max(180).optional(),
     urgency: z.coerce.number().min(1).max(5).default(3),
     rating: z.coerce.number().min(1).max(5).default(4),
+    aadhaarNumber: z.string().optional(),
     text: z.string().max(4000).optional(),
     media: z.string().max(14_000_000).optional()
   })
@@ -33,12 +35,14 @@ export const intakeSchema = z
 
 export type Intake = z.infer<typeof intakeSchema>;
 
-export function toRawIntakePayload(input: Intake): RawIntakePayload {
+export function toRawIntakePayload(input: Intake, identityOverride?: AadhaarIdentity): RawIntakePayload {
+  const identity = identityOverride ?? buildAadhaarIdentity(input.aadhaarNumber);
+  const defaultCitizen = input.userId === "guest" || input.username === "citizen";
   return {
     channel: input.channel,
     language: input.language,
-    userId: input.userId,
-    username: input.username,
+    userId: identity && defaultCitizen ? `aadhaar-${identity.aadhaarHash.slice(0, 16)}` : input.userId,
+    username: identity && defaultCitizen ? `Citizen ${identity.aadhaarMasked}` : input.username,
     privacyMode: input.privacyMode,
     state: input.state,
     district: input.district,
@@ -47,6 +51,11 @@ export function toRawIntakePayload(input: Intake): RawIntakePayload {
     lng: input.lng,
     urgency: input.urgency,
     rating: input.rating,
+    aadhaarHash: identity?.aadhaarHash,
+    aadhaarMasked: identity?.aadhaarMasked,
+    aadhaarLast4: identity?.aadhaarLast4,
+    aadhaarVerified: identity?.aadhaarVerified,
+    identityMode: identity?.identityMode,
     text: input.text,
     media: input.media
   };
@@ -105,6 +114,11 @@ export async function processIntake(
       lat: input.lat,
       lng: input.lng,
       locationLabel: location.label,
+      aadhaarHash: input.aadhaarHash,
+      aadhaarMasked: input.aadhaarMasked,
+      aadhaarLast4: input.aadhaarLast4,
+      aadhaarVerified: input.aadhaarVerified,
+      identityMode: input.identityMode,
       transcript,
       imageSummary,
       isCivicIssue,

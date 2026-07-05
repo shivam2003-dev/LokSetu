@@ -19,6 +19,18 @@ export type UserProfile = {
   contributionScore: number;
 };
 
+export type AadhaarIdentityMode = "aadhaar_format_only";
+
+export type AadhaarIdentity = {
+  aadhaarHash: string;
+  aadhaarMasked: string;
+  aadhaarLast4: string;
+  aadhaarVerified: false;
+  identityMode: AadhaarIdentityMode;
+};
+
+export type RewardBand = "needs_detail" | "useful" | "strong" | "excellent";
+
 export type AuthUser = {
   id: string;
   username: string;
@@ -69,6 +81,15 @@ export type Submission = {
   urgency: number;
   rating: number;
   citizenScore: number;
+  aadhaarHash?: string;
+  aadhaarMasked?: string;
+  aadhaarLast4?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: AadhaarIdentityMode;
+  submissionQualityScore?: number;
+  rewardPoints?: number;
+  rewardBand?: RewardBand;
+  rewardReasons?: string[];
   text: string;
   createdAt: string;
   // Multimodal + location enrichment
@@ -102,6 +123,11 @@ export type RawIntakePayload = {
   lng?: number;
   urgency: number;
   rating: number;
+  aadhaarHash?: string;
+  aadhaarMasked?: string;
+  aadhaarLast4?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: AadhaarIdentityMode;
   text?: string;
   media?: string;
 };
@@ -164,6 +190,9 @@ export type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: ProjectStatus;
+  averageCitizenScore?: number;
+  averageSubmissionQuality?: number;
+  rewardedCitizenCount?: number;
   sourceSnapshotIds?: string[];
   sourceFreshness?: "fresh" | "stale" | "missing";
 };

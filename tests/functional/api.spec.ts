@@ -4,15 +4,20 @@ const apiUrl = "http://127.0.0.1:18080";
 
 async function newApiContext() {
   const password = process.env.TEST_APP_ACCESS_PASSWORD;
-  if (!password) return request.newContext({ baseURL: apiUrl });
-
   const loginContext = await request.newContext({ baseURL: apiUrl });
-  const login = await loginContext.post("/api/auth/login", { data: { password } });
-  if (!login.ok()) {
-    await loginContext.dispose();
-    return request.newContext({ baseURL: apiUrl });
+  if (password) {
+    const login = await loginContext.post("/api/auth/login", { data: { password } });
+    if (login.ok()) {
+      const payload = await login.json() as { token?: string };
+      await loginContext.dispose();
+      return request.newContext({
+        baseURL: apiUrl,
+        extraHTTPHeaders: payload.token ? { Authorization: `Bearer ${payload.token}` } : undefined
+      });
+    }
   }
-  const payload = await login.json() as { token?: string };
+  const citizenSession = await loginContext.post("/api/citizen/session", { data: { aadhaarNumber: "234567890123" } });
+  const payload = citizenSession.ok() ? await citizenSession.json() as { token?: string } : {};
   await loginContext.dispose();
   return request.newContext({
     baseURL: apiUrl,
@@ -50,6 +55,14 @@ test.describe("API functional flow", () => {
     expect(contextPayload.wardsByDistrict["Uttar Pradesh::Lucknow"]).toContain("Aminabad Basti");
     expect(contextPayload.mps.map((mp: { id: string }) => mp.id)).toContain("mp-up-lucknow");
 
+    const citizenSession = await api.post("/api/citizen/session", {
+      data: { aadhaarNumber: "234567890123" }
+    });
+    await expect(citizenSession).toBeOK();
+    const citizenSessionPayload = await citizenSession.json();
+    expect(citizenSessionPayload.citizen.aadhaarMasked).toBe("xxxx-xxxx-0123");
+    expect(citizenSessionPayload.citizen.aadhaarVerified).toBe(false);
+
     const submission = await api.post("/api/submissions", {
       data: {
         channel: "text",
@@ -60,6 +73,7 @@ test.describe("API functional flow", () => {
         ward: "Kalindi Nagar",
         urgency: 5,
         rating: 5,
+        aadhaarNumber: "234567890123",
         text: "Functional test: school road floods and street lights are broken."
       }
     });
@@ -67,6 +81,7 @@ test.describe("API functional flow", () => {
     const receipt = await submission.json();
     expect(receipt.status).toBe("pending_batch");
     expect(receipt.rawIntakeId).toBeTruthy();
+    expect(receipt.aadhaarMasked).toBe("xxxx-xxxx-0123");
 
     const batchStatus = await api.get("/api/batch/status");
     await expect(batchStatus).toBeOK();
@@ -76,7 +91,7 @@ test.describe("API functional flow", () => {
     await expect(aiOps).toBeOK();
     const aiOpsPayload = await aiOps.json();
     expect(["Vertex AI Gemini", "OpenAI-compatible Gemini"]).toContain(aiOpsPayload.provider);
-    expect(["fallback", "openai-compatible"]).toContain(aiOpsPayload.mode);
+    expect(["unconfigured", "fallback", "openai-compatible"]).toContain(aiOpsPayload.mode);
 
     const publicProjects = await api.get("/api/public/projects?scope=global&limit=5");
     await expect(publicProjects).toBeOK();

@@ -71,6 +71,9 @@ type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: "review" | "shortlist" | "approved";
+  averageCitizenScore?: number;
+  averageSubmissionQuality?: number;
+  rewardedCitizenCount?: number;
 };
 
 type DashboardResponse = {
@@ -148,6 +151,14 @@ type IntakeAuditResponse = {
     processedAt?: string;
     channel: string;
     input: { language: string; text: string; hasMedia: boolean; mediaType: string; urgency: number; rating: number; privacyMode: boolean };
+    identity: { aadhaarMasked?: string; aadhaarVerified: boolean; identityMode: string };
+    reward: {
+      citizenScore: number | null;
+      qualityScore: number | null;
+      rewardPoints: number | null;
+      rewardBand: string;
+      reasons: string[];
+    };
     placement: { state: string; district: string; ward: string; mpId?: string; locationLabel?: string };
     ai: {
       category: string;
@@ -2548,7 +2559,7 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
     { name: "Maps Layers", rows: 12, freshness: "Runtime", health: "Ready" },
     { name: "RAG Evidence", rows: ragEvidenceRows, freshness: "Indexed", health: "Ready" }
   ];
-  const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "confidence", "budget_cr", "progress", "citizen_impact"];
+  const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "citizen_score", "aadhaar_ref", "confidence", "citizen_impact"];
 
   useEffect(() => {
     refreshIntakeAudit();
@@ -2614,7 +2625,7 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
               <button className={entry.rawIntakeId === selectedIntake?.rawIntakeId ? "active" : ""} key={entry.rawIntakeId} onClick={() => setSelectedIntakeId(entry.rawIntakeId)} type="button">
                 <strong>{entry.channel.toUpperCase()} · {entry.shortReceipt}</strong>
                 <span>{entry.status} · {entry.placement.ward}</span>
-                <small>{entry.input.mediaType !== "none" ? entry.input.mediaType : "text"} · urgency {entry.input.urgency}/5 · rating {entry.input.rating}/5</small>
+                <small>{entry.input.mediaType !== "none" ? entry.input.mediaType : "text"} · reward {entry.reward.citizenScore ?? "pending"}/100 · {entry.identity.aadhaarMasked ?? "no Aadhaar"}</small>
               </button>
             ))}
             {!intakeAudit?.entries.length ? <p className="empty-state">No submitted Awaaz records yet. Submit from the citizen app, then run pipeline.</p> : null}
@@ -2634,9 +2645,18 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
                   <div><dt>Language</dt><dd>{selectedIntake.ai.detectedLanguage ?? selectedIntake.input.language}</dd></div>
                   <div><dt>Region placed</dt><dd>{selectedIntake.placement.ward}, {selectedIntake.placement.district}, {selectedIntake.placement.state}</dd></div>
                   <div><dt>MP route</dt><dd>{selectedIntake.placement.mpId ?? "pending"}</dd></div>
+                  <div><dt>Aadhaar</dt><dd>{selectedIntake.identity.aadhaarMasked ?? "not collected"} · {selectedIntake.identity.aadhaarVerified ? "verified" : "format only"}</dd></div>
+                  <div><dt>Citizen score</dt><dd>{selectedIntake.reward.citizenScore ?? "pending"}/100 · {selectedIntake.reward.rewardBand}</dd></div>
+                  <div><dt>Quality score</dt><dd>{selectedIntake.reward.qualityScore ?? "pending"}/100</dd></div>
                   <div><dt>Civic issue</dt><dd>{selectedIntake.ai.isCivicIssue === false ? "Needs review" : "Yes"}</dd></div>
                   <div><dt>AI runtime</dt><dd>{selectedIntake.ai.providerMode ?? "pending"} · {selectedIntake.ai.model ?? "pending"}</dd></div>
                 </dl>
+                {selectedIntake.reward.reasons.length ? (
+                  <article>
+                    <h4>Reward factors</h4>
+                    <p>{selectedIntake.reward.reasons.join(" · ")}</p>
+                  </article>
+                ) : null}
                 <article>
                   <h4>AI explanation</h4>
                   <p>{selectedIntake.ai.explanation}</p>
@@ -4291,6 +4311,7 @@ function PriorityDecision({
         <span><MapPin size={14} /> {project.ward}, {project.district}, {project.state}</span>
         <span><Users size={14} /> {formatCount(project.demandCount)} citizen signals</span>
         <span><Star size={14} /> {project.averageRating}/5 from {project.ratings} ratings</span>
+        <span><ShieldCheck size={14} /> {project.averageSubmissionQuality ?? 0}/100 quality · {project.rewardedCitizenCount ?? 0} rewarded</span>
         <span><Languages size={14} /> {project.languageMix.join(", ")}</span>
       </div>
 
@@ -4316,6 +4337,7 @@ function PriorityDecision({
         <ScoreBar label="Ground need" value={project.needScore} max={35} />
         <ScoreBar label="Urgency" value={project.urgencyScore} max={15} />
         <ScoreBar label="Equity" value={project.equityScore} max={15} />
+        <ScoreBar label="Reward quality" value={project.averageSubmissionQuality ?? 0} max={100} />
       </div>
       <div className="evidence-grid">
         <Evidence title="Evidence" items={project.evidence} />

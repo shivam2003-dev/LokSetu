@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import pino from "pino";
 import { z } from "zod";
+import { buildAadhaarIdentity } from "./citizenIdentity.js";
 import { areaMappings, demoSubmissions, mpProfiles, seedUsers, sourceSnapshots } from "./data.js";
 import {
   countRawIntakesByStatus,
@@ -23,7 +24,7 @@ import {
 import { runBatch } from "./batch.js";
 import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayload } from "./intake.js";
 import { buildDashboard } from "./pipeline.js";
-import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
+import { AadhaarIdentity, DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
 import { indicRuntimeMode } from "./indicLanguage.js";
 import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
@@ -37,7 +38,7 @@ const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
 const accessPassword = process.env.APP_ACCESS_PASSWORD ?? "";
-const authSecret = process.env.APP_AUTH_SECRET ?? accessPassword;
+const authSecret = process.env.APP_AUTH_SECRET || accessPassword || "loksetu-local-auth-secret";
 const defaultAdminUsername = process.env.APP_ADMIN_USERNAME ?? "";
 const defaultAdminPassword = process.env.APP_ADMIN_PASSWORD ?? "";
 let memorySubmissions = [...demoSubmissions];
@@ -93,6 +94,10 @@ const receiptIdSchema = z.string().trim().toLowerCase().regex(/^[a-f0-9-]{8,36}$
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(80).optional(),
   password: z.string().min(1)
+});
+
+const aadhaarSessionSchema = z.object({
+  aadhaarNumber: z.string().trim().min(1).max(32)
 });
 
 const adminUserCreateSchema = z.object({
@@ -198,6 +203,25 @@ app.post("/api/auth/login", async (request, response) => {
     token: signAccessToken(expiresAt, authUser?.username ?? "password-access"),
     expiresAt,
     user: authUser ? { id: authUser.id, username: authUser.username, role: authUser.role, displayName: authUser.displayName } : undefined
+  });
+});
+
+app.post("/api/citizen/session", (request, response) => {
+  const parsed = aadhaarSessionSchema.safeParse(request.body);
+  const identity = parsed.success ? buildAadhaarIdentity(parsed.data.aadhaarNumber) : null;
+  if (!parsed.success || !identity) {
+    response.status(400).json({ error: "Enter a 12-digit Aadhaar number." });
+    return;
+  }
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  response.json({
+    token: signAccessToken(expiresAt, `citizen-${identity.aadhaarLast4}`, identity),
+    expiresAt,
+    citizen: {
+      aadhaarMasked: identity.aadhaarMasked,
+      aadhaarVerified: identity.aadhaarVerified,
+      identityMode: identity.identityMode
+    }
   });
 });
 
@@ -754,6 +778,26 @@ app.get("/api/intake/audit", async (_request, response) => {
           rating: payload.rating,
           privacyMode: payload.privacyMode
         },
+        identity: {
+          aadhaarMasked: submission?.aadhaarMasked ?? payload.aadhaarMasked,
+          aadhaarVerified: submission?.aadhaarVerified ?? payload.aadhaarVerified ?? false,
+          identityMode: submission?.identityMode ?? payload.identityMode ?? "not_collected"
+        },
+        reward: submission
+          ? {
+              citizenScore: submission.citizenScore,
+              qualityScore: submission.submissionQualityScore ?? submission.citizenScore,
+              rewardPoints: submission.rewardPoints ?? submission.citizenScore,
+              rewardBand: submission.rewardBand ?? "useful",
+              reasons: submission.rewardReasons ?? []
+            }
+          : {
+              citizenScore: null,
+              qualityScore: null,
+              rewardPoints: null,
+              rewardBand: "pending_ai_score",
+              reasons: ["AI quality and reward score will be available after batch processing."]
+            },
         placement: {
           state: submission?.state ?? payload.state ?? "pending",
           district: submission?.district ?? payload.district ?? "pending",
@@ -810,7 +854,7 @@ function auditExplanation(submission: Awaited<ReturnType<typeof getSubmissions>>
   if (submission.isCivicIssue === false) {
     return `${media} was held for review as non-addressable or noisy input. Reason: ${submission.noiseReason ?? "AI could not confirm a public civic issue"}. It was placed in ${area} from captured location but not treated as normal ranked demand.`;
   }
-  return `${media} was tagged as ${submission.category}, placed in ${area}, ${route}, and scored from urgency ${submission.urgency}/5, citizen rating ${submission.rating}/5, language ${submission.detectedLanguage}, and ${confidence}.`;
+  return `${media} was tagged as ${submission.category}, placed in ${area}, ${route}, and scored ${submission.citizenScore}/100 from AI quality ${submission.submissionQualityScore ?? submission.citizenScore}/100, urgency ${submission.urgency}/5, citizen rating ${submission.rating}/5, language ${submission.detectedLanguage}, and ${confidence}.`;
 }
 
 app.get("/api/audit", async (_request, response) => {
@@ -842,7 +886,12 @@ app.post("/api/submissions", async (request, response) => {
 
 // Simple citizen app submission. Same engine, friendlier receipt.
 app.post("/api/citizen/submit", async (request, response) => {
-  await handleIntake(request.body, response, { friendly: true, requireLocation: true });
+  await handleIntake(request.body, response, {
+    friendly: true,
+    requireLocation: true,
+    requireCitizenIdentity: true,
+    citizenIdentity: citizenIdentityFromRequest(request)
+  });
 });
 
 app.get("/api/citizen/receipts/:receiptId", async (request, response) => {
@@ -1026,11 +1075,16 @@ initDatabase()
 async function handleIntake(
   body: unknown,
   response: express.Response,
-  options: { friendly?: boolean; requireLocation?: boolean } = {}
+  options: { friendly?: boolean; requireLocation?: boolean; requireCitizenIdentity?: boolean; citizenIdentity?: AadhaarIdentity } = {}
 ) {
   const parsed = intakeSchema.safeParse(body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid submission", details: parsed.error.flatten() });
+    return;
+  }
+  const citizenIdentity = options.citizenIdentity ?? buildAadhaarIdentity(parsed.data.aadhaarNumber);
+  if (options.requireCitizenIdentity && !citizenIdentity) {
+    response.status(400).json({ error: "Aadhaar required", message: "Enter a 12-digit Aadhaar number before submitting." });
     return;
   }
   if (options.requireLocation && (typeof parsed.data.lat !== "number" || typeof parsed.data.lng !== "number")) {
@@ -1038,7 +1092,7 @@ async function handleIntake(
     return;
   }
 
-  const raw = await enqueueRaw(toRawIntakePayload(parsed.data));
+  const raw = await enqueueRaw(toRawIntakePayload(parsed.data, citizenIdentity ?? undefined));
   const submissions = await getSubmissions();
   logger.info({ rawIntakeId: raw.id, channel: parsed.data.channel }, "submission queued for batch processing");
 
@@ -1046,7 +1100,10 @@ async function handleIntake(
     rawIntakeId: raw.id,
     status: "pending_batch",
     message: "Submission received. It will be processed in the next scheduled batch run.",
-    nextStep: "Batch worker will run OCR/speech/Vertex AI classification, scoring, clustering, and MP routing.",
+    nextStep: "Batch worker will run OCR/speech/Vertex AI classification, AI quality scoring, reward points, clustering, and MP routing.",
+    aadhaarMasked: raw.payload.aadhaarMasked,
+    aadhaarVerified: raw.payload.aadhaarVerified ?? false,
+    identityMode: raw.payload.identityMode,
     dashboard: options.friendly ? undefined : applyProjectOverrides(buildDashboard(submissions))
   });
 }
@@ -1145,6 +1202,14 @@ async function findReceiptStatus(receiptId: string) {
     state: submission?.state ?? payload.state,
     mpId: submission?.mpId,
     batchId: submission?.batchId,
+    aadhaarMasked: submission?.aadhaarMasked ?? payload.aadhaarMasked,
+    aadhaarVerified: submission?.aadhaarVerified ?? payload.aadhaarVerified ?? false,
+    identityMode: submission?.identityMode ?? payload.identityMode,
+    citizenScore: submission?.citizenScore,
+    submissionQualityScore: submission?.submissionQualityScore,
+    rewardPoints: submission?.rewardPoints,
+    rewardBand: submission?.rewardBand,
+    rewardReasons: submission?.rewardReasons,
     privacy: "Public-safe status only. Citizen identity and raw personal details are not shown."
   };
 }
@@ -1166,24 +1231,36 @@ function publicUser(user: UserProfile) {
   };
 }
 
-function signAccessToken(expiresAt: string, username = "password-access") {
-  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, exp: expiresAt })).toString("base64url");
+type AccessTokenPayload = {
+  sub?: string;
+  user?: string;
+  exp?: string;
+  citizenIdentity?: AadhaarIdentity;
+};
+
+function signAccessToken(expiresAt: string, username = "password-access", citizenIdentity?: AadhaarIdentity) {
+  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, exp: expiresAt, citizenIdentity })).toString("base64url");
   const signature = createHmac("sha256", authSecret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
 function verifyAccessToken(token: string) {
+  return Boolean(parseAccessToken(token));
+}
+
+function parseAccessToken(token: string): AccessTokenPayload | null {
   const [payload, signature] = token.split(".");
-  if (!payload || !signature) return false;
+  if (!payload || !signature) return null;
   const validSignature = [authSecret, accessPassword]
     .filter(Boolean)
     .some((secret) => constantTimeEqual(signature, createHmac("sha256", secret).update(payload).digest("base64url")));
-  if (!validSignature) return false;
+  if (!validSignature) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; exp?: string };
-    return parsed.sub === "loksetu-access" && Boolean(parsed.exp) && Date.parse(parsed.exp!) > Date.now();
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessTokenPayload;
+    if (parsed.sub !== "loksetu-access" || !parsed.exp || Date.parse(parsed.exp) <= Date.now()) return null;
+    return parsed;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -1191,6 +1268,11 @@ function authTokenFromRequest(request: express.Request) {
   const header = request.header("authorization");
   if (header?.toLowerCase().startsWith("bearer ")) return header.slice(7).trim();
   return request.header("x-loksetu-access-token")?.trim();
+}
+
+function citizenIdentityFromRequest(request: express.Request): AadhaarIdentity | undefined {
+  const token = authTokenFromRequest(request);
+  return token ? parseAccessToken(token)?.citizenIdentity : undefined;
 }
 
 function constantTimeEqual(left: string, right: string) {
@@ -1226,6 +1308,11 @@ function publicProjectDto(project: RankedProject, includeDetail = false) {
     ratings: project.ratings,
     status: project.status,
     rationale: project.rationale,
+    rewardSummary: {
+      averageCitizenScore: project.averageCitizenScore ?? 0,
+      averageSubmissionQuality: project.averageSubmissionQuality ?? 0,
+      rewardedCitizenCount: project.rewardedCitizenCount ?? 0
+    },
     sourceSnapshotIds: sourceIds,
     sourceFreshness: project.sourceFreshness ?? "missing",
     evidence: includeDetail ? project.evidence : project.evidence.slice(0, 3),

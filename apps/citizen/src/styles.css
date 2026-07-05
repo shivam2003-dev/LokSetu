@@ -288,6 +288,22 @@ button {
   flex-shrink: 0;
   margin-top: 1px;
 }
+.identity-note {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #bfe6d1;
+  border-radius: 14px;
+  background: #f0fdf4;
+  color: #14532d;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+.identity-note svg {
+  flex-shrink: 0;
+}
 .track-card {
   margin-top: 16px;
   border: 1px solid var(--line);

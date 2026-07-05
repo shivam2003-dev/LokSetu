@@ -41,7 +41,9 @@ try {
                 detectedLanguage: "Hindi",
                 normalizedText: "School toilets need repair.",
                 category: "Education",
-                confidence: 0.91
+                confidence: 0.91,
+                qualityScore: 92,
+                qualitySignals: ["Clear public school issue", "Actionable repair request"]
               })
             }
           }
@@ -60,6 +62,11 @@ try {
     ward: "Kalindi Nagar",
     urgency: 5,
     rating: 5,
+    aadhaarHash: "aadhaar-test-hash",
+    aadhaarMasked: "xxxx-xxxx-0123",
+    aadhaarLast4: "0123",
+    aadhaarVerified: false,
+    identityMode: "aadhaar_format_only",
     text: "हमारे स्कूल के शौचालय ठीक नहीं हैं."
   });
 
@@ -67,6 +74,10 @@ try {
   assert.equal(compatible.submission.aiModel, "google/gemini-test");
   assert.equal(compatible.submission.aiFallbackUsed, false);
   assert.equal(compatible.submission.detectedLanguage, "Hindi");
+  assert.equal(compatible.submission.aadhaarMasked, "xxxx-xxxx-0123");
+  assert.equal(compatible.submission.aadhaarVerified, false);
+  assert.ok((compatible.submission.submissionQualityScore ?? 0) >= 80);
+  assert.equal(compatible.submission.rewardBand, "excellent");
 
   globalThis.fetch = async () =>
     new Response(
