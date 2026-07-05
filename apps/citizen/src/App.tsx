@@ -1,4 +1,5 @@
 import {
+  Award,
   ArrowLeft,
   Camera,
   CheckCircle2,
@@ -68,6 +69,41 @@ type CitizenIdentity = {
   identityMode: string;
 };
 
+type RewardMilestone = {
+  id: string;
+  title: string;
+  threshold: number;
+  description: string;
+};
+
+type RewardLookup = {
+  aadhaarMasked: string;
+  aadhaarVerified: boolean;
+  identityMode: string;
+  totalRewardPoints: number;
+  processedSubmissionCount: number;
+  pendingSubmissionCount: number;
+  failedSubmissionCount: number;
+  averageQualityScore: number;
+  excellentReports: number;
+  strongReports: number;
+  latestRewardedAt?: string;
+  currentMilestone: RewardMilestone;
+  nextMilestone?: RewardMilestone;
+  pointsToNextMilestone: number;
+  milestoneProgressPercent: number;
+  recentRewards: Array<{
+    receiptId: string;
+    rewardPoints: number;
+    rewardBand: string;
+    qualityScore: number;
+    category: string;
+    area: string;
+    processedAt: string;
+  }>;
+  privacy: string;
+};
+
 const channels: Array<{ id: Channel; icon: typeof Camera; en: string; hi: string; hint: string }> = [
   { id: "photo", icon: Camera, en: "Take a photo", hi: "फ़ोटो खींचें", hint: "Pothole, garbage, broken tap" },
   { id: "voice", icon: Mic, en: "Speak", hi: "बोलकर बताएं", hint: "Record in any language" },
@@ -117,6 +153,10 @@ export default function App() {
   const [receiptLookup, setReceiptLookup] = useState<ReceiptLookup | null>(null);
   const [receiptLookupError, setReceiptLookupError] = useState("");
   const [receiptLookupBusy, setReceiptLookupBusy] = useState(false);
+  const [rewardSummary, setRewardSummary] = useState<RewardLookup | null>(null);
+  const [rewardSummaryError, setRewardSummaryError] = useState("");
+  const [rewardSummaryBusy, setRewardSummaryBusy] = useState(false);
+  const [rewardGuideOpen, setRewardGuideOpen] = useState(false);
   const [geo, setGeo] = useState<GeoState>({ status: "idle", label: "Detecting your area…" });
 
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -296,6 +336,27 @@ export default function App() {
     localStorage.removeItem(citizenIdentityKey);
     setAccessToken("");
     setCitizenIdentity(null);
+    setRewardSummary(null);
+    setRewardSummaryError("");
+  }
+
+  async function loadMyRewards() {
+    setRewardSummaryBusy(true);
+    setRewardSummaryError("");
+    try {
+      const response = await apiFetch("/api/citizen/rewards/me");
+      const payload = await response.json() as RewardLookup & { error?: string };
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error ?? "Reward lookup failed");
+      setRewardSummary(payload);
+    } catch (lookupError) {
+      setRewardSummaryError(lookupError instanceof Error ? lookupError.message : "Reward lookup failed");
+    } finally {
+      setRewardSummaryBusy(false);
+    }
   }
 
   if (!accessToken) return <LoginPage onLogin={handleLogin} />;
@@ -324,6 +385,9 @@ export default function App() {
               क्या समस्या है? <span>What is the problem?</span>
             </h1>
             <p className="lede">Report a local issue in seconds through the protected LokSetu intake.</p>
+            <button className="reward-guide-button" onClick={() => setRewardGuideOpen(true)} type="button">
+              <Award size={18} /> How to get 100% reward
+            </button>
             <div className="tiles">
               {channels.map((item) => {
                 const Icon = item.icon;
@@ -355,6 +419,23 @@ export default function App() {
                 <ShieldCheck size={15} /> Aadhaar {citizenIdentity.aadhaarMasked} · format only
               </p>
             ) : null}
+            <section className="reward-panel">
+              <div className="reward-panel-head">
+                <span>
+                  <Award size={18} /> My reward total
+                </span>
+                <button disabled={rewardSummaryBusy} onClick={loadMyRewards} type="button">
+                  {rewardSummaryBusy ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+                  Show my reward total
+                </button>
+              </div>
+              {rewardSummaryError ? <p className="lookup-error">{rewardSummaryError}</p> : null}
+              {rewardSummary ? (
+                <RewardSummaryCard reward={rewardSummary} />
+              ) : (
+                <p className="reward-empty">See cumulative reward points, milestone reached, and pending reports.</p>
+              )}
+            </section>
             <section className="track-card">
               <form className="track-form" onSubmit={searchReceipt}>
                 <label>
@@ -398,6 +479,9 @@ export default function App() {
           <section className="capture">
             <button className="back" onClick={() => setStep("choose")} type="button">
               <ArrowLeft size={18} /> Back
+            </button>
+            <button className="reward-guide-button compact" onClick={() => setRewardGuideOpen(true)} type="button">
+              <Award size={17} /> 100% reward guide
             </button>
 
             <label className="note language-select">
@@ -563,6 +647,89 @@ export default function App() {
           </section>
         ) : null}
       </main>
+      {rewardGuideOpen ? <RewardGuide onClose={() => setRewardGuideOpen(false)} /> : null}
+    </div>
+  );
+}
+
+function RewardGuide({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="reward-guide-title">
+      <section className="reward-guide">
+        <div className="guide-head">
+          <span><Award size={18} /> Reward guide</span>
+          <button onClick={onClose} type="button">Close</button>
+        </div>
+        <h2 id="reward-guide-title">How to report well and earn 100% reward</h2>
+        <p>
+          A 100% reward is for a clear, useful, public-interest report. Write in English, or translate these points
+          into your own language before submitting.
+        </p>
+        <ol>
+          <li>Give the exact place: road, lane, school, clinic, ward, landmark, or bus stop.</li>
+          <li>Describe one public problem clearly. Keep private disputes and unrelated complaints out.</li>
+          <li>Explain who is affected: children, patients, commuters, women, elderly people, or households.</li>
+          <li>Add evidence when possible: photo, voice note, visible damage, timing, or how long it has continued.</li>
+          <li>Explain urgency: safety risk, health risk, school disruption, water shortage, flooding, or night danger.</li>
+          <li>Avoid abuse, rumors, duplicate spam, political slogans, and personal Aadhaar or phone details in the text.</li>
+        </ol>
+        <article>
+          <strong>Good example</strong>
+          <p>Streetlights near Kalindi Nagar bus stop have not worked for 10 days. Women and students feel unsafe after 7 PM, and there was one near-accident yesterday. Location is beside the main road tea stall.</p>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function RewardSummaryCard({ reward }: { reward: RewardLookup }) {
+  const next = reward.nextMilestone;
+  return (
+    <div className="reward-summary" aria-live="polite">
+      <div className="reward-total">
+        <span>Cumulative reward</span>
+        <strong>{reward.totalRewardPoints}</strong>
+        <small>points till date</small>
+      </div>
+      <div className="milestone-box">
+        <span>Current milestone</span>
+        <strong>{reward.currentMilestone.title}</strong>
+        <small>{reward.currentMilestone.description}</small>
+      </div>
+      <div className="milestone-progress">
+        {next ? (
+          <>
+            <div>
+              <span>Next milestone</span>
+              <strong>{next.title}</strong>
+            </div>
+            <small>{reward.pointsToNextMilestone} points to go</small>
+            <div className="progress-track">
+              <span style={{ width: `${reward.milestoneProgressPercent}%` }} />
+            </div>
+          </>
+        ) : (
+          <strong>Top milestone reached</strong>
+        )}
+      </div>
+      <div className="reward-stats">
+        <span>{reward.processedSubmissionCount} processed</span>
+        <span>{reward.pendingSubmissionCount} pending</span>
+        <span>{reward.averageQualityScore}/100 average quality</span>
+      </div>
+      {reward.recentRewards.length ? (
+        <ul className="recent-rewards">
+          {reward.recentRewards.map((item) => (
+            <li key={`${item.receiptId}-${item.processedAt}`}>
+              <strong>{item.rewardPoints}/100</strong>
+              <span>{item.category} · {item.rewardBand.replace("_", " ")}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="reward-empty">No processed rewards yet. Submitted reports appear here after AI batch scoring.</p>
+      )}
+      <p className="reward-privacy">{reward.privacy}</p>
     </div>
   );
 }
@@ -581,6 +748,9 @@ async function apiFetch(path: string, init: RequestInit = {}) {
 function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIdentity) => void }) {
   const [aadhaarNumber, setAadhaarNumber] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rewardLookupBusy, setRewardLookupBusy] = useState(false);
+  const [rewardLookup, setRewardLookup] = useState<RewardLookup | null>(null);
+  const [rewardLookupError, setRewardLookupError] = useState("");
   const [error, setError] = useState("");
   const aadhaarDigits = cleanAadhaar(aadhaarNumber);
 
@@ -608,6 +778,29 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
     }
   }
 
+  async function checkReward() {
+    if (aadhaarDigits.length !== 12) {
+      setRewardLookupError("Enter a 12-digit Aadhaar number.");
+      return;
+    }
+    setRewardLookupBusy(true);
+    setRewardLookupError("");
+    try {
+      const response = await fetch(`${apiBase}/api/citizen/rewards/lookup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aadhaarNumber: aadhaarDigits })
+      });
+      const payload = await response.json() as RewardLookup & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Reward lookup failed");
+      setRewardLookup(payload);
+    } catch (lookupError) {
+      setRewardLookupError(lookupError instanceof Error ? lookupError.message : "Reward lookup failed");
+    } finally {
+      setRewardLookupBusy(false);
+    }
+  }
+
   return (
     <div className="screen auth-screen">
       <main className="auth-card">
@@ -622,7 +815,11 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
               autoFocus
               inputMode="numeric"
               maxLength={14}
-              onChange={(event) => setAadhaarNumber(formatAadhaar(event.target.value))}
+              onChange={(event) => {
+                setAadhaarNumber(formatAadhaar(event.target.value));
+                setRewardLookup(null);
+                setRewardLookupError("");
+              }}
               placeholder="2345 6789 0123"
               type="text"
               value={aadhaarNumber}
@@ -633,7 +830,13 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
             {busy ? <Loader2 className="spin" size={18} /> : <ShieldCheck size={18} />}
             Continue
           </button>
+          <button className="secondary-submit" disabled={rewardLookupBusy || aadhaarDigits.length !== 12} onClick={checkReward} type="button">
+            {rewardLookupBusy ? <Loader2 className="spin" size={18} /> : <Award size={18} />}
+            Check cumulative reward
+          </button>
         </form>
+        {rewardLookupError ? <p className="lookup-error">{rewardLookupError}</p> : null}
+        {rewardLookup ? <RewardSummaryCard reward={rewardLookup} /> : null}
       </main>
     </div>
   );

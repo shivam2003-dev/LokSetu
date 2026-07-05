@@ -7,6 +7,7 @@ import { z } from "zod";
 import { buildAadhaarIdentity } from "./citizenIdentity.js";
 import { areaMappings, demoSubmissions, mpProfiles, seedUsers, sourceSnapshots } from "./data.js";
 import {
+  countRawIntakesByAadhaarHash,
   countRawIntakesByStatus,
   ensureAuthUser,
   findAuthUserByUsername,
@@ -167,6 +168,45 @@ const simulationScenarios = [
   }
 ];
 
+const rewardMilestones = [
+  {
+    id: "ready",
+    title: "Ready to earn",
+    threshold: 0,
+    description: "Start with one clear public-interest report."
+  },
+  {
+    id: "civic-starter",
+    title: "Civic Starter",
+    threshold: 100,
+    description: "You have earned your first full-report equivalent."
+  },
+  {
+    id: "ward-watch",
+    title: "Ward Watch",
+    threshold: 250,
+    description: "You are regularly helping surface local problems."
+  },
+  {
+    id: "problem-solver",
+    title: "Problem Solver",
+    threshold: 500,
+    description: "Your reports are building a useful evidence trail."
+  },
+  {
+    id: "public-champion",
+    title: "Public Champion",
+    threshold: 1_000,
+    description: "You are a high-value contributor for your area."
+  },
+  {
+    id: "loksetu-guardian",
+    title: "LokSetu Guardian",
+    threshold: 2_000,
+    description: "You have a long-running record of useful civic reporting."
+  }
+] as const;
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -223,6 +263,16 @@ app.post("/api/citizen/session", (request, response) => {
       identityMode: identity.identityMode
     }
   });
+});
+
+app.post("/api/citizen/rewards/lookup", async (request, response) => {
+  const parsed = aadhaarSessionSchema.safeParse(request.body);
+  const identity = parsed.success ? buildAadhaarIdentity(parsed.data.aadhaarNumber) : null;
+  if (!parsed.success || !identity) {
+    response.status(400).json({ error: "Enter a 12-digit Aadhaar number." });
+    return;
+  }
+  response.json(await buildCitizenRewardSummary(identity));
 });
 
 app.use("/api", (request, response, next) => {
@@ -917,6 +967,15 @@ app.get("/api/citizen/receipts/:receiptId", async (request, response) => {
   response.json(status);
 });
 
+app.get("/api/citizen/rewards/me", async (request, response) => {
+  const identity = citizenIdentityFromRequest(request);
+  if (!identity) {
+    response.status(401).json({ error: "Citizen Aadhaar session required" });
+    return;
+  }
+  response.json(await buildCitizenRewardSummary(identity));
+});
+
 app.get("/api/simulation/scenarios", (_request, response) => {
   response.json({ scenarios: simulationScenarios });
 });
@@ -1219,6 +1278,97 @@ async function findReceiptStatus(receiptId: string) {
   };
 }
 
+async function buildCitizenRewardSummary(identity: AadhaarIdentity) {
+  const submissions = (await getSubmissions()).filter((submission) => submission.aadhaarHash === identity.aadhaarHash);
+  const rewards = submissions.map(rewardPointsForSubmission);
+  const qualityScores = submissions
+    .map((submission) => numericScore(submission.submissionQualityScore ?? submission.citizenScore))
+    .filter((score): score is number => typeof score === "number");
+  const totalRewardPoints = rewards.reduce((sum, value) => sum + value, 0);
+  const rawStatusCounts = await rawStatusCountsForAadhaarHash(identity.aadhaarHash, submissions);
+  const milestone = rewardMilestoneFor(totalRewardPoints);
+  const recentRewards = submissions
+    .slice()
+    .sort((left, right) => Date.parse(right.processedAt ?? right.createdAt) - Date.parse(left.processedAt ?? left.createdAt))
+    .slice(0, 5)
+    .map((submission) => ({
+      receiptId: submission.rawIntakeId?.slice(0, 8) ?? submission.id.slice(0, 8),
+      rewardPoints: rewardPointsForSubmission(submission),
+      rewardBand: submission.rewardBand ?? rewardBandFromPoints(rewardPointsForSubmission(submission)),
+      qualityScore: numericScore(submission.submissionQualityScore ?? submission.citizenScore) ?? 0,
+      category: submission.category,
+      area: submission.locationLabel ?? [submission.ward, submission.district, submission.state].filter(Boolean).join(", "),
+      processedAt: submission.processedAt ?? submission.createdAt
+    }));
+
+  return {
+    aadhaarMasked: identity.aadhaarMasked,
+    aadhaarVerified: identity.aadhaarVerified,
+    identityMode: identity.identityMode,
+    totalRewardPoints,
+    processedSubmissionCount: submissions.length,
+    pendingSubmissionCount: (rawStatusCounts.pending ?? 0) + (rawStatusCounts.processing ?? 0),
+    failedSubmissionCount: rawStatusCounts.failed ?? 0,
+    averageQualityScore: qualityScores.length ? Math.round(qualityScores.reduce((sum, value) => sum + value, 0) / qualityScores.length) : 0,
+    excellentReports: rewards.filter((points) => points >= 90).length,
+    strongReports: rewards.filter((points) => points >= 75).length,
+    latestRewardedAt: recentRewards[0]?.processedAt,
+    currentMilestone: milestone.current,
+    nextMilestone: milestone.next,
+    pointsToNextMilestone: milestone.pointsToNext,
+    milestoneProgressPercent: milestone.progressPercent,
+    recentRewards,
+    privacy: "Cumulative rewards are matched by salted Aadhaar hash. Raw Aadhaar numbers are not stored or returned."
+  };
+}
+
+async function rawStatusCountsForAadhaarHash(
+  aadhaarHash: string,
+  submissions: Awaited<ReturnType<typeof getSubmissions>>
+): Promise<Record<string, number>> {
+  if (isDatabaseEnabled()) return countRawIntakesByAadhaarHash(aadhaarHash);
+  const processedRawIds = new Set(submissions.map((submission) => submission.rawIntakeId).filter(Boolean));
+  return memoryRawQueue.reduce<Record<string, number>>((counts, record) => {
+    const payload = record.payload as ReturnType<typeof toRawIntakePayload>;
+    if (payload.aadhaarHash !== aadhaarHash || processedRawIds.has(record.id)) return counts;
+    counts.pending = (counts.pending ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function rewardPointsForSubmission(submission: Awaited<ReturnType<typeof getSubmissions>>[number]) {
+  return numericScore(submission.rewardPoints ?? submission.citizenScore) ?? 0;
+}
+
+function numericScore(value: unknown) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return undefined;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function rewardBandFromPoints(points: number) {
+  if (points >= 90) return "excellent";
+  if (points >= 75) return "strong";
+  if (points >= 50) return "useful";
+  return "needs_detail";
+}
+
+function rewardMilestoneFor(totalRewardPoints: number) {
+  const current = rewardMilestones.reduce<(typeof rewardMilestones)[number]>(
+    (best, milestone) => (totalRewardPoints >= milestone.threshold ? milestone : best),
+    rewardMilestones[0]
+  );
+  const next = rewardMilestones.find((milestone) => milestone.threshold > totalRewardPoints);
+  const pointsToNext = next ? Math.max(0, next.threshold - totalRewardPoints) : 0;
+  const progressPercent = next
+    ? Math.max(
+        0,
+        Math.min(100, Math.round(((totalRewardPoints - current.threshold) / (next.threshold - current.threshold)) * 100))
+      )
+    : 100;
+  return { current, next, pointsToNext, progressPercent };
+}
+
 function getActor(userId: string): UserProfile | undefined {
   return seedUsers.find((user) => user.id === userId);
 }
@@ -1285,6 +1435,8 @@ function citizenIdentityFromRequest(request: express.Request): AadhaarIdentity |
 function isCitizenTokenRoute(request: express.Request): boolean {
   const path = request.originalUrl.split("?")[0];
   return (request.method === "POST" && path === "/api/citizen/submit") ||
+    (request.method === "POST" && path === "/api/citizen/rewards/lookup") ||
+    (request.method === "GET" && path === "/api/citizen/rewards/me") ||
     (request.method === "GET" && path.startsWith("/api/citizen/receipts/"));
 }
 

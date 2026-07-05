@@ -26,6 +26,11 @@ Postgres continues using JSONB payload tables:
 - `raw_intake.payload` stores pending intake, masked identity, and HMAC reference.
 - `submissions.payload` stores processed intake, masked identity, AI quality score, reward points, and reward reasons.
 
+Cumulative reward lookup does not add a raw-Aadhaar table. The API rebuilds the citizen's total from:
+
+- processed `submissions.payload` rows where `aadhaarHash` matches the keyed HMAC of the entered 12-digit number.
+- unprocessed `raw_intake.payload` rows where the same hash is still pending, processing, or failed.
+
 ## Flow
 
 1. Citizen enters a 12-digit Aadhaar number in Apni Awaaz.
@@ -34,7 +39,34 @@ Postgres continues using JSONB payload tables:
 4. API queues raw intake with masked/HMAC Aadhaar metadata.
 5. Batch AI processing classifies the issue and returns `qualityScore` plus short quality factors.
 6. `citizenScore`, `rewardPoints`, `rewardBand`, and `rewardReasons` are stored on the processed submission.
-7. Data Explorer and project decision views show masked identity status, citizen score, average submission quality, and rewarded citizen count.
+7. Citizens can enter Aadhaar again to view cumulative reward points, processed/pending report counts, average quality, recent rewards, and milestone progress.
+8. Data Explorer and project decision views show masked identity status, citizen score, average submission quality, and rewarded citizen count.
+
+## Citizen Reward Lookup
+
+Endpoints:
+
+- `POST /api/citizen/rewards/lookup`: public format-only Aadhaar lookup for the login screen.
+- `GET /api/citizen/rewards/me`: citizen-token lookup for the logged-in app.
+
+Returned fields include:
+
+- `totalRewardPoints`: sum of processed `rewardPoints` to date.
+- `processedSubmissionCount`: number of processed submissions for that Aadhaar hash.
+- `pendingSubmissionCount`: queued or processing reports not scored yet.
+- `averageQualityScore`: average AI quality score for processed reports.
+- `currentMilestone`, `nextMilestone`, `pointsToNextMilestone`, and `milestoneProgressPercent`.
+
+Milestones are points-based:
+
+- 0: Ready to earn.
+- 100: Civic Starter.
+- 250: Ward Watch.
+- 500: Problem Solver.
+- 1000: Public Champion.
+- 2000: LokSetu Guardian.
+
+Because Aadhaar verification is not enabled yet, this is a prototype reward ledger keyed by format-only Aadhaar input. Anyone who knows a 12-digit number can look up that prototype total, so the response remains public-safe: masked Aadhaar, aggregate counts, categories, bands, and no raw complaint text.
 
 ## UIDAI Research Notes
 

@@ -122,6 +122,19 @@ export async function countRawIntakesByStatus(): Promise<Record<string, number>>
   return Object.fromEntries(result.rows.map((row) => [row.status, Number(row.count)]));
 }
 
+export async function countRawIntakesByAadhaarHash(aadhaarHash: string): Promise<Record<string, number>> {
+  if (!pool) return {};
+  const result = await pool.query<{ status: string; count: string }>(
+    `select status, count(*)
+     from raw_intake
+     where payload->>'aadhaarHash' = $1 and status <> 'processed'
+     group by status
+     order by status`,
+    [aadhaarHash]
+  );
+  return Object.fromEntries(result.rows.map((row) => [row.status, Number(row.count)]));
+}
+
 export async function findRawIntakesByReceiptPrefix(prefix: string): Promise<RawIntakeRecord[]> {
   if (!pool) return [];
   const result = await pool.query<{

@@ -88,6 +88,16 @@ test.describe("API functional flow", () => {
     expect(receipt.rawIntakeId).toBeTruthy();
     expect(receipt.aadhaarMasked).toBe("xxxx-xxxx-0123");
 
+    const rewardLookup = await api.post("/api/citizen/rewards/lookup", {
+      data: { aadhaarNumber: "234567890123" }
+    });
+    await expect(rewardLookup).toBeOK();
+    const rewardPayload = await rewardLookup.json();
+    expect(rewardPayload.aadhaarMasked).toBe("xxxx-xxxx-0123");
+    expect(rewardPayload.totalRewardPoints).toBeGreaterThanOrEqual(0);
+    expect(rewardPayload.pendingSubmissionCount + rewardPayload.processedSubmissionCount).toBeGreaterThanOrEqual(1);
+    expect(rewardPayload.currentMilestone.title).toBeTruthy();
+
     const batchStatus = await api.get("/api/batch/status");
     await expect(batchStatus).toBeOK();
     expect((await batchStatus.json()).mode).toBe("batch");
