@@ -39,10 +39,13 @@ export async function initDatabase(): Promise<void> {
       finished_at timestamptz,
       status text not null,
       processed integer not null default 0,
+      discarded integer not null default 0,
       failed integer not null default 0,
       error text
     )
   `);
+
+  await pool.query("alter table batch_runs add column if not exists discarded integer not null default 0");
 
   await pool.query(`
     create table if not exists app_users (
@@ -127,7 +130,7 @@ export async function countRawIntakesByAadhaarHash(aadhaarHash: string): Promise
   const result = await pool.query<{ status: string; count: string }>(
     `select status, count(*)
      from raw_intake
-     where payload->>'aadhaarHash' = $1 and status <> 'processed'
+     where payload->>'aadhaarHash' = $1 and status not in ('processed', 'discarded')
      group by status
      order by status`,
     [aadhaarHash]
@@ -212,6 +215,16 @@ export async function markRawIntakeProcessed(id: string, submission: Submission)
   }
 }
 
+export async function markRawIntakeDiscarded(id: string, payload: RawIntakePayload, reason: string): Promise<void> {
+  if (!pool) return;
+  await pool.query(
+    `update raw_intake
+     set status = 'discarded', payload = $2, processed_at = $3, error = $4
+     where id = $1`,
+    [id, payload, payload.discardedAt ?? new Date().toISOString(), reason]
+  );
+}
+
 export async function markRawIntakeFailed(id: string, error: unknown): Promise<void> {
   if (!pool) return;
   await pool.query(
@@ -225,15 +238,16 @@ export async function markRawIntakeFailed(id: string, error: unknown): Promise<v
 export async function insertBatchRun(run: BatchRun): Promise<void> {
   if (!pool) return;
   await pool.query(
-    `insert into batch_runs (id, started_at, finished_at, status, processed, failed, error)
-     values ($1, $2, $3, $4, $5, $6, $7)
+    `insert into batch_runs (id, started_at, finished_at, status, processed, discarded, failed, error)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (id) do update set
        finished_at = excluded.finished_at,
        status = excluded.status,
        processed = excluded.processed,
+       discarded = excluded.discarded,
        failed = excluded.failed,
        error = excluded.error`,
-    [run.id, run.startedAt, run.finishedAt, run.status, run.processed, run.failed, run.error]
+    [run.id, run.startedAt, run.finishedAt, run.status, run.processed, run.discarded, run.failed, run.error]
   );
 }
 
@@ -245,10 +259,11 @@ export async function listRecentBatchRuns(limit = 10): Promise<BatchRun[]> {
     finished_at: Date | null;
     status: BatchRun["status"];
     processed: number;
+    discarded: number;
     failed: number;
     error: string | null;
   }>(
-    `select id, started_at, finished_at, status, processed, failed, error
+    `select id, started_at, finished_at, status, processed, discarded, failed, error
      from batch_runs
      order by started_at desc
      limit $1`,
@@ -260,6 +275,7 @@ export async function listRecentBatchRuns(limit = 10): Promise<BatchRun[]> {
     finishedAt: row.finished_at?.toISOString(),
     status: row.status,
     processed: row.processed,
+    discarded: row.discarded,
     failed: row.failed,
     error: row.error ?? undefined
   }));

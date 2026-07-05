@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { processIntake } from "./intake.js";
+import { buildDiscardedIntakeDecision, MINIMUM_STORED_CITIZEN_SCORE } from "./noisePolicy.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = { ...process.env };
@@ -119,7 +120,61 @@ try {
   assert.equal(shortCivic.submission.isCivicIssue, true);
   assert.equal(shortCivic.submission.noiseReason, undefined);
 
-  console.log(JSON.stringify({ ok: true, aiRuntimeMetadata: ["ai-required", "openai-compatible", "short-civic-guard"] }));
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                detectedLanguage: "English",
+                normalizedText: "bad",
+                category: "Civic Services",
+                confidence: 0.25,
+                qualityScore: 12,
+                qualitySignals: ["Too short to route", "No actionable public details"]
+              })
+            }
+          }
+        ]
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+
+  const noisyScoringPayload = {
+    channel: "text" as const,
+    userId: "ai-test-noise",
+    username: "noise-user",
+    privacyMode: true,
+    urgency: 1,
+    rating: 1,
+    text: "bad"
+  };
+  const noisyPayload = {
+    ...noisyScoringPayload,
+    state: "Delhi",
+    district: "Central Delhi",
+    ward: "Kalindi Nagar",
+    aadhaarHash: "aadhaar-noise-hash",
+    aadhaarMasked: "xxxx-xxxx-9999",
+    aadhaarLast4: "9999",
+    aadhaarVerified: false as const,
+    identityMode: "aadhaar_format_only" as const,
+    media: "data:image/png;base64,abc"
+  };
+  const noisy = await processIntake(noisyScoringPayload);
+  const discard = buildDiscardedIntakeDecision(noisyPayload, noisy.submission, "2026-07-05T00:00:00.000Z");
+  assert.ok(discard, "score below threshold should be discarded");
+  assert.ok(discard.score < MINIMUM_STORED_CITIZEN_SCORE);
+  assert.equal(discard.payload.discarded, true);
+  assert.equal(discard.payload.text, undefined);
+  assert.equal(discard.payload.media, undefined);
+  assert.equal(discard.payload.aadhaarHash, undefined);
+  assert.equal(discard.payload.state, undefined);
+  assert.equal(discard.payload.ward, undefined);
+  assert.equal(discard.payload.discardedScore, discard.score);
+
+  console.log(JSON.stringify({ ok: true, aiRuntimeMetadata: ["ai-required", "openai-compatible", "short-civic-guard", "noise-discard"] }));
 } finally {
   globalThis.fetch = originalFetch;
   process.env = originalEnv;

@@ -24,6 +24,7 @@ import {
 } from "./db.js";
 import { runBatch } from "./batch.js";
 import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayload } from "./intake.js";
+import { buildDiscardedIntakeDecision, isDiscardedPayload, MINIMUM_STORED_CITIZEN_SCORE } from "./noisePolicy.js";
 import { buildDashboard } from "./pipeline.js";
 import { AadhaarIdentity, DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
@@ -46,6 +47,7 @@ let memorySubmissions = [...demoSubmissions];
 let demoDataEnabled = true;
 const demoSubmissionIds = new Set(demoSubmissions.map((submission) => submission.id));
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string; processedAt?: string }> = [];
+const memoryDiscardedIntakes: Array<{ id: string; payload: ReturnType<typeof toRawIntakePayload>; createdAt: string; processedAt: string; error: string }> = [];
 const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
@@ -731,7 +733,7 @@ app.get("/api/integrations", (_request, response) => {
 app.get("/api/batch/status", async (_request, response) => {
   response.json({
     mode: "batch",
-    rawIntake: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length },
+    rawIntake: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length, discarded: memoryDiscardedIntakes.length },
     recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns() : [],
     schedule: process.env.BATCH_SCHEDULE ?? "*/15 * * * *"
   });
@@ -750,12 +752,25 @@ app.post("/api/batch/run", async (request, response) => {
     startedAt: new Date().toISOString(),
     status: "running" as const,
     processed: 0,
+    discarded: 0,
     failed: 0
   };
   const records = memoryRawQueue.splice(0, limit);
   for (const record of records) {
     try {
       const { submission } = await processIntake(record.payload as ReturnType<typeof toRawIntakePayload>, { rawIntakeId: record.id, batchId: run.id });
+      const discard = buildDiscardedIntakeDecision(record.payload as ReturnType<typeof toRawIntakePayload>, submission);
+      if (discard) {
+        memoryDiscardedIntakes.unshift({
+          id: record.id,
+          payload: discard.payload,
+          createdAt: record.createdAt,
+          processedAt: discard.payload.discardedAt ?? new Date().toISOString(),
+          error: discard.reason
+        });
+        run.discarded += 1;
+        continue;
+      }
       memorySubmissions.push(submission);
       run.processed += 1;
     } catch (error) {
@@ -775,22 +790,32 @@ app.get("/api/intake/audit", async (_request, response) => {
   const submissions = await getSubmissions();
   const rawRecords = isDatabaseEnabled()
     ? await listRecentRawIntakes(30)
-    : memoryRawQueue
-        .slice(-30)
-        .reverse()
-        .map((record) => ({
+    : [
+        ...memoryRawQueue.map((record) => ({
           id: record.id,
           payload: record.payload as ReturnType<typeof toRawIntakePayload>,
           status: "pending" as const,
           attempts: 0,
           createdAt: record.createdAt,
           processedAt: undefined
-        }));
+        })),
+        ...memoryDiscardedIntakes.map((record) => ({
+          id: record.id,
+          payload: record.payload,
+          status: "discarded" as const,
+          attempts: 1,
+          error: record.error,
+          createdAt: record.createdAt,
+          processedAt: record.processedAt
+        }))
+      ]
+        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+        .slice(0, 30);
   const byRawId = new Map(submissions.filter((submission) => submission.rawIntakeId).map((submission) => [submission.rawIntakeId, submission]));
   response.json({
     generatedAt: new Date().toISOString(),
     processingMode: "scheduled batch with on-demand evaluator run",
-    rawStatus: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length },
+    rawStatus: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length, discarded: memoryDiscardedIntakes.length },
     recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns(5) : [],
     samples: [
       {
@@ -816,10 +841,11 @@ app.get("/api/intake/audit", async (_request, response) => {
       const submission = byRawId.get(record.id);
       const legacyFallback = Boolean(submission?.aiFallbackUsed);
       const payload = record.payload;
+      const discarded = record.status === "discarded" || isDiscardedPayload(payload);
       return {
         rawIntakeId: record.id,
         shortReceipt: record.id.slice(0, 8),
-        status: submission ? (legacyFallback ? "ai_retry_required" : "processed") : record.status,
+        status: submission ? (legacyFallback ? "ai_retry_required" : "processed") : discarded ? "discarded_noise" : record.status,
         attempts: record.attempts,
         submittedAt: record.createdAt,
         processedAt: submission?.processedAt ?? record.processedAt,
@@ -834,9 +860,9 @@ app.get("/api/intake/audit", async (_request, response) => {
           privacyMode: payload.privacyMode
         },
         identity: {
-          aadhaarMasked: submission?.aadhaarMasked ?? payload.aadhaarMasked,
-          aadhaarVerified: submission?.aadhaarVerified ?? payload.aadhaarVerified ?? false,
-          identityMode: submission?.identityMode ?? payload.identityMode ?? "not_collected"
+          aadhaarMasked: discarded ? undefined : submission?.aadhaarMasked ?? payload.aadhaarMasked,
+          aadhaarVerified: discarded ? false : submission?.aadhaarVerified ?? payload.aadhaarVerified ?? false,
+          identityMode: discarded ? "discarded_noise" : submission?.identityMode ?? payload.identityMode ?? "not_collected"
         },
         reward: submission
           ? {
@@ -846,6 +872,14 @@ app.get("/api/intake/audit", async (_request, response) => {
               rewardBand: submission.rewardBand ?? "useful",
               reasons: submission.rewardReasons ?? []
             }
+          : discarded
+            ? {
+                citizenScore: payload.discardedScore ?? null,
+                qualityScore: payload.discardedQualityScore ?? payload.discardedScore ?? null,
+                rewardPoints: 0,
+                rewardBand: "discarded_noise",
+                reasons: [payload.discardedReason ?? `Score below ${MINIMUM_STORED_CITIZEN_SCORE}/100; raw issue payload was discarded as noise.`]
+              }
           : {
               citizenScore: null,
               qualityScore: null,
@@ -854,9 +888,9 @@ app.get("/api/intake/audit", async (_request, response) => {
               reasons: ["AI quality and reward score will be available after batch processing."]
             },
         placement: {
-          state: submission?.state ?? payload.state ?? "pending",
-          district: submission?.district ?? payload.district ?? "pending",
-          ward: submission?.ward ?? payload.ward ?? "pending",
+          state: discarded ? "not_stored" : submission?.state ?? payload.state ?? "pending",
+          district: discarded ? "not_stored" : submission?.district ?? payload.district ?? "pending",
+          ward: discarded ? "discarded_noise" : submission?.ward ?? payload.ward ?? "pending",
           mpId: submission?.mpId,
           locationLabel: submission?.locationLabel
         },
@@ -888,6 +922,18 @@ app.get("/api/intake/audit", async (_request, response) => {
               fallbackUsed: submission.aiFallbackUsed,
               explanation: auditExplanation(submission)
             }
+          : discarded
+            ? {
+                category: "discarded_noise",
+                detectedLanguage: payload.language ?? "not_stored",
+                normalizedText: "",
+                isCivicIssue: false,
+                noiseReason: payload.discardedReason,
+                providerMode: "ai_noise_gate",
+                model: "score-threshold",
+                fallbackUsed: false,
+                explanation: `AI score ${payload.discardedScore ?? 0}/100 was below ${payload.discardedThreshold ?? MINIMUM_STORED_CITIZEN_SCORE}/100. The record was discarded as noise and the raw text/media/Aadhaar hash were not retained.`
+              }
           : {
               category: "pending_batch",
               detectedLanguage: "pending",
@@ -1235,22 +1281,52 @@ async function findReceiptStatus(receiptId: string) {
   const submissions = await getSubmissions();
   const records = isDatabaseEnabled()
     ? await findRawIntakesByReceiptPrefix(prefix)
-    : memoryRawQueue
-        .filter((item) => item.id.startsWith(prefix))
-        .slice(0, 2)
-        .map((item) => ({
-          id: item.id,
-          payload: item.payload as ReturnType<typeof toRawIntakePayload>,
-          status: "pending" as const,
-          attempts: 0,
-          createdAt: item.createdAt,
-          processedAt: undefined
-        }));
+    : [
+        ...memoryRawQueue
+          .filter((item) => item.id.startsWith(prefix))
+          .map((item) => ({
+            id: item.id,
+            payload: item.payload as ReturnType<typeof toRawIntakePayload>,
+            status: "pending" as const,
+            attempts: 0,
+            createdAt: item.createdAt,
+            processedAt: undefined
+          })),
+        ...memoryDiscardedIntakes
+          .filter((item) => item.id.startsWith(prefix))
+          .map((item) => ({
+            id: item.id,
+            payload: item.payload,
+            status: "discarded" as const,
+            attempts: 1,
+            error: item.error,
+            createdAt: item.createdAt,
+            processedAt: item.processedAt
+          }))
+      ].slice(0, 2);
   if (records.length > 1) return "ambiguous";
   const record = records[0];
   if (!record) return null;
   const submission = submissions.find((item) => item.rawIntakeId === record.id);
   const payload = record.payload;
+  const discarded = record.status === "discarded" || isDiscardedPayload(payload);
+  if (!submission && discarded) {
+    return {
+      receiptId: record.id.slice(0, 8),
+      status: "discarded_noise",
+      nextStep: `This report scored below ${payload.discardedThreshold ?? MINIMUM_STORED_CITIZEN_SCORE}/100 and was discarded as noise. Submit again with exact place, public problem, people affected, urgency, and evidence.`,
+      submittedAt: record.createdAt,
+      processedAt: record.processedAt ?? payload.discardedAt,
+      area: "Not stored after discard",
+      category: "discarded_noise",
+      citizenScore: payload.discardedScore,
+      submissionQualityScore: payload.discardedQualityScore ?? payload.discardedScore,
+      rewardPoints: 0,
+      rewardBand: "discarded_noise",
+      rewardReasons: [payload.discardedReason ?? "Score below the minimum storage threshold."],
+      privacy: "Low-score noise was discarded. Raw text, media, location, and Aadhaar hash were not retained."
+    };
+  }
   return {
     receiptId: record.id.slice(0, 8),
     status: submission ? "processed" : record.status === "pending" ? "pending_batch" : record.status,

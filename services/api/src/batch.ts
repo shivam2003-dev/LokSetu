@@ -5,11 +5,13 @@ import {
   insertBatchRun,
   isDatabaseEnabled,
   listPendingRawIntakes,
+  markRawIntakeDiscarded,
   markRawIntakeFailed,
   markRawIntakeProcessed,
   markRawIntakeProcessing
 } from "./db.js";
 import { processIntake } from "./intake.js";
+import { buildDiscardedIntakeDecision } from "./noisePolicy.js";
 import { indexSubmissionInRag } from "./ragIndexer.js";
 import { BatchRun } from "./types.js";
 
@@ -21,6 +23,7 @@ export async function runBatch(limit = Number(process.env.BATCH_LIMIT ?? 100)): 
     startedAt: new Date().toISOString(),
     status: "running",
     processed: 0,
+    discarded: 0,
     failed: 0
   };
   await insertBatchRun(run);
@@ -33,6 +36,13 @@ export async function runBatch(limit = Number(process.env.BATCH_LIMIT ?? 100)): 
       try {
         await markRawIntakeProcessing(record.id);
         const { submission } = await processIntake(record.payload, { rawIntakeId: record.id, batchId: run.id });
+        const discard = buildDiscardedIntakeDecision(record.payload, submission);
+        if (discard) {
+          await markRawIntakeDiscarded(record.id, discard.payload, discard.reason);
+          run.discarded += 1;
+          logger.info({ rawIntakeId: record.id, score: discard.score }, "raw intake discarded as noise");
+          continue;
+        }
         await markRawIntakeProcessed(record.id, submission);
         await indexSubmissionInRag(submission);
         run.processed += 1;

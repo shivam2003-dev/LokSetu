@@ -31,6 +31,19 @@ Cumulative reward lookup does not add a raw-Aadhaar table. The API rebuilds the 
 - processed `submissions.payload` rows where `aadhaarHash` matches the keyed HMAC of the entered 12-digit number.
 - unprocessed `raw_intake.payload` rows where the same hash is still pending, processing, or failed.
 
+## Noise Discard Policy
+
+The batch pipeline scores every raw intake first. If the final `rewardPoints` / citizen score is below 25:
+
+- The intake is marked `discarded` / `discarded_noise`.
+- No `submissions` row is inserted.
+- The record is not ranked into dashboard projects.
+- The record is not indexed into RAG evidence.
+- The record is not included in cumulative citizen reward totals.
+- The raw text, media, location, and Aadhaar hash are scrubbed from `raw_intake.payload`.
+
+The scrubbed raw marker keeps only operational metadata: channel, discarded score, threshold, timestamp, and reason. This lets receipts and the Data Explorer explain that the issue was discarded as noise without retaining the low-quality complaint.
+
 ## Flow
 
 1. Citizen enters a 12-digit Aadhaar number in Apni Awaaz.
@@ -38,9 +51,10 @@ Cumulative reward lookup does not add a raw-Aadhaar table. The API rebuilds the 
 3. Citizen submits text, voice, or photo issue with location.
 4. API queues raw intake with masked/HMAC Aadhaar metadata.
 5. Batch AI processing classifies the issue and returns `qualityScore` plus short quality factors.
-6. `citizenScore`, `rewardPoints`, `rewardBand`, and `rewardReasons` are stored on the processed submission.
-7. Citizens can enter Aadhaar again to view cumulative reward points, processed/pending report counts, average quality, recent rewards, and milestone progress.
-8. Data Explorer and project decision views show masked identity status, citizen score, average submission quality, and rewarded citizen count.
+6. If reward score is below 25, the raw payload is scrubbed and discarded as noise.
+7. If reward score is 25 or higher, `citizenScore`, `rewardPoints`, `rewardBand`, and `rewardReasons` are stored on the processed submission.
+8. Citizens can enter Aadhaar again to view cumulative reward points, processed/pending report counts, average quality, recent rewards, and milestone progress.
+9. Data Explorer and project decision views show masked identity status, citizen score, average submission quality, rewarded citizen count, and noise-gate discard counts.
 
 ## Citizen Reward Lookup
 

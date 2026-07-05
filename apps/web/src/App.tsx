@@ -132,6 +132,7 @@ type BatchRun = {
   finishedAt?: string;
   status: string;
   processed: number;
+  discarded?: number;
   failed: number;
   error?: string;
 };
@@ -2545,14 +2546,18 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
   const [pipelineNotice, setPipelineNotice] = useState("Scheduled batch mode. Use on-demand run during evaluation.");
   const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
   const selectedIntake = intakeAudit?.entries.find((entry) => entry.rawIntakeId === selectedIntakeId) ?? intakeAudit?.entries[0];
-  const rawIntakeRows = Object.values(intakeAudit?.rawStatus ?? {}).reduce((sum, count) => sum + count, 0);
-  const citizenSubmissionRows = Math.max(demoData.visibleRows, rawIntakeRows, dashboard.totals.submissions);
+  const rawStatus = intakeAudit?.rawStatus ?? {};
+  const rawIntakeRows = Object.values(rawStatus).reduce((sum, count) => sum + count, 0);
+  const discardedRows = rawStatus.discarded ?? 0;
+  const activeRawRows = Math.max(0, rawIntakeRows - discardedRows);
+  const citizenSubmissionRows = Math.max(demoData.visibleRows, activeRawRows, dashboard.totals.submissions);
   const liveProjectRows = Math.max(rows.length, dashboard.projects.length);
   const demandSignalRows = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
   const publicDatasetRows = Math.max(18, demoData.demoRows);
   const ragEvidenceRows = Math.max(942, (intakeAudit?.entries.length ?? 0) * 8 + dashboard.projects.length * 6);
   const sourceCards = [
-    { name: "Citizen Submissions", rows: citizenSubmissionRows, freshness: rawIntakeRows ? `${formatCount(rawIntakeRows)} raw intake` : "Live", health: "Ready" },
+    { name: "Citizen Submissions", rows: citizenSubmissionRows, freshness: activeRawRows ? `${formatCount(activeRawRows)} active raw intake` : "Live", health: "Ready" },
+    { name: "Noise Gate", rows: discardedRows, freshness: "score <25 discarded", health: "Active" },
     { name: "Ranked Projects", rows: liveProjectRows, freshness: "Current batch", health: "Ready" },
     { name: "Demand Signals", rows: demandSignalRows, freshness: "15 min", health: "Ready" },
     { name: "Public Datasets", rows: publicDatasetRows, freshness: "Daily", health: "Partial" },
@@ -2579,7 +2584,7 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
     setPipelineNotice("Running on-demand AI pipeline...");
     try {
       const result = await requestJson<{ run: BatchRun }>("/api/batch/run?limit=10", { method: "POST" } as RequestInit);
-      setPipelineNotice(`On-demand run ${result.run.status}: processed ${result.run.processed}, failed ${result.run.failed}.`);
+      setPipelineNotice(`On-demand run ${result.run.status}: processed ${result.run.processed}, discarded ${result.run.discarded ?? 0}, failed ${result.run.failed}.`);
       await refreshIntakeAudit();
     } catch (error) {
       setPipelineNotice(error instanceof Error ? `On-demand run failed: ${error.message}` : "On-demand run failed.");
@@ -2625,7 +2630,9 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
               <button className={entry.rawIntakeId === selectedIntake?.rawIntakeId ? "active" : ""} key={entry.rawIntakeId} onClick={() => setSelectedIntakeId(entry.rawIntakeId)} type="button">
                 <strong>{entry.channel.toUpperCase()} · {entry.shortReceipt}</strong>
                 <span>{entry.status} · {entry.placement.ward}</span>
-                <small>{entry.input.mediaType !== "none" ? entry.input.mediaType : "text"} · reward {entry.reward.citizenScore ?? "pending"}/100 · {entry.identity.aadhaarMasked ?? "no Aadhaar"}</small>
+                <small>
+                  {entry.input.mediaType !== "none" ? entry.input.mediaType : "text"} · {entry.status === "discarded_noise" ? "discarded" : "reward"} {entry.reward.citizenScore ?? "pending"}/100 · {entry.identity.aadhaarMasked ?? "no Aadhaar"}
+                </small>
               </button>
             ))}
             {!intakeAudit?.entries.length ? <p className="empty-state">No submitted Awaaz records yet. Submit from the citizen app, then run pipeline.</p> : null}

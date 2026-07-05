@@ -130,12 +130,18 @@ export type RawIntakePayload = {
   identityMode?: AadhaarIdentityMode;
   text?: string;
   media?: string;
+  discarded?: boolean;
+  discardedAt?: string;
+  discardedScore?: number;
+  discardedQualityScore?: number;
+  discardedReason?: string;
+  discardedThreshold?: number;
 };
 
 export type RawIntakeRecord = {
   id: string;
   payload: RawIntakePayload;
-  status: "pending" | "processing" | "processed" | "failed";
+  status: "pending" | "processing" | "processed" | "failed" | "discarded";
   attempts: number;
   error?: string;
   createdAt: string;
@@ -148,6 +154,7 @@ export type BatchRun = {
   finishedAt?: string;
   status: "running" | "succeeded" | "failed";
   processed: number;
+  discarded: number;
   failed: number;
   error?: string;
 };
