@@ -1264,7 +1264,7 @@ function parseAccessToken(token: string): AccessTokenPayload | null {
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessTokenPayload;
     if (parsed.sub !== "loksetu-access" || !parsed.exp || Date.parse(parsed.exp) <= Date.now()) return null;
-    if (parsed.kind !== "app" && parsed.kind !== "citizen") parsed.kind = "app";
+    if (parsed.kind !== "app" && parsed.kind !== "citizen") return null;
     return parsed;
   } catch {
     return null;
