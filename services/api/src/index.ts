@@ -287,7 +287,7 @@ app.use("/api", (request, response, next) => {
     return;
   }
   if (parsedToken.kind === "citizen" && !isCitizenTokenRoute(request)) {
-    response.status(403).json({ error: "Citizen token is limited to citizen submission and receipt routes" });
+    response.status(403).json({ error: "Citizen token is limited to citizen submission, receipt, and reward routes" });
     return;
   }
   next();
