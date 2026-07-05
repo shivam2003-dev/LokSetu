@@ -9,6 +9,7 @@ import {
   Database,
   DatabaseZap,
   Droplets,
+  Eye,
   EyeOff,
   FileText,
   Flag,
@@ -900,6 +901,7 @@ class AuthError extends Error {
 function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -975,8 +977,10 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
             Password
             <span className="login-input-wrap">
               <Lock size={21} />
-              <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" type="password" value={password} />
-              <EyeOff size={21} />
+              <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" type={showPassword ? "text" : "password"} value={password} />
+              <button aria-label={showPassword ? "Hide password" : "Show password"} className="login-password-toggle" onClick={() => setShowPassword((value) => !value)} type="button">
+                {showPassword ? <Eye size={21} /> : <EyeOff size={21} />}
+              </button>
             </span>
           </label>
           <div className="login-row">
