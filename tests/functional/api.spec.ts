@@ -16,13 +16,8 @@ async function newApiContext() {
       });
     }
   }
-  const citizenSession = await loginContext.post("/api/citizen/session", { data: { aadhaarNumber: "234567890123" } });
-  const payload = citizenSession.ok() ? await citizenSession.json() as { token?: string } : {};
   await loginContext.dispose();
-  return request.newContext({
-    baseURL: apiUrl,
-    extraHTTPHeaders: payload.token ? { Authorization: `Bearer ${payload.token}` } : undefined
-  });
+  return request.newContext({ baseURL: apiUrl });
 }
 
 test.describe("API functional flow", () => {
@@ -62,6 +57,16 @@ test.describe("API functional flow", () => {
     const citizenSessionPayload = await citizenSession.json();
     expect(citizenSessionPayload.citizen.aadhaarMasked).toBe("xxxx-xxxx-0123");
     expect(citizenSessionPayload.citizen.aadhaarVerified).toBe(false);
+    const citizenApi = await request.newContext({
+      baseURL: apiUrl,
+      extraHTTPHeaders: { Authorization: `Bearer ${citizenSessionPayload.token}` }
+    });
+    const citizenPriorities = await citizenApi.get("/api/priorities?scope=global");
+    expect([200, 403]).toContain(citizenPriorities.status());
+    if (citizenPriorities.status() === 403) {
+      expect((await citizenPriorities.json()).error).toContain("Citizen token is limited");
+    }
+    await citizenApi.dispose();
 
     const submission = await api.post("/api/submissions", {
       data: {

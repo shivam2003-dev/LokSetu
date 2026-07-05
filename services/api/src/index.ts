@@ -215,7 +215,7 @@ app.post("/api/citizen/session", (request, response) => {
   }
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
   response.json({
-    token: signAccessToken(expiresAt, `citizen-${identity.aadhaarLast4}`, identity),
+    token: signAccessToken(expiresAt, `citizen-${identity.aadhaarLast4}`, "citizen", identity),
     expiresAt,
     citizen: {
       aadhaarMasked: identity.aadhaarMasked,
@@ -231,8 +231,13 @@ app.use("/api", (request, response, next) => {
     return;
   }
   const token = authTokenFromRequest(request);
-  if (!token || !verifyAccessToken(token)) {
+  const parsedToken = token ? parseAccessToken(token) : null;
+  if (!parsedToken) {
     response.status(401).json({ error: "Login required" });
+    return;
+  }
+  if (parsedToken.kind === "citizen" && !isCitizenTokenRoute(request)) {
+    response.status(403).json({ error: "Citizen token is limited to citizen submission and receipt routes" });
     return;
   }
   next();
@@ -1234,12 +1239,13 @@ function publicUser(user: UserProfile) {
 type AccessTokenPayload = {
   sub?: string;
   user?: string;
+  kind?: "app" | "citizen";
   exp?: string;
   citizenIdentity?: AadhaarIdentity;
 };
 
-function signAccessToken(expiresAt: string, username = "password-access", citizenIdentity?: AadhaarIdentity) {
-  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, exp: expiresAt, citizenIdentity })).toString("base64url");
+function signAccessToken(expiresAt: string, username = "password-access", kind: "app" | "citizen" = "app", citizenIdentity?: AadhaarIdentity) {
+  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, kind, exp: expiresAt, citizenIdentity })).toString("base64url");
   const signature = createHmac("sha256", authSecret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
@@ -1258,6 +1264,7 @@ function parseAccessToken(token: string): AccessTokenPayload | null {
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessTokenPayload;
     if (parsed.sub !== "loksetu-access" || !parsed.exp || Date.parse(parsed.exp) <= Date.now()) return null;
+    if (parsed.kind !== "app" && parsed.kind !== "citizen") parsed.kind = "app";
     return parsed;
   } catch {
     return null;
@@ -1273,6 +1280,12 @@ function authTokenFromRequest(request: express.Request) {
 function citizenIdentityFromRequest(request: express.Request): AadhaarIdentity | undefined {
   const token = authTokenFromRequest(request);
   return token ? parseAccessToken(token)?.citizenIdentity : undefined;
+}
+
+function isCitizenTokenRoute(request: express.Request): boolean {
+  const path = request.originalUrl.split("?")[0];
+  return (request.method === "POST" && path === "/api/citizen/submit") ||
+    (request.method === "GET" && path.startsWith("/api/citizen/receipts/"));
 }
 
 function constantTimeEqual(left: string, right: string) {
