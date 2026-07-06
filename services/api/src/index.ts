@@ -4,21 +4,31 @@ import helmet from "helmet";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import pino from "pino";
 import { z } from "zod";
+import { buildAadhaarIdentity } from "./citizenIdentity.js";
 import { areaMappings, demoSubmissions, mpProfiles, seedUsers, sourceSnapshots } from "./data.js";
 import {
+  countRawIntakesByAadhaarHash,
   countRawIntakesByStatus,
+  ensureAuthUser,
+  findAuthUserByUsername,
   findRawIntakesByReceiptPrefix,
   initDatabase,
   insertRawIntake,
   insertSubmission,
   isDatabaseEnabled,
   listRecentBatchRuns,
-  listSubmissions
+  listRecentRawIntakes,
+  listSubmissions,
+  upsertAuthUser,
+  verifyPassword
 } from "./db.js";
-import { extractWhatsAppMessages, intakeSchema, toRawIntakePayload } from "./intake.js";
+import { runBatch } from "./batch.js";
+import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayload } from "./intake.js";
+import { buildDiscardedIntakeDecision, isDiscardedPayload, MINIMUM_STORED_CITIZEN_SCORE } from "./noisePolicy.js";
 import { buildDashboard } from "./pipeline.js";
-import { DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
+import { AadhaarIdentity, DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
+import { indicRuntimeMode } from "./indicLanguage.js";
 import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
@@ -30,11 +40,14 @@ const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
 const accessPassword = process.env.APP_ACCESS_PASSWORD ?? "";
-const authSecret = process.env.APP_AUTH_SECRET ?? accessPassword;
+const authSecret = process.env.APP_AUTH_SECRET || accessPassword || "loksetu-local-auth-secret";
+const defaultAdminUsername = process.env.APP_ADMIN_USERNAME ?? "";
+const defaultAdminPassword = process.env.APP_ADMIN_PASSWORD ?? "";
 let memorySubmissions = [...demoSubmissions];
 let demoDataEnabled = true;
 const demoSubmissionIds = new Set(demoSubmissions.map((submission) => submission.id));
-const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string }> = [];
+const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string; processedAt?: string }> = [];
+const memoryDiscardedIntakes: Array<{ id: string; payload: ReturnType<typeof toRawIntakePayload>; createdAt: string; processedAt: string; error: string }> = [];
 const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
@@ -82,7 +95,20 @@ const copilotQuerySchema = z.object({
 
 const receiptIdSchema = z.string().trim().toLowerCase().regex(/^[a-f0-9-]{8,36}$/);
 const loginSchema = z.object({
+  username: z.string().trim().min(1).max(80).optional(),
   password: z.string().min(1)
+});
+
+const aadhaarSessionSchema = z.object({
+  aadhaarNumber: z.string().trim().min(1).max(32)
+});
+
+const adminUserCreateSchema = z.object({
+  actorId: z.string().default("admin-user-shivam"),
+  username: z.string().trim().min(3).max(80),
+  password: z.string().min(4).max(200),
+  role: z.enum(["mp", "ward_staff", "district_admin", "state_admin"]).default("district_admin"),
+  displayName: z.string().trim().min(2).max(120)
 });
 
 const mapBoundaryQuerySchema = z.object({
@@ -144,6 +170,45 @@ const simulationScenarios = [
   }
 ];
 
+const rewardMilestones = [
+  {
+    id: "ready",
+    title: "Ready to earn",
+    threshold: 0,
+    description: "Start with one clear public-interest report."
+  },
+  {
+    id: "civic-starter",
+    title: "Civic Starter",
+    threshold: 100,
+    description: "You have earned your first full-report equivalent."
+  },
+  {
+    id: "ward-watch",
+    title: "Ward Watch",
+    threshold: 250,
+    description: "You are regularly helping surface local problems."
+  },
+  {
+    id: "problem-solver",
+    title: "Problem Solver",
+    threshold: 500,
+    description: "Your reports are building a useful evidence trail."
+  },
+  {
+    id: "public-champion",
+    title: "Public Champion",
+    threshold: 1_000,
+    description: "You are a high-value contributor for your area."
+  },
+  {
+    id: "loksetu-guardian",
+    title: "LokSetu Guardian",
+    threshold: 2_000,
+    description: "You have a long-running record of useful civic reporting."
+  }
+] as const;
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -157,18 +222,59 @@ app.get("/healthz", (_request, response) => {
   });
 });
 
-app.post("/api/auth/login", (request, response) => {
+app.post("/api/auth/login", async (request, response) => {
   if (!accessPassword) {
     response.json({ token: "", expiresAt: "", disabled: true });
     return;
   }
   const parsed = loginSchema.safeParse(request.body);
-  if (!parsed.success || !constantTimeEqual(parsed.data.password, accessPassword)) {
+  if (!parsed.success) {
+    response.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+  const loginUsername = parsed.data.username?.trim();
+  const authUser = loginUsername ? await findAuthUserByUsername(loginUsername) : null;
+  const passwordMatchesUser = authUser ? verifyPassword(parsed.data.password, authUser.passwordHash) : false;
+  const passwordOnlyFallback = !loginUsername && constantTimeEqual(parsed.data.password, accessPassword);
+  if (!passwordMatchesUser && !passwordOnlyFallback) {
     response.status(401).json({ error: "Invalid password" });
     return;
   }
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
-  response.json({ token: signAccessToken(expiresAt), expiresAt });
+  response.json({
+    token: signAccessToken(expiresAt, authUser?.username ?? "password-access"),
+    expiresAt,
+    user: authUser ? { id: authUser.id, username: authUser.username, role: authUser.role, displayName: authUser.displayName } : undefined
+  });
+});
+
+app.post("/api/citizen/session", (request, response) => {
+  const parsed = aadhaarSessionSchema.safeParse(request.body);
+  const identity = parsed.success ? buildAadhaarIdentity(parsed.data.aadhaarNumber) : null;
+  if (!parsed.success || !identity) {
+    response.status(400).json({ error: "Enter a 12-digit Aadhaar number." });
+    return;
+  }
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  response.json({
+    token: signAccessToken(expiresAt, `citizen-${identity.aadhaarLast4}`, "citizen", identity),
+    expiresAt,
+    citizen: {
+      aadhaarMasked: identity.aadhaarMasked,
+      aadhaarVerified: identity.aadhaarVerified,
+      identityMode: identity.identityMode
+    }
+  });
+});
+
+app.post("/api/citizen/rewards/lookup", async (request, response) => {
+  const parsed = aadhaarSessionSchema.safeParse(request.body);
+  const identity = parsed.success ? buildAadhaarIdentity(parsed.data.aadhaarNumber) : null;
+  if (!parsed.success || !identity) {
+    response.status(400).json({ error: "Enter a 12-digit Aadhaar number." });
+    return;
+  }
+  response.json(await buildCitizenRewardSummary(identity));
 });
 
 app.use("/api", (request, response, next) => {
@@ -177,14 +283,20 @@ app.use("/api", (request, response, next) => {
     return;
   }
   const token = authTokenFromRequest(request);
-  if (!token || !verifyAccessToken(token)) {
+  const parsedToken = token ? parseAccessToken(token) : null;
+  if (!parsedToken) {
     response.status(401).json({ error: "Login required" });
+    return;
+  }
+  if (parsedToken.kind === "citizen" && !isCitizenTokenRoute(request)) {
+    response.status(403).json({ error: "Citizen token is limited to citizen submission, receipt, and reward routes" });
     return;
   }
   next();
 });
 
 app.get("/api/client-config", (_request, response) => {
+  const mapplsMapSdkKey = process.env.PUBLIC_MAPPLS_MAP_SDK_KEY ?? process.env.MAPPLS_MAP_SDK_KEY ?? "";
   const browserMapsKey =
     process.env.PUBLIC_GOOGLE_MAPS_API_KEY ??
     process.env.GOOGLE_MAPS_BROWSER_API_KEY ??
@@ -194,10 +306,12 @@ app.get("/api/client-config", (_request, response) => {
   response.json({
     dataMode: isDatabaseEnabled() ? "postgres" : "memory",
     maps: {
-      enabled: Boolean(browserMapsKey),
+      enabled: Boolean(mapplsMapSdkKey || browserMapsKey),
       apiKey: browserMapsKey,
       mapId: process.env.GOOGLE_MAPS_MAP_ID ?? process.env.VITE_GOOGLE_MAPS_MAP_ID ?? "",
-      source: browserMapsKey ? "runtime-api" : "not-configured"
+      provider: mapplsMapSdkKey ? "mappls" : browserMapsKey ? "google" : "osm",
+      mapplsKey: mapplsMapSdkKey,
+      source: mapplsMapSdkKey ? "runtime-mappls-api" : browserMapsKey ? "runtime-api" : "not-configured"
     },
     citizenAppUrl: process.env.CITIZEN_APP_URL ?? "",
     generatedAt: new Date().toISOString()
@@ -269,6 +383,30 @@ app.get("/api/users", (_request, response) => {
   });
 });
 
+app.post("/api/admin/users", async (request, response) => {
+  const parsed = adminUserCreateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+  const actor = getActor(parsed.data.actorId);
+  if (!actor || !["district_admin", "state_admin"].includes(actor.role)) {
+    response.status(403).json({ error: "Only district/state admins can create users" });
+    return;
+  }
+  const user = await upsertAuthUser({
+    username: parsed.data.username,
+    password: parsed.data.password,
+    role: parsed.data.role,
+    displayName: parsed.data.displayName
+  });
+  response.status(201).json({
+    user: user
+      ? { id: user.id, username: user.username, role: user.role, displayName: user.displayName, createdAt: user.createdAt }
+      : { username: parsed.data.username, role: parsed.data.role, displayName: parsed.data.displayName }
+  });
+});
+
 app.get("/api/session", (request, response) => {
   const user = getActor(String(request.query.userId ?? "u-kalindi-01"));
   if (!user) {
@@ -326,10 +464,11 @@ app.get("/api/ai-ops", (_request, response) => {
   response.json({
     provider: aiMode === "openai-compatible" ? "OpenAI-compatible Gemini" : "Vertex AI Gemini",
     mode: aiMode,
+    indicLanguageMode: indicRuntimeMode(),
     tasks: [
-      "text: language detection, translation, civic category",
+      "text: Sarvam/Bhashini-ready language detection and translation, then Gemini civic category",
       "image: civic-issue validation and caption (Gemini vision)",
-      "voice: speech transcription and category (Gemini multimodal)",
+      "voice: Sarvam/Bhashini-ready transcription and translation, then Gemini classification",
       "dedupe and theme clustering",
       "evidence-grounded MP summaries"
     ],
@@ -594,11 +733,230 @@ app.get("/api/integrations", (_request, response) => {
 app.get("/api/batch/status", async (_request, response) => {
   response.json({
     mode: "batch",
-    rawIntake: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length },
+    rawIntake: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length, discarded: memoryDiscardedIntakes.length },
     recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns() : [],
     schedule: process.env.BATCH_SCHEDULE ?? "*/15 * * * *"
   });
 });
+
+app.post("/api/batch/run", async (request, response) => {
+  const limit = Math.min(25, Math.max(1, Number(request.query.limit ?? 10)));
+  if (isDatabaseEnabled()) {
+    const run = await runBatch(limit);
+    response.json({ mode: "on-demand", run });
+    return;
+  }
+
+  const run = {
+    id: crypto.randomUUID(),
+    startedAt: new Date().toISOString(),
+    status: "running" as const,
+    processed: 0,
+    discarded: 0,
+    failed: 0
+  };
+  const records = memoryRawQueue.splice(0, limit);
+  for (const record of records) {
+    try {
+      const { submission } = await processIntake(record.payload as ReturnType<typeof toRawIntakePayload>, { rawIntakeId: record.id, batchId: run.id });
+      const discard = buildDiscardedIntakeDecision(record.payload as ReturnType<typeof toRawIntakePayload>, submission);
+      if (discard) {
+        memoryDiscardedIntakes.unshift({
+          id: record.id,
+          payload: discard.payload,
+          createdAt: record.createdAt,
+          processedAt: discard.payload.discardedAt ?? new Date().toISOString(),
+          error: discard.reason
+        });
+        run.discarded += 1;
+        continue;
+      }
+      memorySubmissions.push(submission);
+      run.processed += 1;
+    } catch (error) {
+      run.failed += 1;
+      memoryRawQueue.push({ ...record, payload: record.payload });
+    }
+  }
+  const completedRun = {
+    ...run,
+    status: run.failed > 0 ? "failed" as const : "succeeded" as const,
+    finishedAt: new Date().toISOString()
+  };
+  response.json({ mode: "on-demand", run: completedRun });
+});
+
+app.get("/api/intake/audit", async (_request, response) => {
+  const submissions = await getSubmissions();
+  const rawRecords = isDatabaseEnabled()
+    ? await listRecentRawIntakes(30)
+    : [
+        ...memoryRawQueue.map((record) => ({
+          id: record.id,
+          payload: record.payload as ReturnType<typeof toRawIntakePayload>,
+          status: "pending" as const,
+          attempts: 0,
+          createdAt: record.createdAt,
+          processedAt: undefined
+        })),
+        ...memoryDiscardedIntakes.map((record) => ({
+          id: record.id,
+          payload: record.payload,
+          status: "discarded" as const,
+          attempts: 1,
+          error: record.error,
+          createdAt: record.createdAt,
+          processedAt: record.processedAt
+        }))
+      ]
+        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+        .slice(0, 30);
+  const byRawId = new Map(submissions.filter((submission) => submission.rawIntakeId).map((submission) => [submission.rawIntakeId, submission]));
+  response.json({
+    generatedAt: new Date().toISOString(),
+    processingMode: "scheduled batch with on-demand evaluator run",
+    rawStatus: isDatabaseEnabled() ? await countRawIntakesByStatus() : { pending: memoryRawQueue.length, discarded: memoryDiscardedIntakes.length },
+    recentRuns: isDatabaseEnabled() ? await listRecentBatchRuns(5) : [],
+    samples: [
+      {
+        type: "text",
+        label: "School sanitation complaint",
+        href: "/demo-assets/janvaani-text-complaint.txt",
+        expected: "Education / Sanitation issue in Kalindi Nagar"
+      },
+      {
+        type: "image",
+        label: "Road damage photo prompt",
+        href: "/demo-assets/janvaani-road-damage.svg",
+        expected: "Roads issue with image-summary validation"
+      },
+      {
+        type: "voice",
+        label: "Short Hindi/English voice script",
+        href: "/demo-assets/janvaani-voice-script.txt",
+        expected: "Voice channel checks speech transcription and category routing"
+      }
+    ],
+    entries: rawRecords.map((record) => {
+      const submission = byRawId.get(record.id);
+      const legacyFallback = Boolean(submission?.aiFallbackUsed);
+      const payload = record.payload;
+      const discarded = record.status === "discarded" || isDiscardedPayload(payload);
+      return {
+        rawIntakeId: record.id,
+        shortReceipt: record.id.slice(0, 8),
+        status: submission ? (legacyFallback ? "ai_retry_required" : "processed") : discarded ? "discarded_noise" : record.status,
+        attempts: record.attempts,
+        submittedAt: record.createdAt,
+        processedAt: submission?.processedAt ?? record.processedAt,
+        channel: payload.channel,
+        input: {
+          language: payload.language ?? "auto",
+          text: payload.text?.slice(0, 500) ?? "",
+          hasMedia: Boolean(payload.media),
+          mediaType: payload.media?.startsWith("data:image/") ? "image" : payload.media?.startsWith("data:audio/") ? "audio" : payload.media?.startsWith("data:video/") ? "video" : "none",
+          urgency: payload.urgency,
+          rating: payload.rating,
+          privacyMode: payload.privacyMode
+        },
+        identity: {
+          aadhaarMasked: discarded ? undefined : submission?.aadhaarMasked ?? payload.aadhaarMasked,
+          aadhaarVerified: discarded ? false : submission?.aadhaarVerified ?? payload.aadhaarVerified ?? false,
+          identityMode: discarded ? "discarded_noise" : submission?.identityMode ?? payload.identityMode ?? "not_collected"
+        },
+        reward: submission
+          ? {
+              citizenScore: submission.citizenScore,
+              qualityScore: submission.submissionQualityScore ?? submission.citizenScore,
+              rewardPoints: submission.rewardPoints ?? submission.citizenScore,
+              rewardBand: submission.rewardBand ?? "useful",
+              reasons: submission.rewardReasons ?? []
+            }
+          : discarded
+            ? {
+                citizenScore: payload.discardedScore ?? null,
+                qualityScore: payload.discardedQualityScore ?? payload.discardedScore ?? null,
+                rewardPoints: 0,
+                rewardBand: "discarded_noise",
+                reasons: [payload.discardedReason ?? `Score below ${MINIMUM_STORED_CITIZEN_SCORE}/100; raw issue payload was discarded as noise.`]
+              }
+          : {
+              citizenScore: null,
+              qualityScore: null,
+              rewardPoints: null,
+              rewardBand: "pending_ai_score",
+              reasons: ["AI quality and reward score will be available after batch processing."]
+            },
+        placement: {
+          state: discarded ? "not_stored" : submission?.state ?? payload.state ?? "pending",
+          district: discarded ? "not_stored" : submission?.district ?? payload.district ?? "pending",
+          ward: discarded ? "discarded_noise" : submission?.ward ?? payload.ward ?? "pending",
+          mpId: submission?.mpId,
+          locationLabel: submission?.locationLabel
+        },
+        ai: submission
+          ? legacyFallback
+            ? {
+                category: "AI retry required",
+                detectedLanguage: submission.detectedLanguage,
+                normalizedText: "Model inference pending. Previous deterministic placeholder suppressed.",
+                transcript: submission.transcript,
+                imageSummary: submission.imageSummary,
+                isCivicIssue: false,
+                noiseReason: "AI model retry required",
+                providerMode: "vertex",
+                model: "Gemini retry required",
+                fallbackUsed: false,
+                explanation: "This record was created before AI-only processing enforcement. Run the pipeline again after Vertex/Gemini succeeds; deterministic offline output is not used for ranking."
+              }
+            : {
+              category: submission.category,
+              detectedLanguage: submission.detectedLanguage,
+              normalizedText: submission.normalizedText,
+              transcript: submission.transcript,
+              imageSummary: submission.imageSummary,
+              isCivicIssue: submission.isCivicIssue ?? true,
+              noiseReason: submission.noiseReason,
+              providerMode: submission.aiProviderMode,
+              model: submission.aiModel,
+              fallbackUsed: submission.aiFallbackUsed,
+              explanation: auditExplanation(submission)
+            }
+          : discarded
+            ? {
+                category: "discarded_noise",
+                detectedLanguage: payload.language ?? "not_stored",
+                normalizedText: "",
+                isCivicIssue: false,
+                noiseReason: payload.discardedReason,
+                providerMode: "ai_noise_gate",
+                model: "score-threshold",
+                fallbackUsed: false,
+                explanation: `AI score ${payload.discardedScore ?? 0}/100 was below ${payload.discardedThreshold ?? MINIMUM_STORED_CITIZEN_SCORE}/100. The record was discarded as noise and the raw text/media/Aadhaar hash were not retained.`
+              }
+          : {
+              category: "pending_batch",
+              detectedLanguage: "pending",
+              explanation: "Raw intake is stored. Run on-demand pipeline to classify, transcribe/OCR media, route constituency, score, and index in RAG."
+            }
+      };
+    })
+  });
+});
+
+function auditExplanation(submission: Awaited<ReturnType<typeof getSubmissions>>[number]): string {
+  const media =
+    submission.mediaType && submission.mediaType !== "none"
+      ? `${submission.channel} intake with ${submission.mediaType} evidence`
+      : `${submission.channel} intake`;
+  const area = [submission.ward, submission.district, submission.state].filter(Boolean).join(", ");
+  const route = submission.mpId === "unassigned" ? "held for constituency review" : `routed to ${submission.mpId}`;
+  const confidence = submission.aiFallbackUsed ? "AI retry required" : `${submission.aiProviderMode ?? "AI"} model`;
+  if (submission.isCivicIssue === false) {
+    return `${media} was held for review as non-addressable or noisy input. Reason: ${submission.noiseReason ?? "AI could not confirm a public civic issue"}. It was placed in ${area} from captured location but not treated as normal ranked demand.`;
+  }
+  return `${media} was tagged as ${submission.category}, placed in ${area}, ${route}, and scored ${submission.citizenScore}/100 from AI quality ${submission.submissionQualityScore ?? submission.citizenScore}/100, urgency ${submission.urgency}/5, citizen rating ${submission.rating}/5, language ${submission.detectedLanguage}, and ${confidence}.`;
+}
 
 app.get("/api/audit", async (_request, response) => {
   const submissions = await getSubmissions();
@@ -629,7 +987,12 @@ app.post("/api/submissions", async (request, response) => {
 
 // Simple citizen app submission. Same engine, friendlier receipt.
 app.post("/api/citizen/submit", async (request, response) => {
-  await handleIntake(request.body, response, { friendly: true });
+  await handleIntake(request.body, response, {
+    friendly: true,
+    requireLocation: true,
+    requireCitizenIdentity: true,
+    citizenIdentity: citizenIdentityFromRequest(request)
+  });
 });
 
 app.get("/api/citizen/receipts/:receiptId", async (request, response) => {
@@ -648,6 +1011,15 @@ app.get("/api/citizen/receipts/:receiptId", async (request, response) => {
     return;
   }
   response.json(status);
+});
+
+app.get("/api/citizen/rewards/me", async (request, response) => {
+  const identity = citizenIdentityFromRequest(request);
+  if (!identity) {
+    response.status(401).json({ error: "Citizen Aadhaar session required" });
+    return;
+  }
+  response.json(await buildCitizenRewardSummary(identity));
 });
 
 app.get("/api/simulation/scenarios", (_request, response) => {
@@ -787,6 +1159,16 @@ app.post("/api/whatsapp/simulate", async (request, response) => {
 
 initDatabase()
   .then(() => {
+    if (!defaultAdminUsername || !defaultAdminPassword) return;
+    return ensureAuthUser({
+      id: `admin-user-${defaultAdminUsername.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      username: defaultAdminUsername,
+      password: defaultAdminPassword,
+      role: "state_admin",
+      displayName: "Platform Admin"
+    });
+  })
+  .then(() => {
     app.listen(port, () => {
       logger.info({ port, database: isDatabaseEnabled() ? "postgres" : "memory", ai: aiMode }, "api listening");
     });
@@ -803,15 +1185,24 @@ initDatabase()
 async function handleIntake(
   body: unknown,
   response: express.Response,
-  options: { friendly?: boolean } = {}
+  options: { friendly?: boolean; requireLocation?: boolean; requireCitizenIdentity?: boolean; citizenIdentity?: AadhaarIdentity } = {}
 ) {
   const parsed = intakeSchema.safeParse(body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid submission", details: parsed.error.flatten() });
     return;
   }
+  const citizenIdentity = options.citizenIdentity ?? buildAadhaarIdentity(parsed.data.aadhaarNumber);
+  if (options.requireCitizenIdentity && !citizenIdentity) {
+    response.status(400).json({ error: "Aadhaar required", message: "Enter a 12-digit Aadhaar number before submitting." });
+    return;
+  }
+  if (options.requireLocation && (typeof parsed.data.lat !== "number" || typeof parsed.data.lng !== "number")) {
+    response.status(400).json({ error: "Location required", message: "Allow browser location before submitting an issue." });
+    return;
+  }
 
-  const raw = await enqueueRaw(toRawIntakePayload(parsed.data));
+  const raw = await enqueueRaw(toRawIntakePayload(parsed.data, citizenIdentity ?? undefined));
   const submissions = await getSubmissions();
   logger.info({ rawIntakeId: raw.id, channel: parsed.data.channel }, "submission queued for batch processing");
 
@@ -819,7 +1210,10 @@ async function handleIntake(
     rawIntakeId: raw.id,
     status: "pending_batch",
     message: "Submission received. It will be processed in the next scheduled batch run.",
-    nextStep: "Batch worker will run OCR/speech/Vertex AI classification, scoring, clustering, and MP routing.",
+    nextStep: "Batch worker will run OCR/speech/Vertex AI classification, AI quality scoring, reward points, clustering, and MP routing.",
+    aadhaarMasked: raw.payload.aadhaarMasked,
+    aadhaarVerified: raw.payload.aadhaarVerified ?? false,
+    identityMode: raw.payload.identityMode,
     dashboard: options.friendly ? undefined : applyProjectOverrides(buildDashboard(submissions))
   });
 }
@@ -887,22 +1281,52 @@ async function findReceiptStatus(receiptId: string) {
   const submissions = await getSubmissions();
   const records = isDatabaseEnabled()
     ? await findRawIntakesByReceiptPrefix(prefix)
-    : memoryRawQueue
-        .filter((item) => item.id.startsWith(prefix))
-        .slice(0, 2)
-        .map((item) => ({
-          id: item.id,
-          payload: item.payload as ReturnType<typeof toRawIntakePayload>,
-          status: "pending" as const,
-          attempts: 0,
-          createdAt: item.createdAt,
-          processedAt: undefined
-        }));
+    : [
+        ...memoryRawQueue
+          .filter((item) => item.id.startsWith(prefix))
+          .map((item) => ({
+            id: item.id,
+            payload: item.payload as ReturnType<typeof toRawIntakePayload>,
+            status: "pending" as const,
+            attempts: 0,
+            createdAt: item.createdAt,
+            processedAt: undefined
+          })),
+        ...memoryDiscardedIntakes
+          .filter((item) => item.id.startsWith(prefix))
+          .map((item) => ({
+            id: item.id,
+            payload: item.payload,
+            status: "discarded" as const,
+            attempts: 1,
+            error: item.error,
+            createdAt: item.createdAt,
+            processedAt: item.processedAt
+          }))
+      ].slice(0, 2);
   if (records.length > 1) return "ambiguous";
   const record = records[0];
   if (!record) return null;
   const submission = submissions.find((item) => item.rawIntakeId === record.id);
   const payload = record.payload;
+  const discarded = record.status === "discarded" || isDiscardedPayload(payload);
+  if (!submission && discarded) {
+    return {
+      receiptId: record.id.slice(0, 8),
+      status: "discarded_noise",
+      nextStep: `This report scored below ${payload.discardedThreshold ?? MINIMUM_STORED_CITIZEN_SCORE}/100 and was discarded as noise. Submit again with exact place, public problem, people affected, urgency, and evidence.`,
+      submittedAt: record.createdAt,
+      processedAt: record.processedAt ?? payload.discardedAt,
+      area: "Not stored after discard",
+      category: "discarded_noise",
+      citizenScore: payload.discardedScore,
+      submissionQualityScore: payload.discardedQualityScore ?? payload.discardedScore,
+      rewardPoints: 0,
+      rewardBand: "discarded_noise",
+      rewardReasons: [payload.discardedReason ?? "Score below the minimum storage threshold."],
+      privacy: "Low-score noise was discarded. Raw text, media, location, and Aadhaar hash were not retained."
+    };
+  }
   return {
     receiptId: record.id.slice(0, 8),
     status: submission ? "processed" : record.status === "pending" ? "pending_batch" : record.status,
@@ -918,8 +1342,107 @@ async function findReceiptStatus(receiptId: string) {
     state: submission?.state ?? payload.state,
     mpId: submission?.mpId,
     batchId: submission?.batchId,
+    aadhaarMasked: submission?.aadhaarMasked ?? payload.aadhaarMasked,
+    aadhaarVerified: submission?.aadhaarVerified ?? payload.aadhaarVerified ?? false,
+    identityMode: submission?.identityMode ?? payload.identityMode,
+    citizenScore: submission?.citizenScore,
+    submissionQualityScore: submission?.submissionQualityScore,
+    rewardPoints: submission?.rewardPoints,
+    rewardBand: submission?.rewardBand,
+    rewardReasons: submission?.rewardReasons,
     privacy: "Public-safe status only. Citizen identity and raw personal details are not shown."
   };
+}
+
+async function buildCitizenRewardSummary(identity: AadhaarIdentity) {
+  const submissions = (await getSubmissions()).filter((submission) => submission.aadhaarHash === identity.aadhaarHash);
+  const rewards = submissions.map(rewardPointsForSubmission);
+  const qualityScores = submissions
+    .map((submission) => numericScore(submission.submissionQualityScore ?? submission.citizenScore))
+    .filter((score): score is number => typeof score === "number");
+  const totalRewardPoints = rewards.reduce((sum, value) => sum + value, 0);
+  const rawStatusCounts = await rawStatusCountsForAadhaarHash(identity.aadhaarHash, submissions);
+  const milestone = rewardMilestoneFor(totalRewardPoints);
+  const recentRewards = submissions
+    .slice()
+    .sort((left, right) => Date.parse(right.processedAt ?? right.createdAt) - Date.parse(left.processedAt ?? left.createdAt))
+    .slice(0, 5)
+    .map((submission) => ({
+      receiptId: submission.rawIntakeId?.slice(0, 8) ?? submission.id.slice(0, 8),
+      rewardPoints: rewardPointsForSubmission(submission),
+      rewardBand: submission.rewardBand ?? rewardBandFromPoints(rewardPointsForSubmission(submission)),
+      qualityScore: numericScore(submission.submissionQualityScore ?? submission.citizenScore) ?? 0,
+      category: submission.category,
+      area: submission.locationLabel ?? [submission.ward, submission.district, submission.state].filter(Boolean).join(", "),
+      processedAt: submission.processedAt ?? submission.createdAt
+    }));
+
+  return {
+    aadhaarMasked: identity.aadhaarMasked,
+    aadhaarVerified: identity.aadhaarVerified,
+    identityMode: identity.identityMode,
+    totalRewardPoints,
+    processedSubmissionCount: submissions.length,
+    pendingSubmissionCount: (rawStatusCounts.pending ?? 0) + (rawStatusCounts.processing ?? 0),
+    failedSubmissionCount: rawStatusCounts.failed ?? 0,
+    averageQualityScore: qualityScores.length ? Math.round(qualityScores.reduce((sum, value) => sum + value, 0) / qualityScores.length) : 0,
+    excellentReports: rewards.filter((points) => points >= 90).length,
+    strongReports: rewards.filter((points) => points >= 75).length,
+    latestRewardedAt: recentRewards[0]?.processedAt,
+    currentMilestone: milestone.current,
+    nextMilestone: milestone.next,
+    pointsToNextMilestone: milestone.pointsToNext,
+    milestoneProgressPercent: milestone.progressPercent,
+    recentRewards,
+    privacy: "Cumulative rewards are matched by salted Aadhaar hash. Raw Aadhaar numbers are not stored or returned."
+  };
+}
+
+async function rawStatusCountsForAadhaarHash(
+  aadhaarHash: string,
+  submissions: Awaited<ReturnType<typeof getSubmissions>>
+): Promise<Record<string, number>> {
+  if (isDatabaseEnabled()) return countRawIntakesByAadhaarHash(aadhaarHash);
+  const processedRawIds = new Set(submissions.map((submission) => submission.rawIntakeId).filter(Boolean));
+  return memoryRawQueue.reduce<Record<string, number>>((counts, record) => {
+    const payload = record.payload as ReturnType<typeof toRawIntakePayload>;
+    if (payload.aadhaarHash !== aadhaarHash || processedRawIds.has(record.id)) return counts;
+    counts.pending = (counts.pending ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function rewardPointsForSubmission(submission: Awaited<ReturnType<typeof getSubmissions>>[number]) {
+  return numericScore(submission.rewardPoints ?? submission.citizenScore) ?? 0;
+}
+
+function numericScore(value: unknown) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return undefined;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function rewardBandFromPoints(points: number) {
+  if (points >= 90) return "excellent";
+  if (points >= 75) return "strong";
+  if (points >= 50) return "useful";
+  return "needs_detail";
+}
+
+function rewardMilestoneFor(totalRewardPoints: number) {
+  const current = rewardMilestones.reduce<(typeof rewardMilestones)[number]>(
+    (best, milestone) => (totalRewardPoints >= milestone.threshold ? milestone : best),
+    rewardMilestones[0]
+  );
+  const next = rewardMilestones.find((milestone) => milestone.threshold > totalRewardPoints);
+  const pointsToNext = next ? Math.max(0, next.threshold - totalRewardPoints) : 0;
+  const progressPercent = next
+    ? Math.max(
+        0,
+        Math.min(100, Math.round(((totalRewardPoints - current.threshold) / (next.threshold - current.threshold)) * 100))
+      )
+    : 100;
+  return { current, next, pointsToNext, progressPercent };
 }
 
 function getActor(userId: string): UserProfile | undefined {
@@ -930,6 +1453,7 @@ function publicUser(user: UserProfile) {
   return {
     id: user.id,
     role: user.role,
+    username: user.username,
     displayName: user.displayName,
     privacyMode: user.privacyMode,
     mpId: user.mpId,
@@ -938,24 +1462,38 @@ function publicUser(user: UserProfile) {
   };
 }
 
-function signAccessToken(expiresAt: string) {
-  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", exp: expiresAt })).toString("base64url");
+type AccessTokenPayload = {
+  sub?: string;
+  user?: string;
+  kind?: "app" | "citizen";
+  exp?: string;
+  citizenIdentity?: AadhaarIdentity;
+};
+
+function signAccessToken(expiresAt: string, username = "password-access", kind: "app" | "citizen" = "app", citizenIdentity?: AadhaarIdentity) {
+  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, kind, exp: expiresAt, citizenIdentity })).toString("base64url");
   const signature = createHmac("sha256", authSecret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
 function verifyAccessToken(token: string) {
+  return Boolean(parseAccessToken(token));
+}
+
+function parseAccessToken(token: string): AccessTokenPayload | null {
   const [payload, signature] = token.split(".");
-  if (!payload || !signature) return false;
+  if (!payload || !signature) return null;
   const validSignature = [authSecret, accessPassword]
     .filter(Boolean)
     .some((secret) => constantTimeEqual(signature, createHmac("sha256", secret).update(payload).digest("base64url")));
-  if (!validSignature) return false;
+  if (!validSignature) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; exp?: string };
-    return parsed.sub === "loksetu-access" && Boolean(parsed.exp) && Date.parse(parsed.exp!) > Date.now();
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessTokenPayload;
+    if (parsed.sub !== "loksetu-access" || !parsed.exp || Date.parse(parsed.exp) <= Date.now()) return null;
+    if (parsed.kind !== "app" && parsed.kind !== "citizen") return null;
+    return parsed;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -963,6 +1501,19 @@ function authTokenFromRequest(request: express.Request) {
   const header = request.header("authorization");
   if (header?.toLowerCase().startsWith("bearer ")) return header.slice(7).trim();
   return request.header("x-loksetu-access-token")?.trim();
+}
+
+function citizenIdentityFromRequest(request: express.Request): AadhaarIdentity | undefined {
+  const token = authTokenFromRequest(request);
+  return token ? parseAccessToken(token)?.citizenIdentity : undefined;
+}
+
+function isCitizenTokenRoute(request: express.Request): boolean {
+  const path = request.originalUrl.split("?")[0];
+  return (request.method === "POST" && path === "/api/citizen/submit") ||
+    (request.method === "POST" && path === "/api/citizen/rewards/lookup") ||
+    (request.method === "GET" && path === "/api/citizen/rewards/me") ||
+    (request.method === "GET" && path.startsWith("/api/citizen/receipts/"));
 }
 
 function constantTimeEqual(left: string, right: string) {
@@ -998,6 +1549,11 @@ function publicProjectDto(project: RankedProject, includeDetail = false) {
     ratings: project.ratings,
     status: project.status,
     rationale: project.rationale,
+    rewardSummary: {
+      averageCitizenScore: project.averageCitizenScore ?? 0,
+      averageSubmissionQuality: project.averageSubmissionQuality ?? 0,
+      rewardedCitizenCount: project.rewardedCitizenCount ?? 0
+    },
     sourceSnapshotIds: sourceIds,
     sourceFreshness: project.sourceFreshness ?? "missing",
     evidence: includeDetail ? project.evidence : project.evidence.slice(0, 3),

@@ -1,11 +1,15 @@
 import {
+  ArrowRight,
+  BarChart3,
   Bot,
   Briefcase,
+  Building2,
   Construction,
   CheckCircle2,
   Database,
   DatabaseZap,
   Droplets,
+  EyeOff,
   FileText,
   Flag,
   Globe2,
@@ -14,10 +18,11 @@ import {
   Home,
   Languages,
   Lock,
-  LockKeyhole,
+  Mail,
   Map as MapIcon,
   MapPinned,
   MapPin,
+  Menu,
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,7 +30,9 @@ import {
   Scale,
   Search,
   Send,
+  ShieldCheck,
   Star,
+  Target,
   Trash2,
   TrendingUp,
   Users,
@@ -64,6 +71,9 @@ type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: "review" | "shortlist" | "approved";
+  averageCitizenScore?: number;
+  averageSubmissionQuality?: number;
+  rewardedCitizenCount?: number;
 };
 
 type DashboardResponse = {
@@ -99,6 +109,8 @@ type ClientConfig = {
     enabled: boolean;
     apiKey: string;
     mapId: string;
+    provider?: "mappls" | "google" | "osm";
+    mapplsKey?: string;
     source: string;
   };
   citizenAppUrl?: string;
@@ -112,6 +124,57 @@ type DemoDataStatus = {
   visibleRows: number;
   totalRows: number;
   label: string;
+};
+
+type BatchRun = {
+  id: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: string;
+  processed: number;
+  discarded?: number;
+  failed: number;
+  error?: string;
+};
+
+type IntakeAuditResponse = {
+  generatedAt: string;
+  processingMode: string;
+  rawStatus: Record<string, number>;
+  recentRuns: BatchRun[];
+  samples: Array<{ type: string; label: string; href: string; expected: string }>;
+  entries: Array<{
+    rawIntakeId: string;
+    shortReceipt: string;
+    status: string;
+    attempts: number;
+    submittedAt: string;
+    processedAt?: string;
+    channel: string;
+    input: { language: string; text: string; hasMedia: boolean; mediaType: string; urgency: number; rating: number; privacyMode: boolean };
+    identity: { aadhaarMasked?: string; aadhaarVerified: boolean; identityMode: string };
+    reward: {
+      citizenScore: number | null;
+      qualityScore: number | null;
+      rewardPoints: number | null;
+      rewardBand: string;
+      reasons: string[];
+    };
+    placement: { state: string; district: string; ward: string; mpId?: string; locationLabel?: string };
+    ai: {
+      category: string;
+      detectedLanguage?: string;
+      normalizedText?: string;
+      transcript?: string;
+      imageSummary?: string;
+      isCivicIssue?: boolean;
+      noiseReason?: string;
+      providerMode?: string;
+      model?: string;
+      fallbackUsed?: boolean;
+      explanation: string;
+    };
+  }>;
 };
 
 type BoundaryLevel = "state" | "district" | "constituency" | "ward";
@@ -194,11 +257,26 @@ type RagStatusResponse = {
 
 type Hotspot = DashboardResponse["hotspots"][number];
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
+type TileFallbackState = {
+  zoom: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  tiles: Array<{ x: number; y: number; url: string; left: number; top: number; width: number; height: number }>;
+};
 declare global {
   interface Window {
     google?: any;
+    mappls?: {
+      Map?: new (element: string | HTMLElement, options: Record<string, unknown>) => unknown;
+      Marker?: new (options: Record<string, unknown>) => unknown;
+    };
     __loksetuGoogleMapsPromise?: Promise<void>;
     __loksetuGoogleMapsLoaded?: () => void;
+    __loksetuMapplsPromise?: Promise<void>;
+    __loksetuMapplsLoaded?: () => void;
+    gm_authFailure?: () => void;
   }
 }
 
@@ -206,6 +284,7 @@ const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
 const envGoogleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
 const envGoogleMapsMapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "").trim();
+const envMapplsMapSdkKey = (import.meta.env.VITE_MAPPLS_MAP_SDK_KEY ?? "").trim();
 const configuredCitizenAppUrl = (import.meta.env.VITE_CITIZEN_APP_URL ?? "").trim();
 const citizenAppUrl =
   configuredCitizenAppUrl ||
@@ -242,6 +321,64 @@ const activeNavIdByPage: Record<Page, string> = {
   compare: "compare",
   settings: "settings"
 };
+
+const tourStorageKey = "janvaaniTourComplete";
+const tourSteps: Array<{ page: Page; title: string; body: string; action: string }> = [
+  {
+    page: "overview",
+    title: "Start with constituency health",
+    body: "Overview gives the MP a 360 degree readout: demand, risk, projects, alerts, citizen satisfaction, and AI priority score.",
+    action: "Use this as the evaluator landing view."
+  },
+  {
+    page: "overview",
+    title: "Citizen submission starts the flow",
+    body: "Open JanVaani from the sidebar to submit a citizen issue. The API ingests it, deduplicates signals, ranks demand, and updates dashboards.",
+    action: "Click Open JanVaani for the public submission journey."
+  },
+  {
+    page: "signals",
+    title: "Demand Signals explains what citizens need",
+    body: "Signals combine citizen intake, official rows, documents, news, web sources, search trends, and connector status into ranked issues.",
+    action: "Use state, district, ward, and issue filters to show Delhi demo data."
+  },
+  {
+    page: "copilot",
+    title: "RAG answers are grounded",
+    body: "The AI Assistant has Online, Submitted Issue, and All modes. Answers cite evidence from reports, complaints, documents, weather, maps, and web signals.",
+    action: "Ask why a road, school, water, or health issue is ranked."
+  },
+  {
+    page: "recommendations",
+    title: "Recommendations become execution priorities",
+    body: "AI ranks projects by urgency, beneficiaries, budget, confidence, evidence, and constituency impact.",
+    action: "Review High, Medium, and Low priority cards."
+  },
+  {
+    page: "projects",
+    title: "Projects track delivery",
+    body: "The MP can review project cards, Kanban, Gantt timeline, expenditure, milestone status, media, documents, and AI delay alerts.",
+    action: "Select a project card to update the execution panels."
+  },
+  {
+    page: "map",
+    title: "Map shows where action is needed",
+    body: "GIS view layers roads, schools, hospitals, PHCs, complaints, projects, flood zones, density, boundaries, and demand heatmaps.",
+    action: "Click hotspots to open evidence and project details."
+  },
+  {
+    page: "reports",
+    title: "Reports package the decision",
+    body: "Generate official Monthly, Budget, Demand Signals, Infrastructure, Development, and AI Recommendation reports with exports.",
+    action: "Use export buttons for presentation-ready files."
+  },
+  {
+    page: "settings",
+    title: "Admin controls keep it governed",
+    body: "Settings cover users, roles, API keys, integrations, vector database health, indexing, audit logs, security, billing, and backups.",
+    action: "Verify connection status and data-source health here."
+  }
+];
 
 const fallbackProject: RankedProject = {
   id: "kalindi-nagar-education",
@@ -288,10 +425,12 @@ const fallbackContext: ContextResponse = {
 const fallbackClientConfig: ClientConfig = {
   dataMode: "memory",
   maps: {
-    enabled: Boolean(envGoogleMapsApiKey),
+    enabled: Boolean(envMapplsMapSdkKey || envGoogleMapsApiKey),
     apiKey: envGoogleMapsApiKey,
     mapId: envGoogleMapsMapId,
-    source: envGoogleMapsApiKey ? "vite-env" : "not-configured"
+    provider: envMapplsMapSdkKey ? "mappls" : envGoogleMapsApiKey ? "google" : "osm",
+    mapplsKey: envMapplsMapSdkKey,
+    source: envMapplsMapSdkKey ? "vite-mappls-env" : envGoogleMapsApiKey ? "vite-env" : "not-configured"
   },
   citizenAppUrl,
   generatedAt: new Date().toISOString()
@@ -334,15 +473,18 @@ function pageFromHash(): Page {
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
     const response = await apiFetch(path);
+    if (response.status === 401) throw new AuthError();
     if (!response.ok) throw new Error(path);
     return response.json();
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
     return fallback;
   }
 }
 
-async function requestJson<T>(path: string): Promise<T> {
-  const response = await apiFetch(path);
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, init);
+  if (response.status === 401) throw new AuthError();
   if (!response.ok) throw new Error(path);
   return response.json();
 }
@@ -378,6 +520,9 @@ export default function App() {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPageState] = useState<Page>(() => pageFromHash());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(tourStorageKey) !== "1");
+  const [tourStep, setTourStep] = useState(0);
   const [scope, setScope] = useState<Scope>("local");
   const [state, setState] = useState("Delhi");
   const [district, setDistrict] = useState("Central Delhi");
@@ -423,7 +568,30 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   function setPage(next: Page) {
     setPageState(next);
+    setMobileNavOpen(false);
     if (window.location.hash !== `#${next}`) window.history.replaceState(null, "", `#${next}`);
+  }
+
+  function startTour() {
+    setTourStep(0);
+    setTourOpen(true);
+    setMobileNavOpen(false);
+    setPage(tourSteps[0].page);
+  }
+
+  function closeTour() {
+    localStorage.setItem(tourStorageKey, "1");
+    setTourOpen(false);
+  }
+
+  function moveTour(nextStep: number) {
+    if (nextStep >= tourSteps.length) {
+      closeTour();
+      return;
+    }
+    const boundedStep = Math.max(0, nextStep);
+    setTourStep(boundedStep);
+    setPage(tourSteps[boundedStep].page);
   }
 
   async function refreshAll() {
@@ -456,6 +624,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       setConnectionError(null);
       setNotice("Live");
     } catch (error) {
+      if (error instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setApiConnected(false);
       setConnectionError(error instanceof Error ? error.message : "API unavailable");
       setNotice("Disconnected");
@@ -471,6 +643,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       setConnectionError(null);
       setNotice("Live");
     } catch (error) {
+      if (error instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setApiConnected(false);
       setConnectionError(error instanceof Error ? error.message : "API unavailable");
       setNotice("Disconnected");
@@ -480,11 +656,16 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   async function updateDemoData(action: "load" | "disable") {
     try {
       const response = await apiFetch(`/api/demo-data/${action}`, { method: "POST" });
+      if (response.status === 401) throw new AuthError();
       if (!response.ok) throw new Error(`Demo data ${action} failed`);
       const nextDemoData = await response.json() as DemoDataStatus;
       setDemoData(nextDemoData);
       await refreshAll();
     } catch (error) {
+      if (error instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setConnectionError(error instanceof Error ? error.message : "Demo data update failed");
       setNotice("Disconnected");
     }
@@ -531,7 +712,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       <aside className="sidebar" aria-label="JanVaani navigation">
         <div className="brand">
           <div className="brand-mark">JV</div>
@@ -578,14 +759,25 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
       </aside>
+      <button className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} type="button" />
 
       <section className="workspace">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">{pageLabel(page)}</p>
-            <h2>{pageTitle(page)}</h2>
+          <div className="topbar-title-row">
+            <button className="mobile-nav-button" onClick={() => setMobileNavOpen(true)} type="button">
+              <Menu size={18} />
+              Menu
+            </button>
+            <div>
+              <p className="eyebrow">{pageLabel(page)}</p>
+              <h2>{pageTitle(page)}</h2>
+            </div>
           </div>
           <div className="topbar-actions">
+            <button className="tour-button" onClick={startTour} type="button">
+              <Star size={16} />
+              Tour
+            </button>
             <div className={`demo-data-toggle ${demoData.enabled ? "enabled" : "disabled"}`} aria-label="Demo data controls">
               <span>{demoData.label}</span>
               <small>{formatCount(demoData.visibleRows)} visible / {formatCount(demoData.demoRows)} demo</small>
@@ -625,7 +817,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
         {page === "signals" ? <DemandSignalsPage /> : null}
-        {page === "explorer" ? <DataExplorerPage dashboard={dashboard} /> : null}
+        {page === "explorer" ? <DataExplorerPage dashboard={dashboard} demoData={demoData} /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
         {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} /> : null}
@@ -634,7 +826,57 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "compare" ? <ComparePage /> : null}
         {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
+      {tourOpen ? (
+        <TourOverlay
+          current={tourStep}
+          steps={tourSteps}
+          onBack={() => moveTour(tourStep - 1)}
+          onClose={closeTour}
+          onNext={() => moveTour(tourStep + 1)}
+          onOpenCitizen={() => window.open(effectiveCitizenAppUrl, "_blank", "noopener,noreferrer")}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function TourOverlay({
+  current,
+  steps,
+  onBack,
+  onClose,
+  onNext,
+  onOpenCitizen
+}: {
+  current: number;
+  steps: typeof tourSteps;
+  onBack: () => void;
+  onClose: () => void;
+  onNext: () => void;
+  onOpenCitizen: () => void;
+}) {
+  const step = steps[current];
+  const isSubmissionStep = current === 1;
+  return (
+    <section className="tour-overlay" role="dialog" aria-modal="true" aria-label="JanVaani evaluator tour">
+      <div className="tour-card">
+        <header>
+          <span>Solution tour</span>
+          <button aria-label="Close tour" onClick={onClose} type="button"><X size={18} /></button>
+        </header>
+        <div className="tour-progress" aria-label={`Step ${current + 1} of ${steps.length}`}>
+          {steps.map((item, index) => <i className={index <= current ? "active" : ""} key={item.title} />)}
+        </div>
+        <strong>{step.title}</strong>
+        <p>{step.body}</p>
+        <mark>{step.action}</mark>
+        <footer>
+          <button disabled={current === 0} onClick={onBack} type="button">Back</button>
+          {isSubmissionStep ? <button className="secondary" onClick={onOpenCitizen} type="button">Open JanVaani</button> : null}
+          <button className="primary" onClick={onNext} type="button">{current === steps.length - 1 ? "Finish" : "Next"}</button>
+        </footer>
+      </div>
+    </section>
   );
 }
 
@@ -649,7 +891,14 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   });
 }
 
+class AuthError extends Error {
+  constructor() {
+    super("Session expired. Please log in again.");
+  }
+}
+
 function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -662,7 +911,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ username, password })
       });
       const payload = await response.json() as { token?: string; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Login failed");
@@ -676,26 +925,84 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-panel">
-        <div className="brand-lock">
-          <span>JV</span>
-          <LockKeyhole size={22} />
+      <section className="login-showcase" aria-label="JanVaani AI platform introduction">
+        <div className="login-brand-row">
+          <span className="login-brand-mark" aria-hidden="true" />
+          <div>
+            <h1>JanVaani <em>AI</em></h1>
+            <p>People's Priorities. Smart Governance.</p>
+          </div>
         </div>
-        <p className="eyebrow">Access Required</p>
-        <h1>JanVaani AI Login</h1>
-        <p>Enter the deployment password before using AI, submission, map, or dashboard APIs.</p>
+        <div className="login-copy-block">
+          <h2>AI-Powered Intelligence for People-First Governance</h2>
+          <p>Turning citizen voices, public data, and AI insights into better decisions and stronger communities.</p>
+        </div>
+        <div className="login-benefits">
+          {[
+            { icon: Users, title: "Understand People's Priorities", detail: "Collect and analyze multilingual citizen feedback from multiple channels." },
+            { icon: BarChart3, title: "Data-Driven Decisions", detail: "Leverage AI and real-time data to identify what matters most." },
+            { icon: Target, title: "Plan. Act. Impact.", detail: "Prioritize projects, allocate resources, and track real impact on the ground." },
+            { icon: ShieldCheck, title: "Transparent & Accountable", detail: "Evidence-based insights with full transparency and citizen trust." }
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <article key={item.title}>
+                <span><Icon size={22} /></span>
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <small className="login-image-credit">Image: Wikimedia Commons / Pinakpani, CC BY-SA 4.0</small>
+      </section>
+
+      <section className="login-panel" aria-label="Admin sign in">
+        <div className="login-card-emblem"><Building2 size={42} /></div>
+        <h2>Welcome Back</h2>
+        <p>Sign in to continue to JanVaani AI</p>
         <form onSubmit={login}>
           <label>
-            Password
-            <input autoFocus onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
+            Email or Mobile Number
+            <span className="login-input-wrap">
+              <Mail size={21} />
+              <input autoFocus autoComplete="username" onChange={(event) => setUsername(event.target.value)} placeholder="Enter your email or mobile number" type="text" value={username} />
+            </span>
           </label>
+          <label>
+            Password
+            <span className="login-input-wrap">
+              <Lock size={21} />
+              <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" type="password" value={password} />
+              <EyeOff size={21} />
+            </span>
+          </label>
+          <div className="login-row">
+            <label className="remember-row"><input defaultChecked type="checkbox" /> Remember me</label>
+            <button className="link-button" type="button">Forgot Password?</button>
+          </div>
           {error ? <div className="login-error">{error}</div> : null}
-          <button className="primary" disabled={busy || !password.trim()} type="submit">
-            {busy ? <RefreshCw className="spin" size={16} /> : <Lock size={16} />}
-            Login
+          <button className="login-submit" disabled={busy || !username.trim() || !password.trim()} type="submit">
+            {busy ? <RefreshCw className="spin" size={18} /> : null}
+            Sign In
+            <ArrowRight size={22} />
           </button>
         </form>
+        <div className="login-divider"><span>or continue with</span></div>
+        <div className="sso-grid">
+          {["MP SSO", "Google", "Microsoft", "Apple"].map((item) => (
+            <button disabled key={item} type="button">{item}</button>
+          ))}
+        </div>
+        <p className="login-admin-note">Don't have an account? <button type="button">Contact Administrator</button></p>
       </section>
+      <footer className="login-security-strip" aria-label="Security posture">
+        <span><ShieldCheck size={17} /> Secure & Encrypted</span>
+        <span><Lock size={17} /> Data Privacy Compliant</span>
+        <span><Building2 size={17} /> Government Grade Security</span>
+      </footer>
     </main>
   );
 }
@@ -763,14 +1070,18 @@ function ConnectionBanner({ error }: { error: string | null }) {
 function mergeClientConfig(config: ClientConfig): ClientConfig {
   const apiKey = config.maps.apiKey || envGoogleMapsApiKey;
   const mapId = config.maps.mapId || envGoogleMapsMapId;
+  const mapplsKey = config.maps.mapplsKey || envMapplsMapSdkKey;
+  const provider = mapplsKey ? "mappls" : apiKey ? "google" : "osm";
   return {
     ...config,
     maps: {
       ...config.maps,
-      enabled: Boolean(apiKey),
+      enabled: Boolean(mapplsKey || apiKey),
       apiKey,
       mapId,
-      source: config.maps.source || (apiKey ? "runtime-api" : "not-configured")
+      provider,
+      mapplsKey,
+      source: config.maps.source || (mapplsKey ? "runtime-mappls-api" : apiKey ? "runtime-api" : "not-configured")
     },
     citizenAppUrl: config.citizenAppUrl?.trim() || citizenAppUrl
   };
@@ -1022,7 +1333,8 @@ function IssueMap({
   selectProject: (id: string) => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
-  const [mapState, setMapState] = useState<MapLoadState>(maps.apiKey ? "idle" : "fallback");
+  const [mapState, setMapState] = useState<MapLoadState>(maps.enabled ? "idle" : "fallback");
+  const [fallbackReason, setFallbackReason] = useState(maps.enabled ? "" : "Map SDK key is not configured.");
   const [gisAction, setGisAction] = useState("Ready to run GIS analysis.");
   const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
@@ -1042,21 +1354,78 @@ function IssueMap({
   ];
 
   useEffect(() => {
-    if (!maps.apiKey || hotspots.length === 0 || !mapRef.current) {
+    if (!maps.enabled || hotspots.length === 0 || !mapRef.current) {
+      setFallbackReason(!maps.enabled ? "Map SDK key is not configured." : "No hotspot coordinates available for the current filters.");
       setMapState("fallback");
       return;
+    }
+
+    if (maps.provider === "mappls" && maps.mapplsKey) {
+      let cancelled = false;
+      const activateFallback = (reason: string) => {
+        if (cancelled) return;
+        setFallbackReason(reason);
+        if (mapRef.current) mapRef.current.replaceChildren();
+        setMapState("fallback");
+      };
+      setFallbackReason("");
+      setMapState("loading");
+      loadMapplsMaps(maps.mapplsKey)
+        .then(() => {
+          if (cancelled || !mapRef.current || !window.mappls?.Map) return;
+          mapRef.current.replaceChildren();
+          mapRef.current.id ||= `mappls-${Math.random().toString(36).slice(2)}`;
+          const center = hotspots[0] ?? { lat: 28.6139, lng: 77.2090 };
+          const map = new window.mappls.Map(mapRef.current.id, {
+            center: [center.lat, center.lng],
+            zoom: hotspots.length > 1 ? 5 : 12,
+            geolocation: false,
+            clickableIcons: false
+          });
+          if (window.mappls.Marker) {
+            hotspots.forEach((hotspot, index) => {
+              try {
+                new window.mappls!.Marker!({
+                  map,
+                  position: { lat: hotspot.lat, lng: hotspot.lng },
+                  title: `${index + 1}. ${hotspot.category} - ${hotspot.ward}`,
+                  draggable: false
+                });
+              } catch {
+                // Mappls marker API varies by SDK version. Base map remains usable.
+              }
+            });
+          }
+          setMapState("ready");
+        })
+        .catch(() => activateFallback("Mappls Map SDK failed to load. Showing the live OpenStreetMap tile layer."));
+      return () => {
+        cancelled = true;
+      };
     }
 
     let cancelled = false;
     let mapErrorTimer = 0;
     const originalConsoleError = window.console.error;
+    const originalAuthFailure = window.gm_authFailure;
+    const activateFallback = (reason: string) => {
+      if (cancelled) return;
+      setFallbackReason(reason);
+      if (mapRef.current) mapRef.current.replaceChildren();
+      setMapState("fallback");
+    };
+    window.gm_authFailure = () => {
+      activateFallback("Google Maps rejected the browser key. Showing the live OpenStreetMap tile layer.");
+      originalAuthFailure?.();
+    };
     window.console.error = (...args: unknown[]) => {
       const message = args.map(String).join(" ");
       if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError/.test(message)) {
-        setMapState("fallback");
+        activateFallback("Google Maps demo-key quota or browser-key access failed. Showing the live OpenStreetMap tile layer.");
       }
       originalConsoleError.apply(window.console, args);
     };
+    setFallbackReason("");
     setMapState("loading");
 
     loadGoogleMaps(maps.apiKey, maps.mapId)
@@ -1087,20 +1456,21 @@ function IssueMap({
         setMapState("ready");
         mapErrorTimer = window.setTimeout(() => {
           if (!cancelled && mapRef.current?.querySelector(".gm-err-container, .gm-err-title, .gm-err-message")) {
-            setMapState("fallback");
+            activateFallback("Google Maps could not render in this browser session. Showing the live OpenStreetMap tile layer.");
           }
         }, 1500);
       })
       .catch(() => {
-        if (!cancelled) setMapState("fallback");
+        activateFallback("Google Maps script failed to load. Showing the live OpenStreetMap tile layer.");
       });
 
     return () => {
       cancelled = true;
       if (mapErrorTimer) window.clearTimeout(mapErrorTimer);
       window.console.error = originalConsoleError;
+      window.gm_authFailure = originalAuthFailure;
     };
-  }, [hotspots, maps.apiKey, maps.mapId, selectProject]);
+  }, [hotspots, maps.enabled, maps.provider, maps.mapplsKey, maps.apiKey, maps.mapId, selectProject]);
 
   return (
     <div className="map-stack gis-dashboard">
@@ -1109,7 +1479,7 @@ function IssueMap({
           <strong>Geospatial demand hotspots</strong>
           <span>Premium GIS control room · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {clusters.clusters.length} AI clusters</span>
         </div>
-        <small className={`map-state ${mapState}`}>{mapStatusText(mapState)}</small>
+        <small className={`map-state ${mapState}`}>{mapStatusText(mapState, maps.provider)}</small>
       </div>
       <div className="map-layout gis-layout">
         <aside className="gis-control-panel" aria-label="GIS layer controls">
@@ -1205,7 +1575,7 @@ function IssueMap({
       </div>
       {mapState === "fallback" ? (
         <p className="map-note">
-          Google Maps key not configured or unavailable. Showing the local geospatial fallback with the same backend hotspot coordinates.
+          {fallbackReason || "Google Maps is unavailable. Showing the live OpenStreetMap tile layer with the same backend hotspot coordinates."}
         </p>
       ) : null}
       <MapIntelligencePanel
@@ -1291,10 +1661,25 @@ function MapIntelligencePanel({
 }
 
 function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hotspots: Array<Hotspot & { projectId: string }>; selectedProjectId: string; selectProject: (projectId: string) => void }) {
+  const tileMap = useMemo(() => buildTileFallbackState(hotspots), [hotspots]);
   return (
-    <div className="fallback-map" aria-label="Local fallback map">
+    <div className="fallback-map osm-fallback-map" aria-label="Live tile-map fallback">
+      <div className="osm-tile-layer" aria-hidden="true">
+        {tileMap.tiles.map((tile) => (
+          <img
+            alt=""
+            decoding="async"
+            draggable={false}
+            key={`${tileMap.zoom}-${tile.x}-${tile.y}`}
+            loading="eager"
+            src={tile.url}
+            style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}
+          />
+        ))}
+      </div>
+      <div className="osm-map-tint" aria-hidden="true" />
       {hotspots.map((hotspot, index) => {
-        const position = indiaProjection(hotspot.lat, hotspot.lng);
+        const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
         return (
           <button
             className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
@@ -1302,8 +1687,10 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
             style={{
               left: `${position.x}%`,
               top: `${position.y}%`,
-              width: `${48 + hotspot.intensity / 3}px`,
-              height: `${48 + hotspot.intensity / 3}px`
+              width: `${44 + hotspot.intensity / 4}px`,
+              height: `${44 + hotspot.intensity / 4}px`,
+              ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
+              ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
             }}
             onClick={() => selectProject(hotspot.projectId)}
             title={`${hotspot.category} in ${hotspot.ward}`}
@@ -1312,6 +1699,7 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
           </button>
         );
       })}
+      <div className="osm-attribution">Map tiles © OpenStreetMap contributors</div>
     </div>
   );
 }
@@ -1521,10 +1909,73 @@ function indiaProjection(lat: number, lng: number) {
   };
 }
 
-function mapStatusText(state: MapLoadState) {
-  if (state === "ready") return "Google Maps live";
+function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>): TileFallbackState {
+  const points = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
+  const lats = points.map((point) => point.lat);
+  const lngs = points.map((point) => point.lng);
+  const latSpan = Math.max(...lats) - Math.min(...lats);
+  const lngSpan = Math.max(...lngs) - Math.min(...lngs);
+  const maxSpan = Math.max(latSpan, lngSpan);
+  const zoom = maxSpan > 14 ? 5 : maxSpan > 6 ? 6 : maxSpan > 2.5 ? 7 : maxSpan > 1 ? 9 : 11;
+  const centerLat = lats.reduce((sum, value) => sum + value, 0) / points.length;
+  const centerLng = lngs.reduce((sum, value) => sum + value, 0) / points.length;
+  const centerX = lngToTileX(centerLng, zoom);
+  const centerY = latToTileY(centerLat, zoom);
+  const cols = zoom <= 6 ? 5.6 : 4.6;
+  const rows = zoom <= 6 ? 4.2 : 3.4;
+  const minX = centerX - cols / 2;
+  const maxX = centerX + cols / 2;
+  const minY = Math.max(0, centerY - rows / 2);
+  const maxY = centerY + rows / 2;
+  const tileMinX = Math.floor(minX);
+  const tileMaxX = Math.ceil(maxX);
+  const tileMinY = Math.floor(minY);
+  const tileMaxY = Math.ceil(maxY);
+  const worldTiles = 2 ** zoom;
+  const tiles: TileFallbackState["tiles"] = [];
+
+  for (let x = tileMinX; x < tileMaxX; x += 1) {
+    for (let y = tileMinY; y < tileMaxY; y += 1) {
+      if (y < 0 || y >= worldTiles) continue;
+      const wrappedX = ((x % worldTiles) + worldTiles) % worldTiles;
+      tiles.push({
+        x,
+        y,
+        url: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        left: ((x - minX) / (maxX - minX)) * 100,
+        top: ((y - minY) / (maxY - minY)) * 100,
+        width: (1 / (maxX - minX)) * 100,
+        height: (1 / (maxY - minY)) * 100
+      });
+    }
+  }
+
+  return { zoom, minX, maxX, minY, maxY, tiles };
+}
+
+function tileProjection(lat: number, lng: number, tileMap: TileFallbackState) {
+  const x = lngToTileX(lng, tileMap.zoom);
+  const y = latToTileY(lat, tileMap.zoom);
+  return {
+    x: Math.min(94, Math.max(6, ((x - tileMap.minX) / (tileMap.maxX - tileMap.minX)) * 100)),
+    y: Math.min(90, Math.max(10, ((y - tileMap.minY) / (tileMap.maxY - tileMap.minY)) * 100))
+  };
+}
+
+function lngToTileX(lng: number, zoom: number) {
+  return ((lng + 180) / 360) * 2 ** zoom;
+}
+
+function latToTileY(lat: number, zoom: number) {
+  const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+  const radians = clampedLat * Math.PI / 180;
+  return ((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2) * 2 ** zoom;
+}
+
+function mapStatusText(state: MapLoadState, provider?: ClientConfig["maps"]["provider"]) {
+  if (state === "ready") return provider === "mappls" ? "Mappls live" : "Google Maps live";
   if (state === "loading") return "Loading map";
-  return "Local map fallback";
+  return "Live tile map";
 }
 
 function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void) {
@@ -1584,6 +2035,23 @@ function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
   return window.__loksetuGoogleMapsPromise;
 }
 
+function loadMapplsMaps(key: string): Promise<void> {
+  if (window.mappls?.Map) return Promise.resolve();
+  if (window.__loksetuMapplsPromise) return window.__loksetuMapplsPromise;
+
+  window.__loksetuMapplsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    window.__loksetuMapplsLoaded = () => resolve();
+    script.src = `https://apis.mappls.com/advancedmaps/api/${encodeURIComponent(key)}/map_sdk?layer=vector&v=3.0&callback=__loksetuMapplsLoaded`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => reject(new Error("Mappls Maps failed to load"));
+    document.head.appendChild(script);
+  });
+
+  return window.__loksetuMapplsPromise;
+}
+
 function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[] }) {
   const prompts = ["Compare roads vs healthcare", "Which villages lack PHCs?", "Show delayed projects", "Summarize citizen feedback"];
   const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
@@ -1607,17 +2075,24 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
   const [error, setError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState("Assistant actions ready.");
+  const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
 
   const latestAnswer = [...messages].reverse().find((message) => message.answer)?.answer ?? null;
   const confidence = latestAnswer?.confidence ?? 97;
   const sourceCounts = buildGroundingSources(latestAnswer, ragStatus);
-  const evidenceItems = (latestAnswer?.citations.length ? latestAnswer.citations : latestAnswer?.retrievedContext.map((item) => ({
-    type: item.sourceType,
-    id: item.id,
-    title: item.title,
-    snippet: item.snippet
-  })) ?? []).slice(0, 5);
+  const evidenceItems = (
+    latestAnswer?.evidence.length
+      ? latestAnswer.evidence.map((item, index) => ({ type: item.type, id: `evidence-${index}`, title: item.type, snippet: item.text }))
+      : latestAnswer?.citations.length
+        ? latestAnswer.citations
+        : latestAnswer?.retrievedContext.map((item) => ({
+            type: item.sourceType,
+            id: item.id,
+            title: item.title,
+            snippet: item.snippet
+          })) ?? []
+  ).slice(0, 5);
   const selectedProject = projectId ? projects.find((project) => project.id === projectId) : projects[0];
   const relatedProjects = projects.slice(0, 3);
 
@@ -1630,6 +2105,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
     if (!cleanQuestion || busy) return;
     setBusy(true);
     setError("");
+    setStreamingSteps(["Understanding question and filters"]);
     const userMessage = { id: `user-${Date.now()}`, role: "user" as const, text: cleanQuestion };
     setMessages((current) => [...current, userMessage]);
     if (cleanQuestion === question.trim()) setQuestion("");
@@ -1638,6 +2114,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
       `Filters: state=${stateFilter}; district=${districtFilter}; constituency=${constituencyFilter}; timeRange=${timeRange}; topic=${topic}; mode=${mode}.`
     ].join("\n");
     try {
+      setStreamingSteps((steps) => [...steps, mode === "online" ? "Fetching live web/news/social signals" : mode === "submitted" ? "Searching submitted citizen issues" : "Searching submitted issues and online signals"]);
       const response = await apiFetch("/api/copilot/query", {
         method: "POST",
         body: JSON.stringify({ role, mode, language, question: groundedQuestion, projectId: projectId || undefined })
@@ -1652,7 +2129,9 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
         }
         throw new Error(message);
       }
+      setStreamingSteps((steps) => [...steps, "Grounding answer with citations and evidence"]);
       const payload = await response.json() as CopilotAnswer;
+      setStreamingSteps((steps) => [...steps, "Answer ready"]);
       setMessages((current) => [
         ...current,
         {
@@ -1666,7 +2145,14 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
       setError(queryError instanceof Error ? queryError.message : "Copilot query failed");
     } finally {
       setBusy(false);
+      window.setTimeout(() => setStreamingSteps([]), 1800);
     }
+  }
+
+  function askFollowUp(prompt: string) {
+    setQuestion(prompt);
+    setActionNotice(`Running follow-up: ${prompt}`);
+    askCopilot(prompt);
   }
 
   function exportAnswer(format: string) {
@@ -1740,9 +2226,14 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
           </form>
           <div className="prompt-strip rag-prompts">
             <span>Suggested Questions:</span>
-            {prompts.map((prompt) => <button key={prompt} onClick={() => askCopilot(prompt)} type="button">{prompt}</button>)}
+            {prompts.map((prompt) => <button disabled={busy} key={prompt} onClick={() => askFollowUp(prompt)} type="button">{prompt}</button>)}
           </div>
           {error ? <div className="error-state">{error}</div> : null}
+          {streamingSteps.length ? (
+            <div className="rag-stream-status" role="status" aria-live="polite">
+              {streamingSteps.map((step, index) => <span key={`${step}-${index}`}>{step}</span>)}
+            </div>
+          ) : null}
 
           <section className="panel rag-answer-card" aria-label="AI answer">
             <header>
@@ -1801,7 +2292,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
             </section>
             <section className="panel">
               <PanelTitle title="Ask Follow-up" icon={MessageSquareText} />
-              <div className="rag-followups">{(latestAnswer?.followUpQuestions ?? prompts).slice(0, 4).map((item) => <button key={item} onClick={() => askCopilot(item)} type="button">{item}</button>)}</div>
+              <div className="rag-followups">{(latestAnswer?.followUpQuestions ?? prompts).slice(0, 4).map((item) => <button disabled={busy} key={item} onClick={() => askFollowUp(item)} type="button">{item}</button>)}</div>
             </section>
           </section>
         </main>
@@ -1833,8 +2324,12 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
 }
 
 function buildGroundingSources(answer: CopilotAnswer | null, ragStatus: RagStatusResponse | null) {
-  if (answer?.citations.length || answer?.retrievedContext.length) {
-    const counts = [...answer.citations.map((item) => item.type), ...answer.retrievedContext.map((item) => item.sourceType)]
+  if (answer?.citations.length || answer?.retrievedContext.length || answer?.evidence.length) {
+    const counts = [
+      ...answer.citations.map((item) => item.type),
+      ...answer.retrievedContext.map((item) => item.sourceType),
+      ...answer.evidence.map((item) => item.type)
+    ]
       .reduce<Record<string, number>>((acc, item) => {
         acc[item] = (acc[item] ?? 0) + 1;
         return acc;
@@ -2043,19 +2538,58 @@ function KnowledgeBasePage() {
   );
 }
 
-function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
+function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardResponse; demoData: DemoDataStatus }) {
   const [queryNotice, setQueryNotice] = useState("Query not run yet.");
   const [activeExplorerFilter, setActiveExplorerFilter] = useState("No filter selected.");
+  const [intakeAudit, setIntakeAudit] = useState<IntakeAuditResponse | null>(null);
+  const [selectedIntakeId, setSelectedIntakeId] = useState("");
+  const [pipelineNotice, setPipelineNotice] = useState("Scheduled batch mode. Use on-demand run during evaluation.");
   const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
+  const selectedIntake = intakeAudit?.entries.find((entry) => entry.rawIntakeId === selectedIntakeId) ?? intakeAudit?.entries[0];
+  const rawStatus = intakeAudit?.rawStatus ?? {};
+  const rawIntakeRows = Object.values(rawStatus).reduce((sum, count) => sum + count, 0);
+  const discardedRows = rawStatus.discarded ?? 0;
+  const activeRawRows = Math.max(0, rawIntakeRows - discardedRows);
+  const citizenSubmissionRows = Math.max(demoData.visibleRows, activeRawRows, dashboard.totals.submissions);
+  const liveProjectRows = Math.max(rows.length, dashboard.projects.length);
+  const demandSignalRows = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
+  const publicDatasetRows = Math.max(18, demoData.demoRows);
+  const ragEvidenceRows = Math.max(942, (intakeAudit?.entries.length ?? 0) * 8 + dashboard.projects.length * 6);
   const sourceCards = [
-    { name: "Citizen Submissions", rows: dashboard.totals.submissions, freshness: "Live", health: "Ready" },
-    { name: "Ranked Projects", rows: rows.length, freshness: "Current batch", health: "Ready" },
-    { name: "Demand Signals", rows: dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0), freshness: "15 min", health: "Ready" },
-    { name: "Public Datasets", rows: 18, freshness: "Daily", health: "Partial" },
+    { name: "Citizen Submissions", rows: citizenSubmissionRows, freshness: activeRawRows ? `${formatCount(activeRawRows)} active raw intake` : "Live", health: "Ready" },
+    { name: "Noise Gate", rows: discardedRows, freshness: "score <25 discarded", health: "Active" },
+    { name: "Ranked Projects", rows: liveProjectRows, freshness: "Current batch", health: "Ready" },
+    { name: "Demand Signals", rows: demandSignalRows, freshness: "15 min", health: "Ready" },
+    { name: "Public Datasets", rows: publicDatasetRows, freshness: "Daily", health: "Partial" },
     { name: "Maps Layers", rows: 12, freshness: "Runtime", health: "Ready" },
-    { name: "RAG Evidence", rows: 942, freshness: "Indexed", health: "Ready" }
+    { name: "RAG Evidence", rows: ragEvidenceRows, freshness: "Indexed", health: "Ready" }
   ];
-  const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "confidence", "budget_cr", "progress", "citizen_impact"];
+  const schemaFields = ["project_id", "category", "state", "district", "ward", "priority_score", "citizen_score", "aadhaar_ref", "confidence", "citizen_impact"];
+
+  useEffect(() => {
+    refreshIntakeAudit();
+  }, []);
+
+  async function refreshIntakeAudit() {
+    try {
+      const next = await requestJson<IntakeAuditResponse>("/api/intake/audit");
+      setIntakeAudit(next);
+      setSelectedIntakeId((current) => (next.entries.some((entry) => entry.rawIntakeId === current) ? current : next.entries[0]?.rawIntakeId ?? ""));
+    } catch (error) {
+      setPipelineNotice(error instanceof Error ? `Intake audit unavailable: ${error.message}` : "Intake audit unavailable.");
+    }
+  }
+
+  async function runPipelineNow() {
+    setPipelineNotice("Running on-demand AI pipeline...");
+    try {
+      const result = await requestJson<{ run: BatchRun }>("/api/batch/run?limit=10", { method: "POST" } as RequestInit);
+      setPipelineNotice(`On-demand run ${result.run.status}: processed ${result.run.processed}, discarded ${result.run.discarded ?? 0}, failed ${result.run.failed}.`);
+      await refreshIntakeAudit();
+    } catch (error) {
+      setPipelineNotice(error instanceof Error ? `On-demand run failed: ${error.message}` : "On-demand run failed.");
+    }
+  }
 
   return (
     <section className="explorer-page">
@@ -2083,6 +2617,77 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
         ))}
       </section>
 
+      <section className="panel intake-audit-panel">
+        <PanelTitle title="Awaaz Intake Audit Trail" icon={MessageSquareText} detail={intakeAudit?.processingMode ?? "loading"} />
+        <div className="intake-audit-actions">
+          <button className="primary" onClick={runPipelineNow} type="button">Run on-demand AI pipeline</button>
+          <button onClick={refreshIntakeAudit} type="button">Refresh intake log</button>
+          <span>{pipelineNotice}</span>
+        </div>
+        <div className="intake-audit-grid">
+          <div className="intake-list" aria-label="Latest citizen submissions">
+            {(intakeAudit?.entries ?? []).slice(0, 8).map((entry) => (
+              <button className={entry.rawIntakeId === selectedIntake?.rawIntakeId ? "active" : ""} key={entry.rawIntakeId} onClick={() => setSelectedIntakeId(entry.rawIntakeId)} type="button">
+                <strong>{entry.channel.toUpperCase()} · {entry.shortReceipt}</strong>
+                <span>{entry.status} · {entry.placement.ward}</span>
+                <small>
+                  {entry.input.mediaType !== "none" ? entry.input.mediaType : "text"} · {entry.status === "discarded_noise" ? "discarded" : "reward"} {entry.reward.citizenScore ?? "pending"}/100 · {entry.identity.aadhaarMasked ?? "no Aadhaar"}
+                </small>
+              </button>
+            ))}
+            {!intakeAudit?.entries.length ? <p className="empty-state">No submitted Awaaz records yet. Submit from the citizen app, then run pipeline.</p> : null}
+          </div>
+          <div className="intake-detail" aria-label="Selected AI inference">
+            {selectedIntake ? (
+              <>
+                <div className="intake-detail-head">
+                  <div>
+                    <span>Receipt</span>
+                    <strong>{selectedIntake.shortReceipt}</strong>
+                  </div>
+                  <mark>{selectedIntake.status}</mark>
+                </div>
+                <dl>
+                  <div><dt>AI tag</dt><dd>{selectedIntake.ai.category}</dd></div>
+                  <div><dt>Language</dt><dd>{selectedIntake.ai.detectedLanguage ?? selectedIntake.input.language}</dd></div>
+                  <div><dt>Region placed</dt><dd>{selectedIntake.placement.ward}, {selectedIntake.placement.district}, {selectedIntake.placement.state}</dd></div>
+                  <div><dt>MP route</dt><dd>{selectedIntake.placement.mpId ?? "pending"}</dd></div>
+                  <div><dt>Aadhaar</dt><dd>{selectedIntake.identity.aadhaarMasked ?? "not collected"} · {selectedIntake.identity.aadhaarVerified ? "verified" : "format only"}</dd></div>
+                  <div><dt>Citizen score</dt><dd>{selectedIntake.reward.citizenScore ?? "pending"}/100 · {selectedIntake.reward.rewardBand}</dd></div>
+                  <div><dt>Quality score</dt><dd>{selectedIntake.reward.qualityScore ?? "pending"}/100</dd></div>
+                  <div><dt>Civic issue</dt><dd>{selectedIntake.ai.isCivicIssue === false ? "Needs review" : "Yes"}</dd></div>
+                  <div><dt>AI runtime</dt><dd>{selectedIntake.ai.providerMode ?? "pending"} · {selectedIntake.ai.model ?? "pending"}</dd></div>
+                </dl>
+                {selectedIntake.reward.reasons.length ? (
+                  <article>
+                    <h4>Reward factors</h4>
+                    <p>{selectedIntake.reward.reasons.join(" · ")}</p>
+                  </article>
+                ) : null}
+                <article>
+                  <h4>AI explanation</h4>
+                  <p>{selectedIntake.ai.explanation}</p>
+                </article>
+                <article>
+                  <h4>Normalized evidence</h4>
+                  <p>{selectedIntake.ai.normalizedText || selectedIntake.ai.transcript || selectedIntake.ai.imageSummary || selectedIntake.input.text || "Pending batch inference."}</p>
+                </article>
+              </>
+            ) : null}
+          </div>
+          <div className="intake-samples" aria-label="Evaluator test samples">
+            <h4>Voice, image, text test kit</h4>
+            {(intakeAudit?.samples ?? []).map((sample) => (
+              <a href={sample.href} key={sample.href} download>
+                <strong>{sample.type}</strong>
+                <span>{sample.label}</span>
+                <small>{sample.expected}</small>
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="explorer-main-grid">
         <section className="panel explorer-query-card">
           <PanelTitle title="Query Builder" icon={Database} detail="reviewed source query" />
@@ -2096,23 +2701,27 @@ function DataExplorerPage({ dashboard }: { dashboard: DashboardResponse }) {
           <p className="action-status" role="status">{queryNotice} Active filter: {activeExplorerFilter}</p>
         </section>
 
-        <section className="panel explorer-schema-card">
-          <PanelTitle title="Schema Browser" icon={Search} detail="semantic fields" />
-          <div className="explorer-schema-list">
-            {schemaFields.map((field) => <span key={field}>{field}</span>)}
-          </div>
-        </section>
+        <div className="explorer-side-stack">
+          <section className="panel explorer-schema-card">
+            <PanelTitle title="Schema Browser" icon={Search} detail="semantic fields" />
+            <div className="explorer-schema-list">
+              {schemaFields.map((field) => <span key={field}>{field}</span>)}
+            </div>
+          </section>
 
-        <section className="panel explorer-quality-card">
-          <PanelTitle title="Data Quality" icon={CheckCircle2} detail="pipeline checks" />
-          {["Deduplication complete", "PII safeguards active", "Geo coordinates validated", "Evidence citations linked"].map((item) => <article key={item}><CheckCircle2 size={15} /><span>{item}</span></article>)}
-        </section>
+          <section className="panel explorer-quality-card">
+            <PanelTitle title="Data Quality" icon={CheckCircle2} detail="pipeline checks" />
+            <div className="explorer-quality-list">
+              {["Deduplication complete", "PII safeguards active", "Geo coordinates validated", "Evidence citations linked"].map((item) => <article key={item}><CheckCircle2 size={15} /><span>{item}</span></article>)}
+            </div>
+          </section>
+        </div>
       </section>
 
       <section className="panel explorer-table-card">
         <PanelTitle title="Live Data Preview" icon={FileText} detail="project ranking dataset" />
         <div className="explorer-table">
-          <b>Ward</b><b>Category</b><b>Score</b><b>Confidence</b><b>Budget</b><b>Progress</b><b>Impact</b>
+          <div className="table-head"><b>Ward</b><b>Category</b><b>Score</b><b>Confidence</b><b>Budget</b><b>Progress</b><b>Impact</b></div>
           {rows.map((row) => (
             <div key={row.id}>
               <span>{row.ward}</span>
@@ -2517,7 +3126,7 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
       <section className="panel rec-table-card">
         <PanelTitle title="Project Ranking Table" icon={FileText} detail="decision-ready queue" />
         <div className="rec-table">
-          <b>Project</b><b>Category</b><b>Score</b><b>Budget</b><b>Beneficiaries</b><b>Priority</b>
+          <div className="table-head"><b>Project</b><b>Category</b><b>Score</b><b>Budget</b><b>Beneficiaries</b><b>Priority</b></div>
           {filtered.slice(0, 8).map((project) => (
             <div key={project.id}>
               <span>{project.title}</span>
@@ -2638,7 +3247,7 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
       <section className="panel reports-table-card">
         <PanelTitle title="Report Data Table" icon={Database} detail="ready for Excel export" />
         <div className="reports-table">
-          <b>Project</b><b>Department</b><b>Budget</b><b>Progress</b><b>Impact</b><b>Status</b>
+          <div className="table-head"><b>Project</b><b>Department</b><b>Budget</b><b>Progress</b><b>Impact</b><b>Status</b></div>
           {projects.slice(0, 7).map((project) => (
             <div key={project.id}>
               <span>{project.title}</span>
@@ -3709,6 +4318,7 @@ function PriorityDecision({
         <span><MapPin size={14} /> {project.ward}, {project.district}, {project.state}</span>
         <span><Users size={14} /> {formatCount(project.demandCount)} citizen signals</span>
         <span><Star size={14} /> {project.averageRating}/5 from {project.ratings} ratings</span>
+        <span><ShieldCheck size={14} /> {project.averageSubmissionQuality ?? 0}/100 quality · {project.rewardedCitizenCount ?? 0} rewarded</span>
         <span><Languages size={14} /> {project.languageMix.join(", ")}</span>
       </div>
 
@@ -3734,6 +4344,7 @@ function PriorityDecision({
         <ScoreBar label="Ground need" value={project.needScore} max={35} />
         <ScoreBar label="Urgency" value={project.urgencyScore} max={15} />
         <ScoreBar label="Equity" value={project.equityScore} max={15} />
+        <ScoreBar label="Reward quality" value={project.averageSubmissionQuality ?? 0} max={100} />
       </div>
       <div className="evidence-grid">
         <Evidence title="Evidence" items={project.evidence} />

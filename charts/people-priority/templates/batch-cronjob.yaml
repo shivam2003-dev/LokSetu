@@ -40,12 +40,86 @@ spec:
                 - name: DATABASE_URL
                   value: {{ .Values.api.env.DATABASE_URL | quote }}
                 {{- end }}
+                {{- if .Values.api.env.VERTEX_AI_PROJECT_ID }}
+                - name: VERTEX_AI_PROJECT_ID
+                  value: {{ .Values.api.env.VERTEX_AI_PROJECT_ID | quote }}
+                {{- end }}
+                {{- if .Values.api.env.GOOGLE_CLOUD_PROJECT }}
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: {{ .Values.api.env.GOOGLE_CLOUD_PROJECT | quote }}
+                {{- end }}
                 - name: VERTEX_AI_LOCATION
                   value: {{ .Values.api.env.VERTEX_AI_LOCATION | quote }}
                 - name: VERTEX_AI_MODEL
                   value: {{ .Values.api.env.VERTEX_AI_MODEL | quote }}
+                {{- with .Values.api.env.VERTEX_AI_FALLBACK_MODELS }}
+                - name: VERTEX_AI_FALLBACK_MODELS
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.AI_RETRY_ATTEMPTS }}
+                - name: AI_RETRY_ATTEMPTS
+                  value: {{ . | quote }}
+                {{- end }}
                 - name: VERTEX_AI_DISABLED
                   value: {{ .Values.api.env.VERTEX_AI_DISABLED | quote }}
+                {{- with .Values.api.env.INDIC_LANGUAGE_PROVIDER_ORDER }}
+                - name: INDIC_LANGUAGE_PROVIDER_ORDER
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.INDIC_AI_RETRY_ATTEMPTS }}
+                - name: INDIC_AI_RETRY_ATTEMPTS
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.SARVAM_API_BASE_URL }}
+                - name: SARVAM_API_BASE_URL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.SARVAM_TRANSLATE_MODEL }}
+                - name: SARVAM_TRANSLATE_MODEL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.SARVAM_SPEECH_MODEL }}
+                - name: SARVAM_SPEECH_MODEL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.BHASHINI_PIPELINE_COMPUTE_URL }}
+                - name: BHASHINI_PIPELINE_COMPUTE_URL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.BHASHINI_AUTH_HEADER }}
+                - name: BHASHINI_AUTH_HEADER
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.BHASHINI_TRANSLATION_SERVICE_ID }}
+                - name: BHASHINI_TRANSLATION_SERVICE_ID
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.BHASHINI_ASR_SERVICE_ID }}
+                - name: BHASHINI_ASR_SERVICE_ID
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.OPENAI_COMPATIBLE_BASE_URL }}
+                - name: OPENAI_COMPATIBLE_BASE_URL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.api.env.OPENAI_COMPATIBLE_MODEL }}
+                - name: OPENAI_COMPATIBLE_MODEL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- if .Values.api.openAiCompatible.existingSecret }}
+                - name: OPENAI_COMPATIBLE_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.api.openAiCompatible.existingSecret | quote }}
+                      key: {{ .Values.api.openAiCompatible.secretKey | quote }}
+                {{- end }}
+                {{- range .Values.api.extraSecretEnv }}
+                - name: {{ .name | quote }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .secretName | quote }}
+                      key: {{ .secretKey | quote }}
+                {{- end }}
                 - name: BATCH_SCHEDULE
                   value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
                 {{- if .Values.api.env.RAG_API_URL }}

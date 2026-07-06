@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { buildAadhaarIdentity } from "./citizenIdentity.js";
 import { resolveLocation } from "./geo.js";
 import { normalizeSubmission } from "./pipeline.js";
-import { RawIntakePayload, Submission } from "./types.js";
+import { AadhaarIdentity, RawIntakePayload, Submission } from "./types.js";
 import {
   analyzeImageWithVertexAi,
   analyzeWithVertexAi,
@@ -24,6 +25,7 @@ export const intakeSchema = z
     lng: z.coerce.number().min(-180).max(180).optional(),
     urgency: z.coerce.number().min(1).max(5).default(3),
     rating: z.coerce.number().min(1).max(5).default(4),
+    aadhaarNumber: z.string().optional(),
     text: z.string().max(4000).optional(),
     media: z.string().max(14_000_000).optional()
   })
@@ -33,12 +35,14 @@ export const intakeSchema = z
 
 export type Intake = z.infer<typeof intakeSchema>;
 
-export function toRawIntakePayload(input: Intake): RawIntakePayload {
+export function toRawIntakePayload(input: Intake, identityOverride?: AadhaarIdentity): RawIntakePayload {
+  const identity = identityOverride ?? buildAadhaarIdentity(input.aadhaarNumber);
+  const defaultCitizen = input.userId === "guest" || input.username === "citizen";
   return {
     channel: input.channel,
     language: input.language,
-    userId: input.userId,
-    username: input.username,
+    userId: identity && defaultCitizen ? `aadhaar-${identity.aadhaarHash.slice(0, 16)}` : input.userId,
+    username: identity && defaultCitizen ? `Citizen ${identity.aadhaarMasked}` : input.username,
     privacyMode: input.privacyMode,
     state: input.state,
     district: input.district,
@@ -47,6 +51,11 @@ export function toRawIntakePayload(input: Intake): RawIntakePayload {
     lng: input.lng,
     urgency: input.urgency,
     rating: input.rating,
+    aadhaarHash: identity?.aadhaarHash,
+    aadhaarMasked: identity?.aadhaarMasked,
+    aadhaarLast4: identity?.aadhaarLast4,
+    aadhaarVerified: identity?.aadhaarVerified,
+    identityMode: identity?.identityMode,
     text: input.text,
     media: input.media
   };
@@ -72,10 +81,10 @@ export async function processIntake(
     imageSummary = result.mediaSummary;
     isCivicIssue = result.isCivicIssue;
   } else if (media?.kind === "audio") {
-    const result = await transcribeWithVertexAi(media.base64, media.mimeType, input.language);
+    const result = await transcribeWithVertexAi(media.base64, media.mimeType, input.language, input.text);
     analysis = result;
     mediaType = "audio";
-    transcript = result.mediaSummary;
+    transcript = result.transcript ?? result.mediaSummary;
     isCivicIssue = result.isCivicIssue;
   } else if (media?.kind === "video") {
     analysis = await analyzeWithVertexAi(input.text || "Citizen uploaded a video showing a local civic development issue.", input.language);
@@ -85,6 +94,7 @@ export async function processIntake(
   } else {
     analysis = await analyzeWithVertexAi(input.text ?? "", input.language);
   }
+  isCivicIssue = isCivicIssue ?? analysis.isCivicIssue;
 
   const now = new Date().toISOString();
   const submission = normalizeSubmission(
@@ -104,9 +114,15 @@ export async function processIntake(
       lat: input.lat,
       lng: input.lng,
       locationLabel: location.label,
+      aadhaarHash: input.aadhaarHash,
+      aadhaarMasked: input.aadhaarMasked,
+      aadhaarLast4: input.aadhaarLast4,
+      aadhaarVerified: input.aadhaarVerified,
+      identityMode: input.identityMode,
       transcript,
       imageSummary,
       isCivicIssue,
+      noiseReason: analysis.noiseReason,
       aiProviderMode: analysis.providerMode,
       aiModel: analysis.model,
       aiFallbackUsed: analysis.fallbackUsed
@@ -162,9 +178,14 @@ export function extractWhatsAppMessages(body: unknown): RawIntakePayload[] {
 }
 
 function parseDataUrl(media: string): { mimeType: string; base64: string; kind: "image" | "audio" | "video" | "other" } | null {
-  const match = /^data:([^;]+);base64,(.+)$/s.exec(media.trim());
-  if (!match) return null;
-  const mimeType = match[1];
+  const trimmed = media.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex === -1) return null;
+  const metadata = trimmed.slice(5, commaIndex).split(";").filter(Boolean);
+  const mimeType = metadata[0] || "application/octet-stream";
+  if (!metadata.some((item) => item.toLowerCase() === "base64")) return null;
+  const base64 = trimmed.slice(commaIndex + 1);
   const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : mimeType.startsWith("video/") ? "video" : "other";
-  return { mimeType, base64: match[2], kind };
+  return { mimeType, base64, kind };
 }

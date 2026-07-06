@@ -21,7 +21,7 @@ Citizen channels
 
 `apps/citizen` is the lightweight public capture app for phone-first voice, photo, and text reports. It returns a batch receipt immediately while AI scoring runs on the schedule.
 
-`services/api` exposes submission and ranking endpoints. It is Vertex-first: when `VERTEX_AI_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` is configured, Gemini on Vertex AI detects language, normalizes/ translates text, and classifies the civic category. Local fallback keeps development deterministic when credentials are missing.
+`services/api` exposes submission and ranking endpoints. It is Vertex-first: when `VERTEX_AI_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` is configured, Gemini on Vertex AI detects language, normalizes/translates text, interprets image and voice evidence, and classifies civic category. AI processing retries the primary Gemini model and configured backup models; if all model calls fail, raw intake is marked failed for retry instead of becoming a deterministic processed record.
 
 - Speech: Cloud Speech-to-Text or Bhashini-backed service for Indian languages.
 - OCR: Cloud Vision OCR for photos and documents.

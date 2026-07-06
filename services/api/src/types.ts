@@ -19,6 +19,27 @@ export type UserProfile = {
   contributionScore: number;
 };
 
+export type AadhaarIdentityMode = "aadhaar_format_only";
+
+export type AadhaarIdentity = {
+  aadhaarHash: string;
+  aadhaarMasked: string;
+  aadhaarLast4: string;
+  aadhaarVerified: false;
+  identityMode: AadhaarIdentityMode;
+};
+
+export type RewardBand = "needs_detail" | "useful" | "strong" | "excellent";
+
+export type AuthUser = {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: UserRole;
+  displayName: string;
+  createdAt: string;
+};
+
 export type AreaMapping = {
   id: string;
   state: string;
@@ -60,6 +81,15 @@ export type Submission = {
   urgency: number;
   rating: number;
   citizenScore: number;
+  aadhaarHash?: string;
+  aadhaarMasked?: string;
+  aadhaarLast4?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: AadhaarIdentityMode;
+  submissionQualityScore?: number;
+  rewardPoints?: number;
+  rewardBand?: RewardBand;
+  rewardReasons?: string[];
   text: string;
   createdAt: string;
   // Multimodal + location enrichment
@@ -70,6 +100,7 @@ export type Submission = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  noiseReason?: string;
   aiProviderMode?: "vertex" | "openai-compatible" | "fallback";
   aiModel?: string;
   aiFallbackUsed?: boolean;
@@ -92,14 +123,25 @@ export type RawIntakePayload = {
   lng?: number;
   urgency: number;
   rating: number;
+  aadhaarHash?: string;
+  aadhaarMasked?: string;
+  aadhaarLast4?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: AadhaarIdentityMode;
   text?: string;
   media?: string;
+  discarded?: boolean;
+  discardedAt?: string;
+  discardedScore?: number;
+  discardedQualityScore?: number;
+  discardedReason?: string;
+  discardedThreshold?: number;
 };
 
 export type RawIntakeRecord = {
   id: string;
   payload: RawIntakePayload;
-  status: "pending" | "processing" | "processed" | "failed";
+  status: "pending" | "processing" | "processed" | "failed" | "discarded";
   attempts: number;
   error?: string;
   createdAt: string;
@@ -112,6 +154,7 @@ export type BatchRun = {
   finishedAt?: string;
   status: "running" | "succeeded" | "failed";
   processed: number;
+  discarded: number;
   failed: number;
   error?: string;
 };
@@ -154,6 +197,9 @@ export type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: ProjectStatus;
+  averageCitizenScore?: number;
+  averageSubmissionQuality?: number;
+  rewardedCitizenCount?: number;
   sourceSnapshotIds?: string[];
   sourceFreshness?: "fresh" | "stale" | "missing";
 };

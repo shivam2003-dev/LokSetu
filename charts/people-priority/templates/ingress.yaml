@@ -41,6 +41,13 @@ spec:
     - host: {{ .Values.ingress.citizenHost }}
       http:
         paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "people-priority.name" . }}-api
+                port:
+                  number: {{ .Values.api.service.port }}
           - path: /
             pathType: Prefix
             backend:

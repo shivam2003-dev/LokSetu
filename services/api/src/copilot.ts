@@ -89,7 +89,9 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     snippet: item.content.slice(0, 260),
     score: Number(item.confidence.toFixed(4))
   })) ?? [];
-  const evidence = retrievedContext.slice(0, 5).map((item) => ({ type: item.sourceType, text: item.snippet }));
+  const evidence = retrievedContext.length
+    ? retrievedContext.slice(0, 5).map((item) => ({ type: item.sourceType, text: item.snippet }))
+    : buildDirectEvidence(project, submissions, projects, mode, onlineContext);
   const citations = ragResponse?.citations.map((item) =>
     citation("rag_chunk", item.chunkId, `${item.document}${item.page ? ` page ${item.page}` : ""}`, item.sourceUrl ?? item.source ?? item.documentId)
   ) ?? [];
@@ -277,6 +279,26 @@ function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string
   }
   if (project) return `${project.title} is currently ${project.status} with score ${project.score}. ${project.rationale}`;
   return null;
+}
+
+function buildDirectEvidence(project: RankedProject | undefined, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string) {
+  const evidence: Array<{ type: string; text: string }> = [];
+  if (mode !== "submitted" && onlineContext) {
+    evidence.push(...onlineContext.split("\n").slice(0, 3).map((item) => ({ type: "Online signal", text: item })));
+  }
+  if (project) {
+    evidence.push(...project.evidence.slice(0, 4).map((item) => ({ type: "Project evidence", text: `${project.title}: ${item}` })));
+    evidence.push({ type: "Ranked project", text: `${project.ward}, ${project.district}: score ${project.score}, confidence ${Math.round(project.confidence * 100)}%, demand ${project.demandCount}.` });
+  }
+  evidence.push(...projects.slice(0, 3).map((item, index) => ({
+    type: "Priority queue",
+    text: `Rank ${index + 1}: ${item.title} in ${item.ward}; ${item.category}; score ${item.score}; ${item.rationale}`
+  })));
+  evidence.push(...submissions.slice(-3).reverse().map((item) => ({
+    type: "Citizen submission",
+    text: `${item.category} in ${item.ward}, ${item.district}: ${item.normalizedText || item.text}`
+  })));
+  return evidence.slice(0, 6);
 }
 
 function pickProject(question: string, projects: RankedProject[]) {

@@ -1,13 +1,22 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Apni Awaaz citizen app functional flow", () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ context, page }) => {
+    await context.grantPermissions(["geolocation"]);
+    await context.setGeolocation({ latitude: 28.62, longitude: 77.3 });
     await loginIfNeeded(page);
   });
 
   test("citizen can submit a text problem and receive a private batch receipt", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByText("Apni Awaaz")).toBeVisible();
+    await page.getByRole("button", { name: "Show my reward total" }).click();
+    await expect(page.getByText("Cumulative reward", { exact: true })).toBeVisible();
+    await expect(page.getByText("Current milestone")).toBeVisible();
+    await page.getByRole("button", { name: "How to get 100% reward" }).click();
+    await expect(page.getByRole("heading", { name: "How to report well and earn 100% reward" })).toBeVisible();
+    await expect(page.getByText("Good example")).toBeVisible();
+    await page.getByRole("button", { name: "Close" }).click();
     await page.getByRole("button", { name: /लिखें Type/i }).click();
     await page.getByPlaceholder("E.g. School toilets are broken and classrooms flood after rain.").fill(
       "Functional citizen test: the school hand pump is broken and children cannot drink water."
@@ -21,14 +30,14 @@ test.describe("Apni Awaaz citizen app functional flow", () => {
 
 async function loginIfNeeded(page: import("@playwright/test").Page) {
   await page.goto("/");
-  const password = page.getByLabel("Password");
-  if (await password.isVisible()) {
-    await password.fill(testAccessPassword());
-    await page.getByRole("button", { name: "Login" }).click();
+  const aadhaarNumber = page.getByLabel("Aadhaar number");
+  if (await aadhaarNumber.isVisible()) {
+    await aadhaarNumber.fill(testAadhaarNumber());
+    await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByText("Apni Awaaz")).toBeVisible();
   }
 }
 
-function testAccessPassword() {
-  return process.env.TEST_APP_ACCESS_PASSWORD ?? process.env.APP_ACCESS_PASSWORD ?? "functional-test";
+function testAadhaarNumber() {
+  return process.env.TEST_AADHAAR_NUMBER ?? "2345 6789 0123";
 }

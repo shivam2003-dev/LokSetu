@@ -1,15 +1,16 @@
-import { civicDatasets, sourceSnapshots } from "./data.js";
-import { DashboardFilters, RankedProject, Submission } from "./types.js";
+import { areaMappings, civicDatasets, mpProfiles, sourceSnapshots } from "./data.js";
+import { AadhaarIdentityMode, DashboardFilters, RankedProject, RewardBand, Submission } from "./types.js";
 import { VertexTextAnalysis } from "./vertexAi.js";
 
 const categoryTerms: Record<string, string[]> = {
   Education: ["school", "classroom", "teacher", "toilet", "student", "bench", "enrollment"],
-  Roads: ["road", "pothole", "street", "bridge", "traffic", "ambulance", "flood"],
+  Roads: ["road", "pothole", "street", "bridge", "traffic", "ambulance"],
   Health: ["clinic", "hospital", "doctor", "medicine", "elderly", "opd", "health"],
   Water: ["water", "tap", "tanker", "drinking", "pipeline", "supply"],
-  Sanitation: ["garbage", "waste", "drain", "sewer", "toilet", "cleaning", "solid waste"],
+  Sanitation: ["garbage", "waste", "drain", "sewer", "toilet", "cleaning", "solid waste", "litter", "littering", "trash", "dumping", "hotel waste"],
   Power: ["streetlight", "light", "electricity", "transformer", "power", "dark"],
-  "Digital Access": ["internet", "network", "mobile", "tower", "broadband", "digital", "signal"]
+  "Digital Access": ["internet", "network", "mobile", "tower", "broadband", "digital", "signal"],
+  "Disaster Relief": ["disaster", "relief", "flood", "cyclone", "storm", "fire", "rescue", "shelter", "food", "ration", "emergency"]
 };
 
 const projectTitles: Record<string, string> = {
@@ -19,7 +20,8 @@ const projectTitles: Record<string, string> = {
   Water: "Stabilize drinking water supply",
   Sanitation: "Upgrade drainage and waste collection",
   Power: "Restore streetlights and safe public lighting",
-  "Digital Access": "Improve mobile and broadband access"
+  "Digital Access": "Improve mobile and broadband access",
+  "Disaster Relief": "Open emergency relief response"
 };
 
 type SubmissionInput = {
@@ -34,6 +36,11 @@ type SubmissionInput = {
   urgency: number;
   rating: number;
   text: string;
+  aadhaarHash?: string;
+  aadhaarMasked?: string;
+  aadhaarLast4?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: AadhaarIdentityMode;
   // Multimodal + location enrichment (optional)
   mediaType?: Submission["mediaType"];
   lat?: number;
@@ -42,6 +49,7 @@ type SubmissionInput = {
   transcript?: string;
   imageSummary?: string;
   isCivicIssue?: boolean;
+  noiseReason?: string;
   aiProviderMode?: Submission["aiProviderMode"];
   aiModel?: string;
   aiFallbackUsed?: boolean;
@@ -49,25 +57,39 @@ type SubmissionInput = {
 
 export function normalizeSubmission(input: SubmissionInput, analysis: VertexTextAnalysis): Submission {
   const civic = civicDatasets.find((dataset) => dataset.ward === input.ward && dataset.district === input.district);
+  const mapping = areaMappings.find((area) => area.state === input.state && area.district === input.district && area.ward === input.ward);
+  const dynamicRoute = dynamicMpRoute(input.state, input.district);
   const displayName = input.privacyMode ? randomAlias(input.userId) : input.username;
   const rating = Math.max(1, Math.min(5, input.rating));
   const urgency = Math.max(1, Math.min(5, input.urgency));
   const text = (input.text || analysis.normalizedText).trim();
+  const ruleCategory = categorize([text, analysis.normalizedText].filter(Boolean).join(" "));
+  const category =
+    input.isCivicIssue === false
+      ? "Needs Review"
+      : analysis.category === "Civic Services" && ruleCategory !== "Civic Services"
+        ? ruleCategory
+        : analysis.category;
+  const reward = calculateCitizenReward(text, input, analysis);
 
   return {
     ...input,
     id: crypto.randomUUID(),
     displayName,
-    mpId: civic?.mpId ?? "unassigned",
+    mpId: civic?.mpId ?? mapping?.mpId ?? dynamicRoute.id,
     language: input.language || analysis.detectedLanguage,
     detectedLanguage: analysis.detectedLanguage,
     normalizedText: analysis.normalizedText,
-    category: analysis.category,
+    category,
     text,
     rating,
     urgency,
     mediaType: input.mediaType ?? "none",
-    citizenScore: calculateCitizenScore(text, urgency, rating, analysis.confidence),
+    citizenScore: reward.points,
+    submissionQualityScore: reward.qualityScore,
+    rewardPoints: reward.points,
+    rewardBand: reward.band,
+    rewardReasons: reward.reasons,
     createdAt: new Date().toISOString()
   };
 }
@@ -125,10 +147,16 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
   const civic = civicDatasets.find(
     (dataset) => dataset.state === state && dataset.district === district && dataset.ward === ward && dataset.category === category
   );
+  const mp = mpProfiles.find((profile) => profile.wards.includes(ward) && profile.district === district && profile.state === state);
+  const dynamicRoute = dynamicMpRoute(state, district);
   const sources = sourceSnapshots.filter(
     (source) => source.state === state && source.district === district && source.ward === ward
   );
-  const demandScore = Math.min(40, Math.round((items.length / Math.max(1, totalSubmissions)) * 130));
+  const averageCitizenScore = Math.round(average(items.map((item) => item.citizenScore)));
+  const averageSubmissionQuality = Math.round(average(items.map((item) => item.submissionQualityScore ?? item.citizenScore)));
+  const rewardedCitizenCount = new Set(items.map((item) => item.aadhaarHash ?? item.userId)).size;
+  const qualityMultiplier = 0.75 + averageSubmissionQuality / 200;
+  const demandScore = Math.min(40, Math.round((items.length / Math.max(1, totalSubmissions)) * 130 * qualityMultiplier));
   const needScore = Math.round((civic?.gapScore ?? 0.45) * 35);
   const urgencyScore = Math.round((average(items.map((item) => item.urgency)) / 5) * 15);
   const equityScore = Math.round((civic?.equityScore ?? 0.5) * 15);
@@ -144,8 +172,8 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
     state,
     district,
     ward,
-    mpId: civic?.mpId ?? items[0]?.mpId ?? "unassigned",
-    mpName: civic?.mpName ?? "Unassigned MP",
+    mpId: civic?.mpId ?? items[0]?.mpId ?? dynamicRoute.id,
+    mpName: civic?.mpName ?? mp?.name ?? dynamicRoute.name,
     score,
     confidence: Number(Math.min(0.94, 0.58 + items.length * 0.06 + (civic ? 0.16 : 0)).toFixed(2)),
     demandCount,
@@ -155,12 +183,22 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
     needScore,
     urgencyScore: Math.min(15, urgencyScore + ratingBoost),
     equityScore,
+    averageCitizenScore,
+    averageSubmissionQuality,
+    rewardedCitizenCount,
     languageMix: [...new Set(items.map((item) => item.detectedLanguage || item.language))],
     recentCitizenAliases: [...new Set(items.map((item) => item.displayName))].slice(0, 4),
     rationale: rationale(category, civic?.indicators ?? [], demandCount),
-    evidence: [`${demandCount} similar requests`, `${averageRating}/5 citizen rating`, ...(civic?.indicators ?? ["Official dataset match pending"])],
+    evidence: [
+      `${demandCount} similar requests`,
+      `${averageRating}/5 citizen rating`,
+      `${averageSubmissionQuality}/100 average submission quality`,
+      `${rewardedCitizenCount} rewarded citizen ${rewardedCitizenCount === 1 ? "identity" : "identities"}`,
+      ...(civic?.indicators ?? ["Official dataset match pending"])
+    ],
     safeguards: [
       "Personal identity removed from MP view",
+      "Aadhaar stored as HMAC hash plus masked last four only",
       "Duplicate campaign and bot pattern checks applied",
       "Vertex AI output stored with normalized text and detected language",
       "Human approval required before allocation"
@@ -223,9 +261,9 @@ function applyFilters(submissions: Submission[], filters: DashboardFilters): Sub
         .toLowerCase()
         .includes(query);
 
-    if (filters.scope === "global") return queryMatch;
-    if (filters.scope === "mp") return mpMatch && queryMatch;
-    return localMatch && districtMatch && stateMatch && queryMatch;
+    if (!stateMatch || !districtMatch || !localMatch || !queryMatch) return false;
+    if (filters.scope === "mp") return mpMatch;
+    return true;
   });
 }
 
@@ -239,16 +277,79 @@ function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+function dynamicMpRoute(state: string, district: string): { id: string; name: string } {
+  const cleanState = state?.trim() || "unknown-state";
+  const cleanDistrict = district?.trim() || "location-pending";
+  if (cleanDistrict === "Location pending" || cleanDistrict === "Delhi") {
+    return { id: `review-${slug(cleanState) || "unknown"}`, name: `${cleanState} routing review` };
+  }
+  return {
+    id: `mp-${slug(cleanState)}-${slug(cleanDistrict)}`,
+    name: `MP ${cleanDistrict}`
+  };
+}
+
 function randomAlias(seed: string): string {
   let hash = 0;
   for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) % 997;
   return `Local Voice ${String(hash).padStart(3, "0")}`;
 }
 
-function calculateCitizenScore(text: string, urgency: number, rating: number, confidence: number): number {
-  const detailScore = Math.min(30, Math.round(text.trim().length / 8));
-  const urgencyScore = urgency * 8;
-  const ratingScore = rating * 4;
-  const aiScore = Math.round(confidence * 10);
-  return Math.min(100, 20 + detailScore + urgencyScore + ratingScore + aiScore);
+function calculateCitizenReward(text: string, input: SubmissionInput, analysis: VertexTextAnalysis): {
+  qualityScore: number;
+  points: number;
+  band: RewardBand;
+  reasons: string[];
+} {
+  if (input.isCivicIssue === false) {
+    return {
+      qualityScore: 5,
+      points: 5,
+      band: "needs_detail",
+      reasons: [input.noiseReason ?? analysis.noiseReason ?? "AI could not confirm an addressable public civic issue."]
+    };
+  }
+  const fallbackQuality = fallbackQualityScore(text, input, analysis.confidence);
+  const aiQuality = typeof analysis.qualityScore === "number" && Number.isFinite(analysis.qualityScore)
+    ? Math.max(0, Math.min(100, Math.round(analysis.qualityScore)))
+    : undefined;
+  const qualityScore = aiQuality === undefined ? fallbackQuality : Math.round(aiQuality * 0.8 + fallbackQuality * 0.2);
+  const points = Math.max(10, Math.min(100, qualityScore));
+  return {
+    qualityScore,
+    points,
+    band: rewardBand(points),
+    reasons: rewardReasons(text, input, analysis, qualityScore)
+  };
+}
+
+function fallbackQualityScore(text: string, input: SubmissionInput, confidence: number): number {
+  const clean = text.trim();
+  const detailScore = Math.min(34, Math.round(clean.length / 6));
+  const evidenceScore = input.mediaType && input.mediaType !== "none" ? 18 : 0;
+  const locationScore = input.lat && input.lng ? 14 : input.ward ? 9 : 0;
+  const urgencyScore = input.urgency * 4;
+  const ratingScore = input.rating * 2;
+  const aiConfidenceScore = Math.round(confidence * 14);
+  return Math.max(10, Math.min(100, 10 + detailScore + evidenceScore + locationScore + urgencyScore + ratingScore + aiConfidenceScore));
+}
+
+function rewardBand(points: number): RewardBand {
+  if (points >= 85) return "excellent";
+  if (points >= 70) return "strong";
+  if (points >= 45) return "useful";
+  return "needs_detail";
+}
+
+function rewardReasons(text: string, input: SubmissionInput, analysis: VertexTextAnalysis, qualityScore: number): string[] {
+  const aiReasons = analysis.qualitySignals?.map((item) => item.trim()).filter(Boolean).slice(0, 3) ?? [];
+  if (aiReasons.length) return aiReasons;
+  const reasons = [];
+  if (text.trim().length >= 120) reasons.push("Detailed description gives field teams useful context.");
+  else if (text.trim().length >= 40) reasons.push("Clear issue summary included.");
+  else reasons.push("More detail would improve the reward score.");
+  if (input.mediaType && input.mediaType !== "none") reasons.push("Media evidence attached.");
+  if (input.lat && input.lng) reasons.push("Precise location captured.");
+  if (qualityScore >= 70) reasons.push("AI marked this as actionable for routing.");
+  return reasons.slice(0, 4);
 }

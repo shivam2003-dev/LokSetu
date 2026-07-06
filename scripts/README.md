@@ -7,6 +7,8 @@ Local startup and bootstrap scripts for development and Argo CD verification.
 - `npm run local:k8s`: builds images, creates kind cluster if needed, applies Argo CD, and deploys local apps.
 - `./scripts/gcp-configure-safe.sh`: configures the local `loksetu-qwiklabs` gcloud profile without creating cloud resources.
 - `./scripts/gcp-safety-check.sh`: verifies active account/project access before any cloud deployment command.
+- `./scripts/gcp-sync-secrets.sh`: syncs production runtime secrets from environment variables or an ignored env file into Kubernetes Secrets.
+- `./scripts/gcp-prune-artifact-images.sh`: removes old Artifact Registry image versions after keeping the latest tagged builds.
 
 ## Full Local Stack
 
@@ -55,3 +57,38 @@ npm run local
 `npm run local` loads `.env.local` when present. `.env.local` is ignored by Git.
 Scripts create Kubernetes Secrets from environment variables. They do not write secrets to Git.
 The GCP safety scripts only read or update local Cloud SDK config. They do not enable APIs, create resources, or run Terraform.
+
+## GCP Runtime Secrets
+
+Create an ignored env file such as `.env.gcp.local`, then run:
+
+```bash
+ENV_FILE=.env.gcp.local ./scripts/gcp-sync-secrets.sh
+```
+
+Required values:
+
+- `APP_ACCESS_PASSWORD`: fallback API password for legacy/password-only clients.
+- `APP_AUTH_SECRET`: token signing secret.
+- `APP_ADMIN_USERNAME`: seeded admin username.
+- `APP_ADMIN_PASSWORD`: seeded admin password.
+- `GOOGLE_MAPS_API_KEY`: backend Maps key.
+- `PUBLIC_GOOGLE_MAPS_API_KEY`: browser Maps key.
+- `NEWS_API_KEY`: NewsAPI key.
+- `X_BEARER_TOKEN`: X API bearer token.
+
+Do not commit `.env.gcp.local` or any other secret file.
+
+## Artifact Registry Pruning
+
+Preview old image cleanup:
+
+```bash
+DRY_RUN=true KEEP=8 ./scripts/gcp-prune-artifact-images.sh
+```
+
+Delete old image versions after reviewing the preview:
+
+```bash
+DRY_RUN=false KEEP=8 ./scripts/gcp-prune-artifact-images.sh
+```

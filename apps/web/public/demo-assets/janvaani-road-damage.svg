@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Demo road damage image for JanVaani AI testing">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dbeafe"/>
+      <stop offset="1" stop-color="#f8fafc"/>
+    </linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#64748b"/>
+      <stop offset="1" stop-color="#1f2937"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <rect x="0" y="395" width="1200" height="405" fill="url(#road)"/>
+  <path d="M0 410 C220 360 350 378 530 415 C710 453 890 446 1200 392 L1200 470 C870 515 710 510 520 472 C330 435 180 432 0 486 Z" fill="#475569"/>
+  <path d="M130 555 C210 515 350 516 420 556 C486 594 435 656 325 664 C215 672 82 632 130 555 Z" fill="#111827"/>
+  <ellipse cx="305" cy="585" rx="118" ry="48" fill="#0f172a"/>
+  <ellipse cx="305" cy="583" rx="82" ry="24" fill="#334155"/>
+  <path d="M655 515 C735 478 840 489 910 540 C966 581 930 637 812 643 C690 650 595 581 655 515 Z" fill="#111827"/>
+  <ellipse cx="792" cy="550" rx="112" ry="42" fill="#0f172a"/>
+  <ellipse cx="792" cy="548" rx="77" ry="21" fill="#334155"/>
+  <path d="M0 660 L1200 620 L1200 800 L0 800 Z" fill="#111827" opacity=".45"/>
+  <g fill="#f8fafc" opacity=".72">
+    <rect x="545" y="432" width="90" height="12" rx="6" transform="rotate(7 590 438)"/>
+    <rect x="715" y="456" width="90" height="12" rx="6" transform="rotate(7 760 462)"/>
+    <rect x="910" y="482" width="90" height="12" rx="6" transform="rotate(7 955 488)"/>
+  </g>
+  <g transform="translate(70 92)">
+    <rect width="520" height="116" rx="18" fill="#ffffff" opacity=".9"/>
+    <text x="28" y="42" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#0f172a">JanVaani demo image</text>
+    <text x="28" y="78" font-family="Arial, sans-serif" font-size="22" fill="#334155">Road damage / pothole complaint</text>
+  </g>
+</svg>

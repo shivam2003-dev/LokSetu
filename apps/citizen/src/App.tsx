@@ -1,4 +1,5 @@
 import {
+  Award,
   ArrowLeft,
   Camera,
   CheckCircle2,
@@ -16,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
+const citizenIdentityKey = "loksetuCitizenIdentity";
 
 type Channel = "photo" | "voice" | "text";
 type Step = "choose" | "capture" | "sending" | "done";
@@ -33,6 +35,8 @@ type Receipt = {
   status: string;
   nextStep: string;
   area: string;
+  aadhaarMasked?: string;
+  aadhaarVerified?: boolean;
 };
 
 type ReceiptLookup = {
@@ -48,6 +52,55 @@ type ReceiptLookup = {
   state?: string;
   mpId?: string;
   batchId?: string;
+  aadhaarMasked?: string;
+  aadhaarVerified?: boolean;
+  identityMode?: string;
+  citizenScore?: number;
+  submissionQualityScore?: number;
+  rewardPoints?: number;
+  rewardBand?: string;
+  rewardReasons?: string[];
+  privacy: string;
+};
+
+type CitizenIdentity = {
+  aadhaarMasked: string;
+  aadhaarVerified: boolean;
+  identityMode: string;
+};
+
+type RewardMilestone = {
+  id: string;
+  title: string;
+  threshold: number;
+  description: string;
+};
+
+type RewardLookup = {
+  aadhaarMasked: string;
+  aadhaarVerified: boolean;
+  identityMode: string;
+  totalRewardPoints: number;
+  processedSubmissionCount: number;
+  pendingSubmissionCount: number;
+  failedSubmissionCount: number;
+  averageQualityScore: number;
+  excellentReports: number;
+  strongReports: number;
+  latestRewardedAt?: string;
+  currentMilestone: RewardMilestone;
+  nextMilestone?: RewardMilestone;
+  pointsToNextMilestone: number;
+  milestoneProgressPercent: number;
+  recentRewards: Array<{
+    receiptId: string;
+    rewardPoints: number;
+    rewardBand: string;
+    qualityScore: number;
+    category: string;
+    area: string;
+    processedAt: string;
+  }>;
   privacy: string;
 };
 
@@ -57,10 +110,39 @@ const channels: Array<{ id: Channel; icon: typeof Camera; en: string; hi: string
   { id: "text", icon: Type, en: "Type", hi: "लिखें", hint: "Write the problem" }
 ];
 
+const languageOptions = [
+  "auto",
+  "Hindi",
+  "English",
+  "Bangla",
+  "Tamil",
+  "Telugu",
+  "Marathi",
+  "Gujarati",
+  "Kannada",
+  "Malayalam",
+  "Punjabi",
+  "Odia",
+  "Urdu",
+  "Assamese",
+  "Bodo",
+  "Dogri",
+  "Konkani",
+  "Kashmiri",
+  "Maithili",
+  "Manipuri",
+  "Nepali",
+  "Sanskrit",
+  "Santali",
+  "Sindhi"
+];
+
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenKey) ?? "");
+  const [citizenIdentity, setCitizenIdentity] = useState<CitizenIdentity | null>(() => readStoredCitizenIdentity());
   const [step, setStep] = useState<Step>("choose");
   const [channel, setChannel] = useState<Channel>("photo");
+  const [language, setLanguage] = useState("auto");
   const [text, setText] = useState("");
   const [media, setMedia] = useState<string | null>(null);
   const [mediaName, setMediaName] = useState("");
@@ -71,6 +153,10 @@ export default function App() {
   const [receiptLookup, setReceiptLookup] = useState<ReceiptLookup | null>(null);
   const [receiptLookupError, setReceiptLookupError] = useState("");
   const [receiptLookupBusy, setReceiptLookupBusy] = useState(false);
+  const [rewardSummary, setRewardSummary] = useState<RewardLookup | null>(null);
+  const [rewardSummaryError, setRewardSummaryError] = useState("");
+  const [rewardSummaryBusy, setRewardSummaryBusy] = useState(false);
+  const [rewardGuideOpen, setRewardGuideOpen] = useState(false);
   const [geo, setGeo] = useState<GeoState>({ status: "idle", label: "Detecting your area…" });
 
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -82,7 +168,7 @@ export default function App() {
 
   function detectLocation() {
     if (!("geolocation" in navigator)) {
-      setGeo({ status: "denied", label: "Location off — your MP area will be set by staff" });
+      setGeo({ status: "denied", label: "Location required — enable browser location" });
       return;
     }
     setGeo({ status: "locating", label: "Detecting your area…" });
@@ -95,7 +181,7 @@ export default function App() {
           label: `Located near ${position.coords.latitude.toFixed(3)}, ${position.coords.longitude.toFixed(3)}`
         });
       },
-      () => setGeo({ status: "denied", label: "Location off — tap to enable for auto-routing" }),
+      () => setGeo({ status: "denied", label: "Location required — tap to allow access" }),
       { enableHighAccuracy: true, timeout: 8000 }
     );
   }
@@ -146,11 +232,18 @@ export default function App() {
     }
   }
 
-  const canSubmit = channel === "text" ? text.trim().length >= 4 : Boolean(media);
+  const hasIssueContent = channel === "text" ? text.trim().length >= 4 : Boolean(media);
+  const hasLocation = geo.status === "ready" && typeof geo.lat === "number" && typeof geo.lng === "number";
+  const canSubmit = hasIssueContent && hasLocation;
 
   async function submit() {
-    if (!canSubmit) {
+    if (!hasIssueContent) {
       setError(channel === "text" ? "Please write the problem." : "Please add a photo or recording.");
+      return;
+    }
+    if (!hasLocation) {
+      setError("Location is required before submission. Tap Enable and allow location permission.");
+      detectLocation();
       return;
     }
     setError("");
@@ -160,6 +253,7 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           channel,
+          language: language === "auto" ? undefined : language,
           text: text.trim() || undefined,
           media: media || undefined,
           lat: geo.lat,
@@ -167,6 +261,10 @@ export default function App() {
           privacyMode: true
         })
       });
+      if (response.status === 401) {
+        logout();
+        return;
+      }
       if (!response.ok) throw new Error("submit failed");
       const payload = await response.json();
       setReceipt({
@@ -174,7 +272,9 @@ export default function App() {
         rawIntakeId: payload.rawIntakeId,
         status: payload.status,
         nextStep: payload.nextStep,
-        area: geo.label
+        area: geo.label,
+        aadhaarMasked: payload.aadhaarMasked,
+        aadhaarVerified: payload.aadhaarVerified
       });
       setReceiptSearch(payload.rawIntakeId.slice(0, 8));
       setStep("done");
@@ -207,6 +307,10 @@ export default function App() {
     try {
       const response = await apiFetch(`/api/citizen/receipts/${encodeURIComponent(cleanReceipt)}`);
       const payload = await response.json();
+      if (response.status === 401) {
+        logout();
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "Receipt lookup failed");
       setReceiptLookup(payload);
     } catch (lookupError) {
@@ -220,14 +324,39 @@ export default function App() {
     return status.replace(/_/g, " ");
   }
 
-  function handleLogin(token: string) {
+  function handleLogin(token: string, identity: CitizenIdentity) {
     localStorage.setItem(accessTokenKey, token);
+    localStorage.setItem(citizenIdentityKey, JSON.stringify(identity));
     setAccessToken(token);
+    setCitizenIdentity(identity);
   }
 
   function logout() {
     localStorage.removeItem(accessTokenKey);
+    localStorage.removeItem(citizenIdentityKey);
     setAccessToken("");
+    setCitizenIdentity(null);
+    setRewardSummary(null);
+    setRewardSummaryError("");
+  }
+
+  async function loadMyRewards() {
+    setRewardSummaryBusy(true);
+    setRewardSummaryError("");
+    try {
+      const response = await apiFetch("/api/citizen/rewards/me");
+      const payload = await response.json() as RewardLookup & { error?: string };
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error ?? "Reward lookup failed");
+      setRewardSummary(payload);
+    } catch (lookupError) {
+      setRewardSummaryError(lookupError instanceof Error ? lookupError.message : "Reward lookup failed");
+    } finally {
+      setRewardSummaryBusy(false);
+    }
   }
 
   if (!accessToken) return <LoginPage onLogin={handleLogin} />;
@@ -256,6 +385,9 @@ export default function App() {
               क्या समस्या है? <span>What is the problem?</span>
             </h1>
             <p className="lede">Report a local issue in seconds through the protected LokSetu intake.</p>
+            <button className="reward-guide-button" onClick={() => setRewardGuideOpen(true)} type="button">
+              <Award size={18} /> How to get 100% reward
+            </button>
             <div className="tiles">
               {channels.map((item) => {
                 const Icon = item.icon;
@@ -282,6 +414,28 @@ export default function App() {
             <p className="trust">
               <ShieldCheck size={15} /> Your name stays private. AI removes personal details before your MP sees it.
             </p>
+            {citizenIdentity ? (
+              <p className="identity-note">
+                <ShieldCheck size={15} /> Aadhaar {citizenIdentity.aadhaarMasked} · format only
+              </p>
+            ) : null}
+            <section className="reward-panel">
+              <div className="reward-panel-head">
+                <span>
+                  <Award size={18} /> My reward total
+                </span>
+                <button disabled={rewardSummaryBusy} onClick={loadMyRewards} type="button">
+                  {rewardSummaryBusy ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+                  Show my reward total
+                </button>
+              </div>
+              {rewardSummaryError ? <p className="lookup-error">{rewardSummaryError}</p> : null}
+              {rewardSummary ? (
+                <RewardSummaryCard reward={rewardSummary} />
+              ) : (
+                <p className="reward-empty">See cumulative reward points, milestone reached, and pending reports.</p>
+              )}
+            </section>
             <section className="track-card">
               <form className="track-form" onSubmit={searchReceipt}>
                 <label>
@@ -312,6 +466,9 @@ export default function App() {
                   </div>
                   <p>{receiptLookup.nextStep}</p>
                   {receiptLookup.category ? <small>{receiptLookup.category} · {receiptLookup.ward}</small> : null}
+                  {typeof receiptLookup.citizenScore === "number" ? (
+                    <small>Reward {receiptLookup.citizenScore}/100 · quality {receiptLookup.submissionQualityScore ?? receiptLookup.citizenScore}/100</small>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -323,6 +480,20 @@ export default function App() {
             <button className="back" onClick={() => setStep("choose")} type="button">
               <ArrowLeft size={18} /> Back
             </button>
+            <button className="reward-guide-button compact" onClick={() => setRewardGuideOpen(true)} type="button">
+              <Award size={17} /> 100% reward guide
+            </button>
+
+            <label className="note language-select">
+              Language
+              <select onChange={(event) => setLanguage(event.target.value)} value={language}>
+                {languageOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {item === "auto" ? "Auto-detect language" : item}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {channel === "photo" ? (
               <div className="block">
@@ -388,7 +559,7 @@ export default function App() {
             <div className="area-card">
               <MapPin size={16} />
               <div>
-                <strong>{geo.status === "ready" ? "Auto-detected area" : "Area"}</strong>
+                <strong>{geo.status === "ready" ? "Auto-detected area" : "Location required"}</strong>
                 <small>{geo.label}</small>
               </div>
               {geo.status !== "ready" ? (
@@ -402,7 +573,7 @@ export default function App() {
 
             <button className="submit" disabled={!canSubmit || step === "sending"} onClick={submit} type="button">
               {step === "sending" ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              {step === "sending" ? "Sending to your MP…" : "Submit problem"}
+              {step === "sending" ? "Sending to your MP…" : hasLocation ? "Submit problem" : "Allow location to submit"}
             </button>
           </section>
         ) : null}
@@ -423,7 +594,7 @@ export default function App() {
                 <span>
                   <Languages size={13} /> AI batch
                 </span>
-                <strong>Queued for processing</strong>
+                <strong>Reward pending</strong>
               </div>
               <div>
                 <span>Area</span>
@@ -432,6 +603,10 @@ export default function App() {
               <div>
                 <span>Receipt ID</span>
                 <strong className="score">{receipt.rawIntakeId.slice(0, 8)}</strong>
+              </div>
+              <div>
+                <span>Aadhaar</span>
+                <strong>{receipt.aadhaarMasked ?? citizenIdentity?.aadhaarMasked ?? "format checked"}</strong>
               </div>
             </div>
             <form className="track-form done-track" onSubmit={searchReceipt}>
@@ -461,6 +636,9 @@ export default function App() {
                 </div>
                 <p>{receiptLookup.nextStep}</p>
                 {receiptLookup.category ? <small>{receiptLookup.category} · {receiptLookup.ward}</small> : null}
+                {typeof receiptLookup.citizenScore === "number" ? (
+                  <small>Reward {receiptLookup.citizenScore}/100 · quality {receiptLookup.submissionQualityScore ?? receiptLookup.citizenScore}/100</small>
+                ) : null}
               </div>
             ) : null}
             <button className="submit" onClick={reset} type="button">
@@ -469,6 +647,89 @@ export default function App() {
           </section>
         ) : null}
       </main>
+      {rewardGuideOpen ? <RewardGuide onClose={() => setRewardGuideOpen(false)} /> : null}
+    </div>
+  );
+}
+
+function RewardGuide({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="reward-guide-title">
+      <section className="reward-guide">
+        <div className="guide-head">
+          <span><Award size={18} /> Reward guide</span>
+          <button onClick={onClose} type="button">Close</button>
+        </div>
+        <h2 id="reward-guide-title">How to report well and earn 100% reward</h2>
+        <p>
+          A 100% reward is for a clear, useful, public-interest report. Write in English, or translate these points
+          into your own language before submitting.
+        </p>
+        <ol>
+          <li>Give the exact place: road, lane, school, clinic, ward, landmark, or bus stop.</li>
+          <li>Describe one public problem clearly. Keep private disputes and unrelated complaints out.</li>
+          <li>Explain who is affected: children, patients, commuters, women, elderly people, or households.</li>
+          <li>Add evidence when possible: photo, voice note, visible damage, timing, or how long it has continued.</li>
+          <li>Explain urgency: safety risk, health risk, school disruption, water shortage, flooding, or night danger.</li>
+          <li>Avoid abuse, rumors, duplicate spam, political slogans, and personal Aadhaar or phone details in the text.</li>
+        </ol>
+        <article>
+          <strong>Good example</strong>
+          <p>Streetlights near Kalindi Nagar bus stop have not worked for 10 days. Women and students feel unsafe after 7 PM, and there was one near-accident yesterday. Location is beside the main road tea stall.</p>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function RewardSummaryCard({ reward }: { reward: RewardLookup }) {
+  const next = reward.nextMilestone;
+  return (
+    <div className="reward-summary" aria-live="polite">
+      <div className="reward-total">
+        <span>Cumulative reward</span>
+        <strong>{reward.totalRewardPoints}</strong>
+        <small>points till date</small>
+      </div>
+      <div className="milestone-box">
+        <span>Current milestone</span>
+        <strong>{reward.currentMilestone.title}</strong>
+        <small>{reward.currentMilestone.description}</small>
+      </div>
+      <div className="milestone-progress">
+        {next ? (
+          <>
+            <div>
+              <span>Next milestone</span>
+              <strong>{next.title}</strong>
+            </div>
+            <small>{reward.pointsToNextMilestone} points to go</small>
+            <div className="progress-track">
+              <span style={{ width: `${reward.milestoneProgressPercent}%` }} />
+            </div>
+          </>
+        ) : (
+          <strong>Top milestone reached</strong>
+        )}
+      </div>
+      <div className="reward-stats">
+        <span>{reward.processedSubmissionCount} processed</span>
+        <span>{reward.pendingSubmissionCount} pending</span>
+        <span>{reward.averageQualityScore}/100 average quality</span>
+      </div>
+      {reward.recentRewards.length ? (
+        <ul className="recent-rewards">
+          {reward.recentRewards.map((item) => (
+            <li key={`${item.receiptId}-${item.processedAt}`}>
+              <strong>{item.rewardPoints}/100</strong>
+              <span>{item.category} · {item.rewardBand.replace("_", " ")}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="reward-empty">No processed rewards yet. Submitted reports appear here after AI batch scoring.</p>
+      )}
+      <p className="reward-privacy">{reward.privacy}</p>
     </div>
   );
 }
@@ -484,28 +745,59 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   });
 }
 
-function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
-  const [password, setPassword] = useState("");
+function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIdentity) => void }) {
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rewardLookupBusy, setRewardLookupBusy] = useState(false);
+  const [rewardLookup, setRewardLookup] = useState<RewardLookup | null>(null);
+  const [rewardLookupError, setRewardLookupError] = useState("");
   const [error, setError] = useState("");
+  const aadhaarDigits = cleanAadhaar(aadhaarNumber);
 
   async function login(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (aadhaarDigits.length !== 12) {
+      setError("Enter a 12-digit Aadhaar number.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${apiBase}/api/auth/login`, {
+      const response = await fetch(`${apiBase}/api/citizen/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ aadhaarNumber: aadhaarDigits })
       });
-      const payload = await response.json() as { token?: string; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Login failed");
-      onLogin(payload.token || "auth-disabled");
+      const payload = await response.json() as { token?: string; citizen?: CitizenIdentity; error?: string };
+      if (!response.ok || !payload.token || !payload.citizen) throw new Error(payload.error ?? "Aadhaar access failed");
+      onLogin(payload.token, payload.citizen);
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "Login failed");
+      setError(loginError instanceof Error ? loginError.message : "Aadhaar access failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function checkReward() {
+    if (aadhaarDigits.length !== 12) {
+      setRewardLookupError("Enter a 12-digit Aadhaar number.");
+      return;
+    }
+    setRewardLookupBusy(true);
+    setRewardLookupError("");
+    try {
+      const response = await fetch(`${apiBase}/api/citizen/rewards/lookup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aadhaarNumber: aadhaarDigits })
+      });
+      const payload = await response.json() as RewardLookup & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Reward lookup failed");
+      setRewardLookup(payload);
+    } catch (lookupError) {
+      setRewardLookupError(lookupError instanceof Error ? lookupError.message : "Reward lookup failed");
+    } finally {
+      setRewardLookupBusy(false);
     }
   }
 
@@ -513,20 +805,56 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
     <div className="screen auth-screen">
       <main className="auth-card">
         <span className="logo-mark">आ</span>
-        <h1>Apni Awaaz Login</h1>
-        <p>Access is restricted to control AI and cloud usage.</p>
+        <h1>Apni Awaaz</h1>
+        <p>Aadhaar access uses 12-digit format check only.</p>
         <form onSubmit={login}>
           <label>
-            Password
-            <input autoFocus onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
+            Aadhaar number
+            <input
+              autoComplete="off"
+              autoFocus
+              inputMode="numeric"
+              maxLength={14}
+              onChange={(event) => {
+                setAadhaarNumber(formatAadhaar(event.target.value));
+                setRewardLookup(null);
+                setRewardLookupError("");
+              }}
+              placeholder="2345 6789 0123"
+              type="text"
+              value={aadhaarNumber}
+            />
           </label>
           {error ? <p className="lookup-error">{error}</p> : null}
-          <button className="submit" disabled={busy || !password.trim()} type="submit">
+          <button className="submit" disabled={busy || aadhaarDigits.length !== 12} type="submit">
             {busy ? <Loader2 className="spin" size={18} /> : <ShieldCheck size={18} />}
-            Login
+            Continue
+          </button>
+          <button className="secondary-submit" disabled={rewardLookupBusy || aadhaarDigits.length !== 12} onClick={checkReward} type="button">
+            {rewardLookupBusy ? <Loader2 className="spin" size={18} /> : <Award size={18} />}
+            Check cumulative reward
           </button>
         </form>
+        {rewardLookupError ? <p className="lookup-error">{rewardLookupError}</p> : null}
+        {rewardLookup ? <RewardSummaryCard reward={rewardLookup} /> : null}
       </main>
     </div>
   );
+}
+
+function cleanAadhaar(value: string) {
+  return value.replace(/\D/g, "").slice(0, 12);
+}
+
+function formatAadhaar(value: string) {
+  return cleanAadhaar(value).replace(/(\d{4})(?=\d)/g, "$1 ").trim();
+}
+
+function readStoredCitizenIdentity(): CitizenIdentity | null {
+  try {
+    const stored = localStorage.getItem(citizenIdentityKey);
+    return stored ? JSON.parse(stored) as CitizenIdentity : null;
+  } catch {
+    return null;
+  }
 }
