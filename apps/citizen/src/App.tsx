@@ -14,10 +14,12 @@ import {
   Type
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { detectLocalLanguage, nativeLanguageLabel } from "./localLanguage.js";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
 const citizenIdentityKey = "loksetuCitizenIdentity";
+const languagePrefKey = "loksetuLanguage";
 
 type Channel = "photo" | "voice" | "text";
 type Step = "choose" | "capture" | "sending" | "done";
@@ -142,7 +144,9 @@ export default function App() {
   const [citizenIdentity, setCitizenIdentity] = useState<CitizenIdentity | null>(() => readStoredCitizenIdentity());
   const [step, setStep] = useState<Step>("choose");
   const [channel, setChannel] = useState<Channel>("photo");
-  const [language, setLanguage] = useState("auto");
+  const [language, setLanguage] = useState(() => localStorage.getItem(languagePrefKey) ?? "auto");
+  const [localLanguage, setLocalLanguage] = useState<string | null>(null);
+  const [languageModalOpen, setLanguageModalOpen] = useState(false);
   const [text, setText] = useState("");
   const [media, setMedia] = useState<string | null>(null);
   const [mediaName, setMediaName] = useState("");
@@ -166,6 +170,14 @@ export default function App() {
     if (accessToken) detectLocation();
   }, [accessToken]);
 
+  // Explicit citizen choice; persisted so it wins over location auto-detect on
+  // the next visit.
+  function chooseLanguage(next: string) {
+    setLanguage(next);
+    localStorage.setItem(languagePrefKey, next);
+    setLanguageModalOpen(false);
+  }
+
   function detectLocation() {
     if (!("geolocation" in navigator)) {
       setGeo({ status: "denied", label: "Location required — enable browser location" });
@@ -174,12 +186,18 @@ export default function App() {
     setGeo({ status: "locating", label: "Detecting your area…" });
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        const { latitude, longitude } = position.coords;
         setGeo({
           status: "ready",
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          label: `Located near ${position.coords.latitude.toFixed(3)}, ${position.coords.longitude.toFixed(3)}`
+          lat: latitude,
+          lng: longitude,
+          label: `Located near ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`
         });
+        const detected = detectLocalLanguage(latitude, longitude);
+        setLocalLanguage(detected);
+        // Adopt the local language automatically only if the citizen has not
+        // already picked one themselves.
+        if (!localStorage.getItem(languagePrefKey)) setLanguage(detected);
       },
       () => setGeo({ status: "denied", label: "Location required — tap to allow access" }),
       { enableHighAccuracy: true, timeout: 8000 }
@@ -486,7 +504,7 @@ export default function App() {
 
             <label className="note language-select">
               Language
-              <select onChange={(event) => setLanguage(event.target.value)} value={language}>
+              <select onChange={(event) => chooseLanguage(event.target.value)} value={language}>
                 {languageOptions.map((item) => (
                   <option key={item} value={item}>
                     {item === "auto" ? "Auto-detect language" : item}
@@ -647,7 +665,103 @@ export default function App() {
           </section>
         ) : null}
       </main>
+      <LanguageBar
+        language={language}
+        localLanguage={localLanguage}
+        onChoose={chooseLanguage}
+        onMore={() => setLanguageModalOpen(true)}
+      />
       {rewardGuideOpen ? <RewardGuide onClose={() => setRewardGuideOpen(false)} /> : null}
+      {languageModalOpen ? (
+        <LanguagePicker
+          language={language}
+          localLanguage={localLanguage}
+          onChoose={chooseLanguage}
+          onClose={() => setLanguageModalOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function LanguageBar({
+  language,
+  localLanguage,
+  onChoose,
+  onMore
+}: {
+  language: string;
+  localLanguage: string | null;
+  onChoose: (next: string) => void;
+  onMore: () => void;
+}) {
+  // Facebook-style quick row: auto-detected local language first, then Hindi
+  // and English, then a "More" button that opens the full list.
+  const quick: string[] = [];
+  if (localLanguage) quick.push(localLanguage);
+  for (const item of ["Hindi", "English"]) {
+    if (!quick.includes(item)) quick.push(item);
+  }
+  return (
+    <footer className="language-bar" aria-label="Choose language">
+      <span className="language-bar-label">
+        <Languages size={14} /> Language
+      </span>
+      <div className="language-bar-options">
+        {quick.map((item) => (
+          <button
+            key={item}
+            className={`language-chip ${language === item ? "active" : ""}`}
+            onClick={() => onChoose(item)}
+            type="button"
+          >
+            {nativeLanguageLabel(item)}
+            {item === localLanguage ? <em>local</em> : null}
+          </button>
+        ))}
+        <button className="language-chip more" onClick={onMore} type="button">
+          + More languages
+        </button>
+      </div>
+    </footer>
+  );
+}
+
+function LanguagePicker({
+  language,
+  localLanguage,
+  onChoose,
+  onClose
+}: {
+  language: string;
+  localLanguage: string | null;
+  onChoose: (next: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="language-picker-title" onClick={onClose}>
+      <section className="language-picker" onClick={(event) => event.stopPropagation()}>
+        <div className="guide-head">
+          <span><Languages size={18} /> Choose your language</span>
+          <button onClick={onClose} type="button">Close</button>
+        </div>
+        <h2 id="language-picker-title">Select a language</h2>
+        <p>Pick any Indian language. Your voice or text can still be in any language — this sets your preference.</p>
+        <div className="language-grid">
+          {languageOptions.map((item) => (
+            <button
+              key={item}
+              className={`language-option ${language === item ? "active" : ""}`}
+              onClick={() => onChoose(item)}
+              type="button"
+            >
+              <strong>{item === "auto" ? "Auto-detect" : nativeLanguageLabel(item)}</strong>
+              <small>{item === "auto" ? "Detect from what you write or say" : item}</small>
+              {item === localLanguage ? <span className="local-tag">Local</span> : null}
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
