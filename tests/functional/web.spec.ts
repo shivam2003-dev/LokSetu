@@ -448,7 +448,7 @@ async function loginIfNeeded(page: import("@playwright/test").Page) {
     window.localStorage.setItem("janvaaniTourComplete", "1");
   });
   const username = page.getByLabel("Email or Mobile Number");
-  const password = page.getByLabel("Password");
+  const password = page.getByLabel("Password", { exact: true });
   if (await password.isVisible()) {
     if (await username.isVisible()) {
       await username.fill(testUsername());
