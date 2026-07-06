@@ -22,7 +22,7 @@ web:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-web-80-4ac9cbb6"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/web
-    tag: gcp-20260705115815-noise-discard-amd64
+    tag: gcp-20260706064425-pr18-pr19-amd64
 
 citizen:
   replicaCount: 1
@@ -30,7 +30,7 @@ citizen:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-citize-8-e0ef404d"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/citizen
-    tag: gcp-20260705104551-cumulative-rewards-amd64
+    tag: gcp-20260706064425-pr18-pr19-amd64
 
 api:
   replicaCount: 1
