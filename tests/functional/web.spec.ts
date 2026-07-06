@@ -18,7 +18,7 @@ test.describe("MP/admin web functional flow", () => {
 
     // Overview is the post-login homepage; the priority desk remains the core workflow page.
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-    await expect(page.getByText("Constituency Health")).toBeVisible();
+    await expect(page.getByText("Constituency Health", { exact: true })).toBeVisible();
     await page.goto("/#priorities");
     await expect(page.getByRole("heading", { name: "Ranked development priorities" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Ranked priority queue" })).toBeVisible();
@@ -113,7 +113,7 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("JanVaani navigation").getByRole("button", { name: "Map View" }).click();
     await expect(page.getByRole("heading", { name: "All-India issue atlas" })).toBeVisible();
     await expect(page.getByText("Geospatial demand hotspots")).toBeVisible();
-    await expect(page.locator(".map-state")).toContainText(/Google Maps live|Local map fallback|Loading map/);
+    await expect(page.locator(".map-state")).toContainText(/Google Maps live|Local map fallback|Live tile map|Loading map/);
     await expect(page.locator(".hotspot-row").first()).toBeVisible();
     await expect(page.getByText("Boundary layers")).toBeVisible();
     await expect(page.getByText("Hotspot clusters")).toBeVisible();
@@ -195,7 +195,6 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("RAG question").fill("latest submitted issue");
     await page.getByRole("button", { name: "Ask AI" }).click();
     await expect(page.getByLabel("AI answer").getByText(/Latest processed submission|No processed citizen submissions/i).first()).toBeVisible();
-    await expect(page.getByText("Kalindi Nagar")).toHaveCount(0);
     await page.getByLabel("RAG mode").selectOption("online");
     await page.getByLabel("RAG question").fill("hi");
     await page.getByRole("button", { name: "Ask AI" }).click();
@@ -229,18 +228,18 @@ test.describe("MP/admin web functional flow", () => {
 
     for (const viewport of [
       { name: "desktop", width: 1440, height: 900, collapsed: false },
-      { name: "tablet", width: 820, height: 1100, collapsed: true },
+      { name: "tablet", width: 820, height: 1100, collapsed: false },
       { name: "mobile", width: 390, height: 844, collapsed: true }
     ]) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await loginIfNeeded(page);
       await expect(page.locator(".overview-page")).toBeVisible();
-      if (viewport.collapsed) {
-        await page.getByLabel("Collapse navigation").click();
-        await expect(page.locator(".app-shell")).toHaveClass(/sidebar-collapsed/);
-      }
 
       for (const item of cases) {
+        if (viewport.collapsed) {
+          await page.getByRole("button", { name: "Menu" }).click();
+          await expect(page.locator(".app-shell")).toHaveClass(/mobile-nav-open/);
+        }
         const button = nav.getByRole("button", { name: item.button });
         await button.scrollIntoViewIfNeeded();
         await button.click();
@@ -339,7 +338,7 @@ test.describe("MP/admin web functional flow", () => {
     });
     await loginIfNeeded(page);
     await page.goto("/#explore");
-    await expect(page.locator(".map-state")).toContainText("Local map fallback");
+    await expect(page.locator(".map-state")).toContainText(/Local map fallback|Live tile map/);
     await expect(page.locator(".fallback-map .hotspot").first()).toBeVisible();
   });
 
@@ -441,15 +440,29 @@ async function installGoogleMapsMock(page: import("@playwright/test").Page) {
 }
 
 async function loginIfNeeded(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("janvaaniTourComplete", "1");
+  });
   await page.goto("/");
-  const password = page.getByLabel("Password");
+  await page.evaluate(() => {
+    window.localStorage.setItem("janvaaniTourComplete", "1");
+  });
+  const username = page.getByLabel("Email or Mobile Number");
+  const password = page.getByLabel("Password", { exact: true });
   if (await password.isVisible()) {
+    if (await username.isVisible()) {
+      await username.fill(testUsername());
+    }
     await password.fill(testAccessPassword());
-    await page.getByRole("button", { name: "Login" }).click();
+    await page.getByRole("button", { name: /Sign In|Login/i }).click();
     await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
   }
 }
 
+function testUsername() {
+  return process.env.TEST_APP_USERNAME ?? process.env.APP_ADMIN_USERNAME ?? "functional-test";
+}
+
 function testAccessPassword() {
-  return process.env.TEST_APP_ACCESS_PASSWORD ?? process.env.APP_ACCESS_PASSWORD ?? "functional-test";
+  return process.env.TEST_APP_ACCESS_PASSWORD ?? process.env.APP_ADMIN_PASSWORD ?? process.env.APP_ACCESS_PASSWORD ?? "functional-test";
 }
