@@ -307,8 +307,8 @@ button {
 .login-card-emblem {
   display: grid;
   place-items: center;
-  width: clamp(54px, 5.4vh, 64px);
-  height: clamp(60px, 6.2vh, 72px);
+  width: clamp(140px, 16vh, 168px);
+  height: clamp(140px, 16vh, 168px);
   margin: 0 auto clamp(12px, 2vh, 20px);
   border-radius: 18px 18px 18px 6px;
   background: linear-gradient(155deg, #7a3df4, #4c1ed9);
@@ -4993,8 +4993,8 @@ meter::-moz-meter-bar {
     padding: 28px 20px;
   }
   .login-card-emblem {
-    width: 58px;
-    height: 66px;
+    width: 128px;
+    height: 128px;
     margin-bottom: 20px;
   }
   .login-panel h2 {
@@ -5133,8 +5133,8 @@ meter::-moz-meter-bar {
     padding: 24px 34px;
   }
   .login-card-emblem {
-    width: 54px;
-    height: 60px;
+    width: 124px;
+    height: 124px;
     margin-bottom: 14px;
   }
   .login-panel h2 {
@@ -5283,8 +5283,8 @@ meter::-moz-meter-bar {
   }
 
   .login-card-emblem {
-    width: 40px;
-    height: 46px;
+    width: 112px;
+    height: 112px;
     margin-bottom: 8px;
   }
 
@@ -9778,4 +9778,29 @@ button.problem-row.selected {
   .gis-scale {
     display: none;
   }
+}
+
+/* --- JanVaani logo image in brand marks -------------------------------- */
+/* Render the PNG logo cleanly inside the existing brand containers and
+   suppress the decorative gradient/`::after` overlays when an image is used. */
+.brand-mark:has(img),
+.login-brand-mark:has(img),
+.login-card-emblem:has(img) {
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+  padding: 0;
+}
+.brand-mark:has(img)::after,
+.login-brand-mark:has(img)::after,
+.login-card-emblem:has(img)::after {
+  content: none;
+}
+.brand-mark img,
+.login-brand-mark img,
+.login-card-emblem img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }

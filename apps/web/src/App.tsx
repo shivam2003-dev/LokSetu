@@ -44,6 +44,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DemandSignalsPage } from "./DemandSignals";
 
+const janVaaniLogo = "/images/JanVaniRobo.png";
+
 type Page = "overview" | "priorities" | "pulse" | "map" | "signals" | "explorer" | "copilot" | "knowledge" | "recommendations" | "projects" | "reports" | "compare" | "settings";
 
 type Scope = "local" | "mp" | "global";
@@ -716,7 +718,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       <aside className="sidebar" aria-label="JanVaani navigation">
         <div className="brand">
-          <div className="brand-mark">JV</div>
+          <div className="brand-mark"><img src={janVaaniLogo} alt="JanVaani AI" /></div>
           <div>
             <h1>JanVaani <em>AI</em></h1>
             <p>Constituency Intelligence Platform</p>
@@ -929,7 +931,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
     <main className="login-shell">
       <section className="login-showcase" aria-label="JanVaani AI platform introduction">
         <div className="login-brand-row">
-          <span className="login-brand-mark" aria-hidden="true" />
+          <span className="login-brand-mark"><img src={janVaaniLogo} alt="JanVaani AI" /></span>
           <div>
             <h1>JanVaani <em>AI</em></h1>
             <p>People's Priorities. Smart Governance.</p>
@@ -962,7 +964,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
       </section>
 
       <section className="login-panel" aria-label="Admin sign in">
-        <div className="login-card-emblem"><Building2 size={42} /></div>
+        <div className="login-card-emblem"><img src={janVaaniLogo} alt="JanVaani AI" /></div>
         <h2>Welcome Back</h2>
         <p>Sign in to continue to JanVaani AI</p>
         <form onSubmit={login}>
