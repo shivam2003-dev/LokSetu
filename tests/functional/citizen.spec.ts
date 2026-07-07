@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test.describe("Apni Awaaz citizen app functional flow", () => {
   test.beforeEach(async ({ context, page }) => {
+    await context.addInitScript(() => {
+      localStorage.setItem("loksetuLanguage", "English");
+    });
     await context.grantPermissions(["geolocation"]);
     await context.setGeolocation({ latitude: 28.62, longitude: 77.3 });
     await loginIfNeeded(page);
@@ -17,7 +20,7 @@ test.describe("Apni Awaaz citizen app functional flow", () => {
     await expect(page.getByRole("heading", { name: "How to report well and earn 100% reward" })).toBeVisible();
     await expect(page.getByText("Good example")).toBeVisible();
     await page.getByRole("button", { name: "Close" }).click();
-    await page.getByRole("button", { name: /लिखें Type/i }).click();
+    await page.getByRole("button", { name: "Type Write the problem" }).click();
     await page.getByPlaceholder("E.g. School toilets are broken and classrooms flood after rain.").fill(
       "Functional citizen test: the school hand pump is broken and children cannot drink water."
     );

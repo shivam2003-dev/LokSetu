@@ -92,6 +92,49 @@ us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/web
 us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/citizen
 ```
 
+## Continuous Deployment
+
+`.github/workflows/cd-gcp.yml` deploys automatically on every successful merge
+to `main`. It can also be started manually from GitHub Actions.
+
+The workflow:
+
+1. Runs the deployment gate: `npm ci`, typecheck, build, Playwright functional
+   tests, runtime config smoke, production dependency audit, Helm lint, and Helm
+   render with `values-gcp.yaml`.
+2. Authenticates to Google Cloud through Workload Identity Federation.
+3. Builds and pushes immutable Artifact Registry images for `api`, `rag-api`,
+   `web`, and `citizen`.
+4. Updates the four image tags in `charts/people-priority/values-gcp.yaml` and
+   commits that GitOps tag bump back to `main`.
+5. Refreshes the existing Argo CD application `loksetu-gcp`, waits until Argo is
+   synced to the new Git revision and healthy, checks Kubernetes rollout status,
+   then runs public smoke checks against LokSetu and Apni Awaaz.
+
+Required repository variables:
+
+```text
+GCP_WORKLOAD_IDENTITY_PROVIDER
+GCP_SERVICE_ACCOUNT
+GCP_PROJECT_ID=project-72558650-faf6-4529-a05
+GCP_REGION=us-east4
+GKE_CLUSTER_NAME=loksetu
+ARGOCD_NAMESPACE=argocd
+ARGOCD_APPLICATION=loksetu-gcp
+VITE_CITIZEN_APP_URL=https://awaaz.shivam2003.com
+```
+
+Required IAM for the GitHub Actions service account:
+
+```text
+roles/artifactregistry.writer
+roles/container.admin
+```
+
+The same identity must also have Kubernetes RBAC in the existing cluster for
+the `argocd` and `people-priority` namespaces, because the workflow patches the
+Argo CD `Application` and waits on workload rollouts.
+
 ## Cost Control
 
 The GitHub Action `.github/workflows/gcp-power.yml` is for start/stop only. It does not delete infrastructure.
@@ -119,18 +162,15 @@ Preserved while stopped:
 - Cloud SQL data and instance metadata.
 - Argo CD GitOps manifests.
 
-Required GitHub secret:
+Required repository variables for power control:
 
 ```text
-GCP_SA_KEY_JSON
+GCP_WORKLOAD_IDENTITY_PROVIDER
+GCP_SERVICE_ACCOUNT
 ```
 
-Required IAM for that service account:
-
-```text
-roles/container.admin
-roles/cloudsql.admin
-```
+Required IAM for the GitHub Actions service account: `roles/container.admin`
+and `roles/cloudsql.admin`.
 
 Optional repository variables:
 
