@@ -28,7 +28,8 @@ import { buildDiscardedIntakeDecision, isDiscardedPayload, MINIMUM_STORED_CITIZE
 import { buildDashboard } from "./pipeline.js";
 import { AadhaarIdentity, DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
-import { indicRuntimeMode } from "./indicLanguage.js";
+import { indicRuntimeMode, translateUiStrings } from "./indicLanguage.js";
+import { seedUiTranslations } from "./uiTranslations.js";
 import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
@@ -275,6 +276,47 @@ app.post("/api/citizen/rewards/lookup", async (request, response) => {
     return;
   }
   response.json(await buildCitizenRewardSummary(identity));
+});
+
+// UI translation for the citizen app. Public (used on the login screen too).
+// Translations are cached per language for the process lifetime so each
+// language is translated by the AI provider at most once.
+const uiTranslationSchema = z.object({
+  language: z.string().trim().min(2).max(40),
+  strings: z.array(z.string().min(1).max(2000)).min(1).max(200)
+});
+const uiTranslationCache = new Map<string, Record<string, string>>();
+
+app.post("/api/citizen/ui-translations", async (request, response) => {
+  const parsed = uiTranslationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Provide a language and strings to translate." });
+    return;
+  }
+  const { language, strings } = parsed.data;
+  const cacheKey = language.toLowerCase();
+  const cached = uiTranslationCache.get(cacheKey);
+  if (cached) {
+    response.json({ language, source: "cache", translations: cached });
+    return;
+  }
+  // Hand-written seed dictionary works offline (no AI provider needed) and is
+  // preferred where present; the AI fills any remaining strings.
+  const seed = seedUiTranslations(language);
+  let aiTranslations: Record<string, string> | null = null;
+  try {
+    const missing = strings.filter((item) => !seed?.[item]);
+    aiTranslations = missing.length ? await translateUiStrings(missing, language) : null;
+  } catch (error) {
+    logger.warn({ error, language }, "ui translation failed");
+  }
+  const translations = { ...(aiTranslations ?? {}), ...(seed ?? {}) };
+  if (!Object.keys(translations).length) {
+    response.json({ language, source: "none", translations: {} });
+    return;
+  }
+  uiTranslationCache.set(cacheKey, translations);
+  response.json({ language, source: seed ? (aiTranslations ? "seed+ai" : "seed") : "ai", translations });
 });
 
 app.use("/api", (request, response, next) => {
