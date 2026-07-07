@@ -121,6 +121,38 @@ export async function transcribeIndicAudio(base64: string, mimeType: string, dec
   return null;
 }
 
+/**
+ * Translate a batch of English UI strings into the target language. Returns a
+ * map keyed by the original English string; entries that cannot be translated
+ * are omitted so the client falls back to English. Uses Sarvam's translate
+ * endpoint (English -> target). Returns null when no provider is configured.
+ */
+export async function translateUiStrings(
+  strings: string[],
+  targetLanguage: string
+): Promise<Record<string, string> | null> {
+  const targetCode = languageCodeFromDeclared(targetLanguage);
+  if (!targetCode || isEnglishCode(targetCode)) return null;
+  const unique = Array.from(new Set(strings.map((item) => item.trim()).filter(Boolean)));
+  if (!unique.length) return null;
+  if (!sarvamConfig().enabled) return null;
+
+  const result: Record<string, string> = {};
+  // Translate one string at a time so a single failure never corrupts the batch
+  // and each phrase is translated in isolation (UI labels have no shared context).
+  for (const source of unique) {
+    try {
+      const translated = await translateSarvamText(source, "en-IN", targetCode);
+      if (translated && translated.trim() && translated.trim() !== source) {
+        result[source] = translated.trim();
+      }
+    } catch {
+      // Skip this string; the client keeps the English original.
+    }
+  }
+  return Object.keys(result).length ? result : null;
+}
+
 function providerOrder(): Array<"sarvam" | "bhashini"> {
   const configured = (process.env.INDIC_LANGUAGE_PROVIDER_ORDER ?? "sarvam,bhashini")
     .split(",")
@@ -192,7 +224,11 @@ async function detectSarvamLanguage(text: string): Promise<SarvamLanguageRespons
   });
 }
 
-async function translateSarvamText(text: string, sourceLanguageCode: string): Promise<string> {
+async function translateSarvamText(
+  text: string,
+  sourceLanguageCode: string,
+  targetLanguageCode = "en-IN"
+): Promise<string> {
   const { baseUrl, translateModel } = sarvamConfig();
   const chunks = chunkText(text, 1800);
   const translated: string[] = [];
@@ -203,7 +239,7 @@ async function translateSarvamText(text: string, sourceLanguageCode: string): Pr
       body: JSON.stringify({
         input: chunk,
         source_language_code: sourceLanguageCode,
-        target_language_code: "en-IN",
+        target_language_code: targetLanguageCode,
         model: translateModel,
         mode: "formal"
       })

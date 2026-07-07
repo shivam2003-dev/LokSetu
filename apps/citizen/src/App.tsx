@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { detectLocalLanguage, nativeLanguageLabel } from "./localLanguage.js";
+import { I18nProvider, useT } from "./i18n.js";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
@@ -106,10 +107,10 @@ type RewardLookup = {
   privacy: string;
 };
 
-const channels: Array<{ id: Channel; icon: typeof Camera; en: string; hi: string; hint: string }> = [
-  { id: "photo", icon: Camera, en: "Take a photo", hi: "फ़ोटो खींचें", hint: "Pothole, garbage, broken tap" },
-  { id: "voice", icon: Mic, en: "Speak", hi: "बोलकर बताएं", hint: "Record in any language" },
-  { id: "text", icon: Type, en: "Type", hi: "लिखें", hint: "Write the problem" }
+const channels: Array<{ id: Channel; icon: typeof Camera; en: string; hint: string }> = [
+  { id: "photo", icon: Camera, en: "Take a photo", hint: "Pothole, garbage, broken tap" },
+  { id: "voice", icon: Mic, en: "Speak", hint: "Record in any language" },
+  { id: "text", icon: Type, en: "Type", hint: "Write the problem" }
 ];
 
 const languageOptions = [
@@ -139,14 +140,49 @@ const languageOptions = [
   "Sindhi"
 ];
 
+// Outer shell owns only the language state so the i18n provider (which wraps
+// everything) re-renders when the citizen switches language. All other state
+// lives in CitizenApp, which runs inside the provider and can call useT().
 export default function App() {
+  const [language, setLanguage] = useState(() => localStorage.getItem(languagePrefKey) ?? "auto");
+  const [localLanguage, setLocalLanguage] = useState<string | null>(null);
+  const [languageModalOpen, setLanguageModalOpen] = useState(false);
+  return (
+    <I18nProvider language={language}>
+      <CitizenApp
+        language={language}
+        setLanguage={setLanguage}
+        localLanguage={localLanguage}
+        setLocalLanguage={setLocalLanguage}
+        languageModalOpen={languageModalOpen}
+        setLanguageModalOpen={setLanguageModalOpen}
+      />
+    </I18nProvider>
+  );
+}
+
+type CitizenAppProps = {
+  language: string;
+  setLanguage: (value: string) => void;
+  localLanguage: string | null;
+  setLocalLanguage: (value: string | null) => void;
+  languageModalOpen: boolean;
+  setLanguageModalOpen: (value: boolean) => void;
+};
+
+function CitizenApp({
+  language,
+  setLanguage,
+  localLanguage,
+  setLocalLanguage,
+  languageModalOpen,
+  setLanguageModalOpen
+}: CitizenAppProps) {
+  const t = useT();
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenKey) ?? "");
   const [citizenIdentity, setCitizenIdentity] = useState<CitizenIdentity | null>(() => readStoredCitizenIdentity());
   const [step, setStep] = useState<Step>("choose");
   const [channel, setChannel] = useState<Channel>("photo");
-  const [language, setLanguage] = useState(() => localStorage.getItem(languagePrefKey) ?? "auto");
-  const [localLanguage, setLocalLanguage] = useState<string | null>(null);
-  const [languageModalOpen, setLanguageModalOpen] = useState(false);
   const [text, setText] = useState("");
   const [media, setMedia] = useState<string | null>(null);
   const [mediaName, setMediaName] = useState("");
@@ -377,7 +413,9 @@ export default function App() {
     }
   }
 
-  if (!accessToken) return <LoginPage onLogin={handleLogin} />;
+  if (!accessToken) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
 
   return (
     <div className="screen">
@@ -386,25 +424,23 @@ export default function App() {
           <span className="logo-mark">आ</span>
           <div>
             <strong>Apni Awaaz</strong>
-            <small>Your voice reaches your MP</small>
+            <small><T>Your voice reaches your MP</T></small>
           </div>
         </div>
         <button className="loc-chip" onClick={detectLocation} type="button">
           {geo.status === "locating" ? <Loader2 className="spin" size={15} /> : <MapPin size={15} />}
           <span>{geo.label}</span>
         </button>
-        <button className="logout-chip" onClick={logout} type="button">Logout</button>
+        <button className="logout-chip" onClick={logout} type="button"><T>Logout</T></button>
       </header>
 
       <main className="stage">
         {step === "choose" ? (
           <section className="choose">
-            <h1>
-              क्या समस्या है? <span>What is the problem?</span>
-            </h1>
-            <p className="lede">Report a local issue in seconds through the protected LokSetu intake.</p>
+            <h1>{t("What is the problem?")}</h1>
+            <p className="lede"><T>Report a local issue in seconds through the protected LokSetu intake.</T></p>
             <button className="reward-guide-button" onClick={() => setRewardGuideOpen(true)} type="button">
-              <Award size={18} /> How to get 100% reward
+              <Award size={18} /> <T>How to get 100% reward</T>
             </button>
             <div className="tiles">
               {channels.map((item) => {
@@ -414,9 +450,8 @@ export default function App() {
                     <span className="tile-icon">
                       <Icon size={28} />
                     </span>
-                    <strong>{item.hi}</strong>
-                    <span className="tile-en">{item.en}</span>
-                    <small>{item.hint}</small>
+                    <strong>{t(item.en)}</strong>
+                    <small>{t(item.hint)}</small>
                   </button>
                 );
               })}
@@ -427,10 +462,10 @@ export default function App() {
               target="_blank"
               rel="noreferrer"
             >
-              <Send size={18} /> Prefer WhatsApp? Send us a message
+              <Send size={18} /> <T>Prefer WhatsApp? Send us a message</T>
             </a>
             <p className="trust">
-              <ShieldCheck size={15} /> Your name stays private. AI removes personal details before your MP sees it.
+              <ShieldCheck size={15} /> <T>Your name stays private. AI removes personal details before your MP sees it.</T>
             </p>
             {citizenIdentity ? (
               <p className="identity-note">
@@ -440,24 +475,24 @@ export default function App() {
             <section className="reward-panel">
               <div className="reward-panel-head">
                 <span>
-                  <Award size={18} /> My reward total
+                  <Award size={18} /> <T>My reward total</T>
                 </span>
                 <button disabled={rewardSummaryBusy} onClick={loadMyRewards} type="button">
                   {rewardSummaryBusy ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-                  Show my reward total
+                  <T>Show my reward total</T>
                 </button>
               </div>
               {rewardSummaryError ? <p className="lookup-error">{rewardSummaryError}</p> : null}
               {rewardSummary ? (
                 <RewardSummaryCard reward={rewardSummary} />
               ) : (
-                <p className="reward-empty">See cumulative reward points, milestone reached, and pending reports.</p>
+                <p className="reward-empty"><T>See cumulative reward points, milestone reached, and pending reports.</T></p>
               )}
             </section>
             <section className="track-card">
               <form className="track-form" onSubmit={searchReceipt}>
                 <label>
-                  Track receipt
+                  <T>Track receipt</T>
                   <input
                     autoComplete="off"
                     inputMode="text"
@@ -468,18 +503,18 @@ export default function App() {
                 </label>
                 <button disabled={receiptLookupBusy} type="submit">
                   {receiptLookupBusy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
-                  Search
+                  <T>Search</T>
                 </button>
               </form>
               {receiptLookupError ? <p className="lookup-error">{receiptLookupError}</p> : null}
               {receiptLookup ? (
                 <div className="track-result">
                   <div>
-                    <span>Status</span>
+                    <span><T>Status</T></span>
                     <strong>{statusLabel(receiptLookup.status)}</strong>
                   </div>
                   <div>
-                    <span>Area</span>
+                    <span><T>Area</T></span>
                     <strong>{receiptLookup.area}</strong>
                   </div>
                   <p>{receiptLookup.nextStep}</p>
@@ -496,18 +531,18 @@ export default function App() {
         {step === "capture" || step === "sending" ? (
           <section className="capture">
             <button className="back" onClick={() => setStep("choose")} type="button">
-              <ArrowLeft size={18} /> Back
+              <ArrowLeft size={18} /> <T>Back</T>
             </button>
             <button className="reward-guide-button compact" onClick={() => setRewardGuideOpen(true)} type="button">
-              <Award size={17} /> 100% reward guide
+              <Award size={17} /> <T>100% reward guide</T>
             </button>
 
             <label className="note language-select">
-              Language
+              <T>Language</T>
               <select onChange={(event) => chooseLanguage(event.target.value)} value={language}>
                 {languageOptions.map((item) => (
                   <option key={item} value={item}>
-                    {item === "auto" ? "Auto-detect language" : item}
+                    {item === "auto" ? t("Auto-detect language") : item}
                   </option>
                 ))}
               </select>
@@ -515,20 +550,20 @@ export default function App() {
 
             {channel === "photo" ? (
               <div className="block">
-                <h2>Photo of the problem</h2>
+                <h2><T>Photo of the problem</T></h2>
                 {media ? (
                   <img className="preview" src={media} alt="Selected problem" />
                 ) : (
                   <label className="dropzone">
                     <Camera size={34} />
-                    <strong>Tap to open camera</strong>
-                    <small>or choose from gallery</small>
+                    <strong><T>Tap to open camera</T></strong>
+                    <small><T>or choose from gallery</T></small>
                     <input accept="image/*" capture="environment" hidden onChange={onFile} type="file" />
                   </label>
                 )}
                 {media ? (
                   <label className="retake">
-                    Retake / choose another
+                    <T>Retake / choose another</T>
                     <input accept="image/*" capture="environment" hidden onChange={onFile} type="file" />
                   </label>
                 ) : null}
@@ -537,11 +572,11 @@ export default function App() {
 
             {channel === "voice" ? (
               <div className="block">
-                <h2>Record your voice</h2>
+                <h2><T>Record your voice</T></h2>
                 <button className={`record ${recording ? "live" : ""}`} onClick={toggleRecording} type="button">
                   {recording ? <Square size={30} /> : <Mic size={34} />}
-                  <strong>{recording ? "Tap to stop" : media ? "Record again" : "Tap to speak"}</strong>
-                  <small>{recording ? "Listening…" : "Hindi, Tamil, Bangla, Marathi, English — any language"}</small>
+                  <strong>{recording ? t("Tap to stop") : media ? t("Record again") : t("Tap to speak")}</strong>
+                  <small>{recording ? t("Listening…") : t("Hindi, Tamil, Bangla, Marathi, English — any language")}</small>
                 </button>
                 {media && !recording ? (
                   <div className="voice-preview">
@@ -549,7 +584,7 @@ export default function App() {
                     <audio controls preload="metadata" src={media}>
                       Your browser does not support audio playback.
                     </audio>
-                    <small>Listen once before submitting. Record again if needed.</small>
+                    <small><T>Listen once before submitting. Record again if needed.</T></small>
                   </div>
                 ) : null}
               </div>
@@ -557,11 +592,11 @@ export default function App() {
 
             {channel === "text" ? (
               <div className="block">
-                <h2>Describe the problem</h2>
+                <h2><T>Describe the problem</T></h2>
                 <textarea
                   autoFocus
                   onChange={(event) => setText(event.target.value)}
-                  placeholder="E.g. School toilets are broken and classrooms flood after rain."
+                  placeholder={t("E.g. School toilets are broken and classrooms flood after rain.")}
                   value={text}
                 />
               </div>
@@ -569,20 +604,20 @@ export default function App() {
 
             {channel !== "text" ? (
               <label className="note">
-                Add a note (optional)
-                <input onChange={(event) => setText(event.target.value)} placeholder="Anything to add" value={text} />
+                <T>Add a note (optional)</T>
+                <input onChange={(event) => setText(event.target.value)} placeholder={t("Anything to add")} value={text} />
               </label>
             ) : null}
 
             <div className="area-card">
               <MapPin size={16} />
               <div>
-                <strong>{geo.status === "ready" ? "Auto-detected area" : "Location required"}</strong>
+                <strong>{geo.status === "ready" ? t("Auto-detected area") : t("Location required")}</strong>
                 <small>{geo.label}</small>
               </div>
               {geo.status !== "ready" ? (
                 <button className="link" onClick={detectLocation} type="button">
-                  Enable
+                  <T>Enable</T>
                 </button>
               ) : null}
             </div>
@@ -591,7 +626,7 @@ export default function App() {
 
             <button className="submit" disabled={!canSubmit || step === "sending"} onClick={submit} type="button">
               {step === "sending" ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              {step === "sending" ? "Sending to your MP…" : hasLocation ? "Submit problem" : "Allow location to submit"}
+              {step === "sending" ? t("Sending to your MP…") : hasLocation ? t("Submit problem") : t("Allow location to submit")}
             </button>
           </section>
         ) : null}
@@ -601,35 +636,35 @@ export default function App() {
             <div className="tick">
               <CheckCircle2 size={48} />
             </div>
-            <h2>Submitted. Thank you!</h2>
+            <h2><T>Submitted. Thank you!</T></h2>
             <p className="receipt-line">{receipt.message}</p>
             <div className="receipt-grid">
               <div>
-                <span>Status</span>
+                <span><T>Status</T></span>
                 <strong>{receipt.status.replace("_", " ")}</strong>
               </div>
               <div>
                 <span>
-                  <Languages size={13} /> AI batch
+                  <Languages size={13} /> <T>AI batch</T>
                 </span>
-                <strong>Reward pending</strong>
+                <strong><T>Reward pending</T></strong>
               </div>
               <div>
-                <span>Area</span>
+                <span><T>Area</T></span>
                 <strong>{receipt.area}</strong>
               </div>
               <div>
-                <span>Receipt ID</span>
+                <span><T>Receipt ID</T></span>
                 <strong className="score">{receipt.rawIntakeId.slice(0, 8)}</strong>
               </div>
               <div>
-                <span>Aadhaar</span>
-                <strong>{receipt.aadhaarMasked ?? citizenIdentity?.aadhaarMasked ?? "format checked"}</strong>
+                <span><T>Aadhaar</T></span>
+                <strong>{receipt.aadhaarMasked ?? citizenIdentity?.aadhaarMasked ?? t("format checked")}</strong>
               </div>
             </div>
             <form className="track-form done-track" onSubmit={searchReceipt}>
               <label>
-                Search this receipt
+                <T>Search this receipt</T>
                 <input
                   autoComplete="off"
                   onChange={(event) => setReceiptSearch(event.target.value)}
@@ -638,18 +673,18 @@ export default function App() {
               </label>
               <button disabled={receiptLookupBusy} type="submit">
                 {receiptLookupBusy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
-                Search
+                <T>Search</T>
               </button>
             </form>
             {receiptLookupError ? <p className="lookup-error">{receiptLookupError}</p> : null}
             {receiptLookup ? (
               <div className="track-result">
                 <div>
-                  <span>Status</span>
+                  <span><T>Status</T></span>
                   <strong>{statusLabel(receiptLookup.status)}</strong>
                 </div>
                 <div>
-                  <span>Area</span>
+                  <span><T>Area</T></span>
                   <strong>{receiptLookup.area}</strong>
                 </div>
                 <p>{receiptLookup.nextStep}</p>
@@ -660,7 +695,7 @@ export default function App() {
               </div>
             ) : null}
             <button className="submit" onClick={reset} type="button">
-              Report another problem
+              <T>Report another problem</T>
             </button>
           </section>
         ) : null}
@@ -684,6 +719,12 @@ export default function App() {
   );
 }
 
+// Tiny helper so JSX text can be translated inline: <T>Some string</T>.
+function T({ children }: { children: string }) {
+  const t = useT();
+  return <>{t(children)}</>;
+}
+
 function LanguageBar({
   language,
   localLanguage,
@@ -702,10 +743,11 @@ function LanguageBar({
   for (const item of ["Hindi", "English"]) {
     if (!quick.includes(item)) quick.push(item);
   }
+  const t = useT();
   return (
     <footer className="language-bar" aria-label="Choose language">
       <span className="language-bar-label">
-        <Languages size={14} /> Language
+        <Languages size={14} /> {t("Language")}
       </span>
       <div className="language-bar-options">
         {quick.map((item) => (
@@ -720,7 +762,7 @@ function LanguageBar({
           </button>
         ))}
         <button className="language-chip more" onClick={onMore} type="button">
-          + More languages
+          {t("+ More languages")}
         </button>
       </div>
     </footer>
@@ -738,15 +780,16 @@ function LanguagePicker({
   onChoose: (next: string) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   return (
     <div className="guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="language-picker-title" onClick={onClose}>
       <section className="language-picker" onClick={(event) => event.stopPropagation()}>
         <div className="guide-head">
-          <span><Languages size={18} /> Choose your language</span>
-          <button onClick={onClose} type="button">Close</button>
+          <span><Languages size={18} /> {t("Choose your language")}</span>
+          <button onClick={onClose} type="button">{t("Close")}</button>
         </div>
-        <h2 id="language-picker-title">Select a language</h2>
-        <p>Pick any Indian language. Your voice or text can still be in any language — this sets your preference.</p>
+        <h2 id="language-picker-title">{t("Select a language")}</h2>
+        <p>{t("Pick any Indian language. Your voice or text can still be in any language — this sets your preference.")}</p>
         <div className="language-grid">
           {languageOptions.map((item) => (
             <button
@@ -755,9 +798,9 @@ function LanguagePicker({
               onClick={() => onChoose(item)}
               type="button"
             >
-              <strong>{item === "auto" ? "Auto-detect" : nativeLanguageLabel(item)}</strong>
-              <small>{item === "auto" ? "Detect from what you write or say" : item}</small>
-              {item === localLanguage ? <span className="local-tag">Local</span> : null}
+              <strong>{item === "auto" ? t("Auto-detect") : nativeLanguageLabel(item)}</strong>
+              <small>{item === "auto" ? t("Detect from what you write or say") : item}</small>
+              {item === localLanguage ? <span className="local-tag">{t("Local")}</span> : null}
             </button>
           ))}
         </div>
@@ -767,14 +810,15 @@ function LanguagePicker({
 }
 
 function RewardGuide({ onClose }: { onClose: () => void }) {
+  const t = useT();
   return (
     <div className="guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="reward-guide-title">
       <section className="reward-guide">
         <div className="guide-head">
-          <span><Award size={18} /> Reward guide</span>
-          <button onClick={onClose} type="button">Close</button>
+          <span><Award size={18} /> {t("Reward guide")}</span>
+          <button onClick={onClose} type="button">{t("Close")}</button>
         </div>
-        <h2 id="reward-guide-title">How to report well and earn 100% reward</h2>
+        <h2 id="reward-guide-title">{t("How to report well and earn 100% reward")}</h2>
         <p>
           A 100% reward is for a clear, useful, public-interest report. Write in English, or translate these points
           into your own language before submitting.
@@ -797,16 +841,17 @@ function RewardGuide({ onClose }: { onClose: () => void }) {
 }
 
 function RewardSummaryCard({ reward }: { reward: RewardLookup }) {
+  const t = useT();
   const next = reward.nextMilestone;
   return (
     <div className="reward-summary" aria-live="polite">
       <div className="reward-total">
-        <span>Cumulative reward</span>
+        <span>{t("Cumulative reward")}</span>
         <strong>{reward.totalRewardPoints}</strong>
-        <small>points till date</small>
+        <small>{t("points till date")}</small>
       </div>
       <div className="milestone-box">
-        <span>Current milestone</span>
+        <span>{t("Current milestone")}</span>
         <strong>{reward.currentMilestone.title}</strong>
         <small>{reward.currentMilestone.description}</small>
       </div>
@@ -814,7 +859,7 @@ function RewardSummaryCard({ reward }: { reward: RewardLookup }) {
         {next ? (
           <>
             <div>
-              <span>Next milestone</span>
+              <span>{t("Next milestone")}</span>
               <strong>{next.title}</strong>
             </div>
             <small>{reward.pointsToNextMilestone} points to go</small>
@@ -823,7 +868,7 @@ function RewardSummaryCard({ reward }: { reward: RewardLookup }) {
             </div>
           </>
         ) : (
-          <strong>Top milestone reached</strong>
+          <strong>{t("Top milestone reached")}</strong>
         )}
       </div>
       <div className="reward-stats">
@@ -860,6 +905,7 @@ async function apiFetch(path: string, init: RequestInit = {}) {
 }
 
 function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIdentity) => void }) {
+  const t = useT();
   const [aadhaarNumber, setAadhaarNumber] = useState("");
   const [busy, setBusy] = useState(false);
   const [rewardLookupBusy, setRewardLookupBusy] = useState(false);
@@ -920,10 +966,10 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
       <main className="auth-card">
         <span className="logo-mark">आ</span>
         <h1>Apni Awaaz</h1>
-        <p>Aadhaar access uses 12-digit format check only.</p>
+        <p>{t("Aadhaar access uses 12-digit format check only.")}</p>
         <form onSubmit={login}>
           <label>
-            Aadhaar number
+            {t("Aadhaar number")}
             <input
               autoComplete="off"
               autoFocus
@@ -942,11 +988,11 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
           {error ? <p className="lookup-error">{error}</p> : null}
           <button className="submit" disabled={busy || aadhaarDigits.length !== 12} type="submit">
             {busy ? <Loader2 className="spin" size={18} /> : <ShieldCheck size={18} />}
-            Continue
+            {t("Continue")}
           </button>
           <button className="secondary-submit" disabled={rewardLookupBusy || aadhaarDigits.length !== 12} onClick={checkReward} type="button">
             {rewardLookupBusy ? <Loader2 className="spin" size={18} /> : <Award size={18} />}
-            Check cumulative reward
+            {t("Check cumulative reward")}
           </button>
         </form>
         {rewardLookupError ? <p className="lookup-error">{rewardLookupError}</p> : null}
