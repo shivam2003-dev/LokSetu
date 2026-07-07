@@ -1114,6 +1114,79 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+type GaugeSegment = { label: string; value: number; color: string };
+
+function HealthGauge({ score, segments, signals }: { score: number; segments: GaugeSegment[]; signals: number }) {
+  const SIZE = 220;
+  const cx = SIZE / 2;
+  const cy = SIZE / 2;
+  const R = 88;
+  const strokeW = 10;
+  const GAP_DEG = 4;
+  // Arc spans 270° starting from 135° (bottom-left), going clockwise
+  const TOTAL_DEG = 270;
+  const START_DEG = 135;
+  const totalGap = GAP_DEG * segments.length;
+  const arcAvail = TOTAL_DEG - totalGap;
+
+  function polar(deg: number, r: number): [number, number] {
+    const rad = (deg - 90) * (Math.PI / 180);
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  }
+
+  function arcPath(startDeg: number, spanDeg: number, r: number): string {
+    if (spanDeg <= 0) return "";
+    const [x1, y1] = polar(startDeg, r);
+    const [x2, y2] = polar(startDeg + spanDeg, r);
+    const large = spanDeg > 180 ? 1 : 0;
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+  }
+
+  // Track background arc
+  const trackPath = arcPath(START_DEG, TOTAL_DEG, R);
+
+  // Build segment arcs — each proportional to its value (0-100)
+  let cursor = START_DEG;
+  const segmentArcs = segments.map((seg) => {
+    const span = (seg.value / 100) * (arcAvail / segments.length);
+    const path = arcPath(cursor, span, R);
+    const labelDeg = cursor + span / 2;
+    const [dotX, dotY] = polar(labelDeg, R + 22);
+    cursor += span + GAP_DEG;
+    return { ...seg, path, dotX, dotY };
+  });
+
+  // Score color
+  const scoreColor = score >= 80 ? "#22c55e" : score >= 60 ? "#f59e0b" : "#ef4444";
+
+  return (
+    <div className="health-gauge">
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE}>
+        {/* Track */}
+        <path d={trackPath} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={strokeW} strokeLinecap="round" />
+        {/* Colored segments */}
+        {segmentArcs.map((seg) => (
+          <path key={seg.label} d={seg.path} fill="none" stroke={seg.color} strokeWidth={strokeW} strokeLinecap="round" />
+        ))}
+        {/* Score */}
+        <text x={cx} y={cy - 10} textAnchor="middle" dominantBaseline="middle" fill={scoreColor} fontSize="44" fontWeight="800" fontFamily="var(--font-display, system-ui)">{score}</text>
+        <text x={cx} y={cy + 22} textAnchor="middle" dominantBaseline="middle" fill="rgba(255,255,255,0.5)" fontSize="11" fontWeight="700" letterSpacing="1">HEALTH SCORE</text>
+        {/* Signal count */}
+        <text x={cx} y={SIZE - 18} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="11" fontWeight="700">{formatCount(signals)} citizen signals</text>
+      </svg>
+      {/* Legend */}
+      <div className="health-gauge-legend">
+        {segmentArcs.map((seg) => (
+          <span key={seg.label}>
+            <em style={{ background: seg.color }} />
+            {seg.label} <b>{seg.value}%</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; setPage: (page: Page) => void }) {
   const projects = buildManagedProjects(dashboard.projects);
   const topPriorities = projects.slice(0, 5);
@@ -1151,11 +1224,16 @@ function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; se
             <button onClick={() => setPage("map")} type="button">View GIS map</button>
           </div>
         </div>
-        <div className="overview-score-orb">
-          <span>Constituency Health</span>
-          <strong>{healthScore}</strong>
-          <small>{avgConfidence}% AI confidence · {formatCount(totalDemand)} citizen signals</small>
-        </div>
+        <HealthGauge
+          score={healthScore}
+          segments={[
+            { label: "AI Confidence", value: avgConfidence, color: "#0ea5e9" },
+            { label: "Signal Quality", value: 100 - Math.min(42, dashboard.totals.botRisk === "high" ? 38 : dashboard.totals.botRisk === "medium" ? 18 : 6), color: "#22c55e" },
+            { label: "Delivery", value: Math.round(average(projects.map((p) => p.progress))), color: "#f59e0b" },
+            { label: "Coverage", value: Math.min(100, dashboard.totals.wards * 4 + 48), color: "#8b5cf6" },
+          ]}
+          signals={totalDemand}
+        />
       </section>
 
       <section className="overview-kpi-grid">

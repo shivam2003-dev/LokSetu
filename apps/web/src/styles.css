@@ -9133,10 +9133,12 @@ button.problem-row.selected {
 .overview-actions button { border: 1px solid rgba(91,53,245,0.22); border-radius: 999px; background: rgba(255,255,255,0.78); color: #3722a8; padding: 10px 14px; font-weight: 900; box-shadow: 0 10px 30px rgba(91,53,245,0.1); transition: transform 0.16s ease, box-shadow 0.16s ease; }
 .overview-actions button:first-child { background: linear-gradient(135deg, #5b35f5, #0ea5e9); color: #fff; }
 .overview-actions button:hover { transform: translateY(-1px); box-shadow: 0 16px 36px rgba(91,53,245,0.18); }
-.overview-score-orb { display: grid; place-items: center; gap: 8px; aspect-ratio: 1; border-radius: 999px; border: 1px solid rgba(255,255,255,0.8); background: radial-gradient(circle at 35% 25%, rgba(255,255,255,0.95), rgba(238,242,255,0.72)), conic-gradient(from 140deg, #5b35f5, #0ea5e9, #22c55e, #5b35f5); box-shadow: inset 0 0 0 14px rgba(255,255,255,0.7), 0 24px 70px rgba(91,53,245,0.24); text-align: center; padding: 34px; }
-.overview-score-orb span { color: #475569; font-size: 11px; font-weight: 900; letter-spacing: 0.8px; text-transform: uppercase; }
-.overview-score-orb strong { color: #0b1028; font-family: var(--font-display); font-size: 72px; line-height: 0.9; }
-.overview-score-orb small { color: #64748b; font-size: 11px; font-weight: 800; }
+.health-gauge { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.health-gauge svg { filter: drop-shadow(0 0 24px rgba(14,165,233,0.18)); }
+.health-gauge-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; }
+.health-gauge-legend span { display: inline-flex; align-items: center; gap: 5px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 700; }
+.health-gauge-legend em { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; font-style: normal; }
+.health-gauge-legend b { color: rgba(255,255,255,0.85); font-weight: 800; }
 .overview-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .overview-kpi-grid article { display: grid; gap: 5px; padding: 16px; background: rgba(255,255,255,0.86); border-color: rgba(148,163,184,0.32); backdrop-filter: blur(14px); transition: transform 0.16s ease, box-shadow 0.16s ease; }
 .overview-kpi-grid article:hover { transform: translateY(-2px); box-shadow: 0 18px 44px rgba(51, 65, 140, 0.12); }
@@ -9582,7 +9584,7 @@ button.problem-row.selected {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .overview-score-orb {
+  .health-gauge {
     max-width: 300px;
     justify-self: center;
     width: 100%;
