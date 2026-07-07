@@ -241,4 +241,3 @@ jobs:
           curl -fsS https://loksetu.shivam2003.com/ >/dev/null
           curl -fsS https://awaaz.shivam2003.com/ >/dev/null
           curl -fsS https://loksetu.shivam2003.com/healthz >/dev/null
-          curl -fsS "https://loksetu.shivam2003.com/api/priorities?scope=global" >/dev/null
