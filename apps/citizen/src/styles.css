@@ -966,6 +966,42 @@ textarea {
 }
 
 /* ---- Language switcher (footer bar + picker) ---- */
+.language-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 9px 15px;
+  border-radius: 999px;
+  background: rgba(11, 27, 58, 0.92);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 12px 30px -10px rgba(8, 18, 38, 0.6);
+  pointer-events: none;
+  animation: toast-rise 0.2s ease;
+}
+.language-toast svg {
+  color: #ffb454;
+  flex-shrink: 0;
+}
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 .language-bar {
   position: sticky;
   bottom: 0;
