@@ -138,19 +138,37 @@ export async function translateUiStrings(
   if (!sarvamConfig().enabled) return null;
 
   const result: Record<string, string> = {};
-  // Translate one string at a time so a single failure never corrupts the batch
-  // and each phrase is translated in isolation (UI labels have no shared context).
-  for (const source of unique) {
-    try {
-      const translated = await translateSarvamText(source, "en-IN", targetCode);
-      if (translated && translated.trim() && translated.trim() !== source) {
-        result[source] = translated.trim();
-      }
-    } catch {
-      // Skip this string; the client keeps the English original.
-    }
+  // Translate strings in bounded-concurrency batches under an overall deadline.
+  // Each string is translated in isolation (so keys never misalign), but running
+  // a window in parallel keeps latency well under the gateway timeout — a fully
+  // sequential loop over ~75 strings otherwise exceeds it (504). If the deadline
+  // is hit we return whatever finished; the client caches partial results and
+  // falls back to English for the rest, and unfinished languages are completed
+  // on the next request.
+  const concurrency = Math.max(1, Number(process.env.UI_TRANSLATION_CONCURRENCY ?? "10"));
+  const deadlineMs = Math.max(1000, Number(process.env.UI_TRANSLATION_DEADLINE_MS ?? "20000"));
+  const startedAt = nowMs();
+  for (let i = 0; i < unique.length; i += concurrency) {
+    if (nowMs() - startedAt > deadlineMs) break;
+    const window = unique.slice(i, i + concurrency);
+    await Promise.all(
+      window.map(async (source) => {
+        try {
+          const translated = await translateSarvamText(source, "en-IN", targetCode);
+          if (translated && translated.trim() && translated.trim() !== source) {
+            result[source] = translated.trim();
+          }
+        } catch {
+          // Skip this string; the client keeps the English original.
+        }
+      })
+    );
   }
   return Object.keys(result).length ? result : null;
+}
+
+function nowMs(): number {
+  return Date.now();
 }
 
 function providerOrder(): Array<"sarvam" | "bhashini"> {

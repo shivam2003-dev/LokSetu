@@ -315,7 +315,14 @@ app.post("/api/citizen/ui-translations", async (request, response) => {
     response.json({ language, source: "none", translations: {} });
     return;
   }
-  uiTranslationCache.set(cacheKey, translations);
+  // Only cache when the batch is essentially complete. Under load the translator
+  // may return partial results (deadline hit); caching those would permanently
+  // serve an incomplete dictionary. Leaving them uncached lets the next request
+  // fill the gaps, while the client still uses this partial set immediately.
+  const coverage = strings.filter((item) => translations[item]).length / strings.length;
+  if (coverage >= 0.95) {
+    uiTranslationCache.set(cacheKey, translations);
+  }
   response.json({ language, source: seed ? (aiTranslations ? "seed+ai" : "seed") : "ai", translations });
 });
 
