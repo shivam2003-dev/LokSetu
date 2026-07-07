@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const expectedCitizenAppUrl = process.env.VITE_CITIZEN_APP_URL ?? "http://localhost:5174";
+
 test.describe("MP/admin web functional flow", () => {
   test("priority desk decision loop, pulse, map, signals, and copilot render", async ({ page }) => {
     await loginIfNeeded(page);
@@ -141,7 +143,7 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page.locator(".hotspot-row").first()).toContainText("Aminabad Basti");
 
-    await expect(page.getByRole("link", { name: "Open JanVaani" })).toHaveAttribute("href", "http://localhost:5174");
+    await expect(page.getByRole("link", { name: "Open JanVaani" })).toHaveAttribute("href", expectedCitizenAppUrl);
 
     // Web Signals is the Demand Signals Intelligence dashboard.
     await page.getByRole("button", { name: "Demand Signals" }).click();
