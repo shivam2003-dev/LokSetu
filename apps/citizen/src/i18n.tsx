@@ -34,7 +34,12 @@ function cacheKey(language: string) {
 function readCache(language: string): TranslationMap | null {
   try {
     const stored = localStorage.getItem(cacheKey(language));
-    return stored ? (JSON.parse(stored) as TranslationMap) : null;
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as TranslationMap;
+    // Treat an empty cached map as a miss so we re-fetch. Empty entries can be
+    // left behind if a language was selected while the AI provider was
+    // unavailable; without this, the UI would stay stuck in English forever.
+    return parsed && Object.keys(parsed).length ? parsed : null;
   } catch {
     return null;
   }
@@ -77,10 +82,14 @@ export function I18nProvider({ language, children }: { language: string; childre
         if (cancelled) return;
         const map = payload?.translations ?? {};
         setTranslations(map);
-        try {
-          localStorage.setItem(cacheKey(language), JSON.stringify(map));
-        } catch {
-          // Ignore quota / privacy-mode storage failures; translation still works this session.
+        // Only persist non-empty results. Caching an empty map would make the
+        // language appear "translated" (a cache hit) and block future retries.
+        if (Object.keys(map).length) {
+          try {
+            localStorage.setItem(cacheKey(language), JSON.stringify(map));
+          } catch {
+            // Ignore quota / privacy-mode storage failures; translation still works this session.
+          }
         }
       })
       .catch(() => {
