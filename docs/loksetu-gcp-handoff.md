@@ -121,7 +121,7 @@ GCP_REGION=us-east4
 GKE_CLUSTER_NAME=loksetu
 ARGOCD_NAMESPACE=argocd
 ARGOCD_APPLICATION=loksetu-gcp
-VITE_CITIZEN_APP_URL=https://awaaz.shivam2003.com
+GCP_CITIZEN_APP_URL=https://awaaz.shivam2003.com
 ```
 
 Required IAM for the GitHub Actions service account:

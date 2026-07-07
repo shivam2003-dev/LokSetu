@@ -20,7 +20,7 @@ env:
   ARGOCD_NAMESPACE: ${{ vars.ARGOCD_NAMESPACE || 'argocd' }}
   ARGOCD_APPLICATION: ${{ vars.ARGOCD_APPLICATION || 'loksetu-gcp' }}
   GKE_CLUSTER_NAME: ${{ vars.GKE_CLUSTER_NAME || 'loksetu' }}
-  VITE_CITIZEN_APP_URL: ${{ vars.VITE_CITIZEN_APP_URL || 'https://awaaz.shivam2003.com' }}
+  VITE_CITIZEN_APP_URL: ${{ vars.GCP_CITIZEN_APP_URL || 'https://awaaz.shivam2003.com' }}
   PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.PUBLIC_GOOGLE_MAPS_API_KEY || secrets.VITE_GOOGLE_MAPS_API_KEY }}
   GOOGLE_MAPS_MAP_ID: ${{ vars.GOOGLE_MAPS_MAP_ID }}
   OPENAI_COMPATIBLE_BASE_URL: ${{ vars.OPENAI_COMPATIBLE_BASE_URL || 'https://openrouter.ai/api/v1' }}
