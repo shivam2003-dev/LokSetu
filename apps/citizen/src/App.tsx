@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { detectLocalLanguage, nativeLanguageLabel } from "./localLanguage.js";
-import { I18nProvider, useT } from "./i18n.js";
+import { I18nProvider, useI18n, useT } from "./i18n.js";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const accessTokenKey = "loksetuAccessToken";
@@ -715,6 +715,7 @@ function CitizenApp({
           onClose={() => setLanguageModalOpen(false)}
         />
       ) : null}
+      <LanguageLoadingToast />
     </div>
   );
 }
@@ -766,6 +767,19 @@ function LanguageBar({
         </button>
       </div>
     </footer>
+  );
+}
+
+// Small non-blocking pill shown at the bottom while translations for the chosen
+// language are still being fetched. Driven by the i18n provider's `ready` flag.
+function LanguageLoadingToast() {
+  const { language, ready } = useI18n();
+  if (ready) return null;
+  return (
+    <div className="language-toast" role="status" aria-live="polite">
+      <Loader2 className="spin" size={15} />
+      <span>Switching to {nativeLanguageLabel(language)}…</span>
+    </div>
   );
 }
 
@@ -998,6 +1012,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
         {rewardLookupError ? <p className="lookup-error">{rewardLookupError}</p> : null}
         {rewardLookup ? <RewardSummaryCard reward={rewardLookup} /> : null}
       </main>
+      <LanguageLoadingToast />
     </div>
   );
 }
