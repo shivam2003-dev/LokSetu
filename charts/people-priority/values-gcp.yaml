@@ -22,7 +22,7 @@ web:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-web-80-4ac9cbb6"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/web
-    tag: gcp-20260706064425-pr18-pr19-amd64
+    tag: gcp-20260707072052-4697692-amd64
 
 citizen:
   replicaCount: 1
@@ -30,7 +30,7 @@ citizen:
     cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"k8s1-33b19180-people-priority-people-priority-citize-8-e0ef404d"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/citizen
-    tag: gcp-20260706064425-pr18-pr19-amd64
+    tag: gcp-20260707072052-4697692-amd64
 
 api:
   replicaCount: 1
@@ -38,7 +38,7 @@ api:
     cloud.google.com/neg: '{"exposed_ports":{"8080":{"name":"k8s1-33b19180-people-priority-people-priority-api-8080-d3b4a98a"}}}'
   image:
     repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/api
-    tag: gcp-20260705115815-noise-discard-amd64
+    tag: gcp-20260707072052-4697692-amd64
   database:
     existingSecret: loksetu-db
     secretKey: DATABASE_URL
@@ -101,7 +101,7 @@ rag:
       cloud.google.com/neg: '{"exposed_ports":{"8090":{"name":"k8s1-33b19180-people-priorit-people-priority-rag-a-809-13500a77"}}}'
     image:
       repository: us-east4-docker.pkg.dev/project-72558650-faf6-4529-a05/people-priority/rag-api
-      tag: gcp-20260702095940
+      tag: gcp-20260707072052-4697692-amd64
     database:
       existingSecret: loksetu-db
       secretKey: RAG_DATABASE_URL
