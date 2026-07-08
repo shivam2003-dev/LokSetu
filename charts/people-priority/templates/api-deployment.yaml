@@ -158,6 +158,10 @@ spec:
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
             - name: RAG_API_URL
               value: {{ .Values.api.env.RAG_API_URL | quote }}
+            {{- with .Values.api.env.APP_DEMO_ACCESS_ENABLED }}
+            - name: APP_DEMO_ACCESS_ENABLED
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.api.auth.existingSecret }}
             - name: APP_ACCESS_PASSWORD
               valueFrom:

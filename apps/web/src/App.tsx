@@ -985,15 +985,14 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function login(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitLogin(body: { username?: string; password?: string; demoAccess?: boolean }) {
     setBusy(true);
     setError("");
     try {
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(username.trim() ? { username: username.trim(), password } : { password })
+        body: JSON.stringify(body)
       });
       const payload = await response.json() as { token?: string; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Login failed");
@@ -1003,6 +1002,15 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function login(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitLogin(username.trim() ? { username: username.trim(), password } : { password });
+  }
+
+  async function loginWithDemoAccess() {
+    await submitLogin({ demoAccess: true });
   }
 
   return (
@@ -1076,6 +1084,12 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
               <code>local-dev</code>
             </div>
           ) : null}
+          <div className="login-demo-access">
+            <span><T>Hackathon demo</T> —</span>
+            <button disabled={busy} type="button" onClick={loginWithDemoAccess}>
+              <T>enter without password</T>
+            </button>
+          </div>
           {error ? <div className="login-error">{error}</div> : null}
           <button className="login-submit" disabled={busy || !password.trim()} type="submit">
             {busy ? <RefreshCw className="spin" size={18} /> : null}
@@ -1083,13 +1097,6 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
             <ArrowRight size={22} />
           </button>
         </form>
-        <div className="login-divider"><span>or continue with</span></div>
-        <div className="sso-grid">
-          {["MP SSO", "Google", "Microsoft", "Apple"].map((item) => (
-            <button disabled key={item} type="button">{item}</button>
-          ))}
-        </div>
-        <p className="login-admin-note">Don't have an account? <button type="button">Contact Administrator</button></p>
       </section>
       <footer className="login-security-strip" aria-label="Security posture">
         <span><ShieldCheck size={17} /> Secure & Encrypted</span>

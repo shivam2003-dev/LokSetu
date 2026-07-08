@@ -42,6 +42,7 @@ const port = Number(process.env.PORT ?? 8080);
 const aiMode = aiRuntimeMode();
 const accessPassword = process.env.APP_ACCESS_PASSWORD ?? "";
 const authSecret = process.env.APP_AUTH_SECRET || accessPassword || "loksetu-local-auth-secret";
+const demoAccessEnabled = process.env.APP_DEMO_ACCESS_ENABLED === "true";
 const defaultAdminUsername = process.env.APP_ADMIN_USERNAME ?? "";
 const defaultAdminPassword = process.env.APP_ADMIN_PASSWORD ?? "";
 let memorySubmissions = [...demoSubmissions];
@@ -97,7 +98,8 @@ const copilotQuerySchema = z.object({
 const receiptIdSchema = z.string().trim().toLowerCase().regex(/^[a-f0-9-]{8,36}$/);
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(80).optional(),
-  password: z.string().min(1)
+  password: z.string().optional(),
+  demoAccess: z.boolean().optional()
 });
 
 const aadhaarSessionSchema = z.object({
@@ -231,6 +233,23 @@ app.post("/api/auth/login", async (request, response) => {
   const parsed = loginSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+  if (parsed.data.demoAccess) {
+    if (!demoAccessEnabled) {
+      response.status(403).json({ error: "Demo access is not enabled" });
+      return;
+    }
+    const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+    response.json({
+      token: signAccessToken(expiresAt, "hackathon-demo"),
+      expiresAt,
+      user: { id: "hackathon-demo", username: "hackathon-demo", role: "state_admin", displayName: "Hackathon Demo" }
+    });
+    return;
+  }
+  if (!parsed.data.password) {
+    response.status(401).json({ error: "Invalid password" });
     return;
   }
   const loginUsername = parsed.data.username?.trim();

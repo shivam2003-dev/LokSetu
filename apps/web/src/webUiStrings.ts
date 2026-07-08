@@ -32,8 +32,7 @@ export const WEB_UI_STRINGS: string[] = [
   "Email or Mobile Number", "Enter your email or mobile number",
   "Password", "Enter your password", "Show password", "Hide password",
   "Remember me", "Forgot Password?", "Sign In",
-  "or continue with", "MP SSO", "Google", "Microsoft", "Apple",
-  "Don't have an account?", "Contact Administrator",
+  "Hackathon demo", "enter without password",
   "Secure & Encrypted", "Data Privacy Compliant", "Government Grade Security",
 
   // Health gauge

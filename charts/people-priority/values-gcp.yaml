@@ -66,6 +66,7 @@ api:
     OPENAI_COMPATIBLE_MODEL: ""
     BATCH_SCHEDULE: "*/15 * * * *"
     RAG_API_URL: http://people-priority-rag-api:8090
+    APP_DEMO_ACCESS_ENABLED: "true"
   extraSecretEnv:
     - name: SARVAM_API_KEY
       secretName: loksetu-sarvam
