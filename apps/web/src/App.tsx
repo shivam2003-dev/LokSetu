@@ -846,8 +846,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
               Menu
             </button>
             <div>
-              <p className="eyebrow">{pageLabel(page)}</p>
-              <h2>{pageTitle(page)}</h2>
+              <p className="eyebrow">{t(pageLabel(page))}</p>
+              <h2>{t(pageTitle(page))}</h2>
             </div>
           </div>
           <div className="topbar-actions">
@@ -4944,7 +4944,8 @@ function RatingControl({ project, refreshAll }: { project: RankedProject; refres
 
 
 function PanelTitle({ title, icon: Icon, detail }: { title: string; icon: typeof Home; detail?: string }) {
-  return <div className="panel-title"><h3><Icon size={18} /> {title}</h3>{detail ? <span>{detail}</span> : null}</div>;
+  const t = useT();
+  return <div className="panel-title"><h3><Icon size={18} /> {t(title)}</h3>{detail ? <span>{t(detail)}</span> : null}</div>;
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
