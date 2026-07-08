@@ -975,7 +975,8 @@ class AuthError extends Error {
   }
 }
 
-const isLocalDev = import.meta.env.DEV || import.meta.env.VITE_APP_ENV !== "production";
+const appEnv = (import.meta.env.VITE_APP_ENV ?? "").toLowerCase();
+const isLocalDev = import.meta.env.DEV || appEnv === "local" || appEnv === "development";
 
 function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
   const t = useT();
