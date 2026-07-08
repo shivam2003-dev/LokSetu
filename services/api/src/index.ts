@@ -29,7 +29,7 @@ import { buildDashboard } from "./pipeline.js";
 import { AadhaarIdentity, DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
 import { indicRuntimeMode, translateUiStrings } from "./indicLanguage.js";
-import { seedUiTranslations } from "./uiTranslations.js";
+import { seedUiTranslations, seedWebUiTranslations } from "./uiTranslations.js";
 import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
 import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from "./intelligence.js";
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
@@ -323,6 +323,40 @@ app.post("/api/citizen/ui-translations", async (request, response) => {
   if (coverage >= 0.95) {
     uiTranslationCache.set(cacheKey, translations);
   }
+  response.json({ language, source: seed ? (aiTranslations ? "seed+ai" : "seed") : "ai", translations });
+});
+
+// Web console UI translations — separate namespace/cache from the citizen app.
+const webUiTranslationCache = new Map<string, Record<string, string>>();
+
+app.post("/api/web/ui-translations", async (request, response) => {
+  const parsed = uiTranslationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Provide a language and strings to translate." });
+    return;
+  }
+  const { language, strings } = parsed.data;
+  const cacheKey = `web:${language.toLowerCase()}`;
+  const cached = webUiTranslationCache.get(cacheKey);
+  if (cached) {
+    response.json({ language, source: "cache", translations: cached });
+    return;
+  }
+  const seed = seedWebUiTranslations(language);
+  let aiTranslations: Record<string, string> | null = null;
+  try {
+    const missing = strings.filter((item) => !seed?.[item]);
+    aiTranslations = missing.length ? await translateUiStrings(missing, language) : null;
+  } catch (error) {
+    logger.warn({ error, language }, "web ui translation failed");
+  }
+  const translations = { ...(aiTranslations ?? {}), ...(seed ?? {}) };
+  if (!Object.keys(translations).length) {
+    response.json({ language, source: "none", translations: {} });
+    return;
+  }
+  const coverage = strings.filter((item) => translations[item]).length / strings.length;
+  if (coverage >= 0.9) webUiTranslationCache.set(cacheKey, translations);
   response.json({ language, source: seed ? (aiTranslations ? "seed+ai" : "seed") : "ai", translations });
 });
 
