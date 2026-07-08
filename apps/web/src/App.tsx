@@ -50,6 +50,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import PptxGenJS from "pptxgenjs";
 import { DemandSignalsPage } from "./DemandSignals";
+import { WebI18nProvider, useT, useWebI18n } from "./i18n.js";
 
 const janVaaniLogo = "/images/JanVaniRobo.png";
 
@@ -526,10 +527,69 @@ export default function App() {
     setAccessToken("");
   }
 
-  return accessToken ? <AuthenticatedApp onLogout={handleLogout} /> : <LoginPage onLogin={handleLogin} />;
+  return (
+    <WebI18nProvider>
+      {accessToken ? <AuthenticatedApp onLogout={handleLogout} /> : <LoginPage onLogin={handleLogin} />}
+    </WebI18nProvider>
+  );
+}
+
+const WEB_LANGUAGES = [
+  "English", "Hindi", "Bangla", "Tamil", "Telugu", "Marathi",
+  "Gujarati", "Kannada", "Malayalam", "Punjabi", "Odia", "Urdu",
+  "Assamese", "Nepali", "Maithili", "Sindhi"
+];
+
+const LANGUAGE_NATIVE: Record<string, string> = {
+  English: "English", Hindi: "हिन्दी", Bangla: "বাংলা", Tamil: "தமிழ்",
+  Telugu: "తెలుగు", Marathi: "मराठी", Gujarati: "ગુજરાતી", Kannada: "ಕನ್ನಡ",
+  Malayalam: "മലയാളം", Punjabi: "ਪੰਜਾਬੀ", Odia: "ଓଡ଼ିଆ", Urdu: "اردو",
+  Assamese: "অসমীয়া", Nepali: "नेपाली", Maithili: "मैथिली", Sindhi: "سنڌي"
+};
+
+// Inline translation helper — wrap any static string: <T>Some text</T>
+function T({ children }: { children: string }) {
+  const t = useT();
+  return <>{t(children)}</>;
+}
+
+function WebLanguageSwitcher() {
+  const { language, chooseLanguage, ready } = useWebI18n();
+  const [open, setOpen] = useState(false);
+  if (!chooseLanguage) return null;
+  return (
+    <div className="web-lang-switcher">
+      <button
+        className="web-lang-btn"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Change language"
+      >
+        <Languages size={14} />
+        <span>{LANGUAGE_NATIVE[language] ?? language}</span>
+        {!ready ? <span className="web-lang-loading">…</span> : null}
+      </button>
+      {open ? (
+        <div className="web-lang-menu">
+          {WEB_LANGUAGES.map((lang) => (
+            <button
+              key={lang}
+              type="button"
+              className={lang === language ? "active" : ""}
+              onClick={() => { chooseLanguage(lang); setOpen(false); }}
+            >
+              <span>{LANGUAGE_NATIVE[lang] ?? lang}</span>
+              <small>{lang}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
+  const t = useT();
   const [page, setPageState] = useState<Page>(() => pageFromHash());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -734,7 +794,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           <div className="brand-mark"><img src={janVaaniLogo} alt="JanVaani AI" /></div>
           <div>
             <h1>JanVaani <em>AI</em></h1>
-            <p>Constituency Intelligence Platform</p>
+            <p><T>Constituency Intelligence Platform</T></p>
           </div>
           <button
             aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
@@ -748,17 +808,17 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         </div>
         <nav className="nav-scroll">
           <div className="nav-section">
-            <span>Core workflow</span>
+            <span><T>Core workflow</T></span>
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button className={`nav-item rich ${activeNavIdByPage[page] === item.id ? "active" : ""}`} key={item.id} onClick={() => setPage(item.page)}>
                   <Icon size={18} />
                   <span className="nav-copy">
-                    <strong>{item.label}</strong>
-                    {item.hint ? <small>{item.hint}</small> : null}
+                    <strong>{t(item.label)}</strong>
+                    {item.hint ? <small>{t(item.hint)}</small> : null}
                   </span>
-                  {item.badge ? <em>{item.badge}</em> : null}
+                  {item.badge ? <em>{t(item.badge)}</em> : null}
                 </button>
               );
             })}
@@ -767,12 +827,13 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         <div className="sidebar-footer">
           <a className="citizen-link" href={effectiveCitizenAppUrl}>
             <Send size={16} />
-            Open JanVaani
+            <T>Open JanVaani</T>
           </a>
           <div className={`status-pill ${apiConnected ? "connected" : "disconnected"}`}>
             <CheckCircle2 size={16} />
             <span>{notice} - {clientConfig.dataMode}</span>
           </div>
+          <WebLanguageSwitcher />
         </div>
       </aside>
       <button className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} type="button" />
@@ -792,18 +853,18 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           <div className="topbar-actions">
             <button className="tour-button" onClick={startTour} type="button">
               <Star size={16} />
-              Tour
+              <T>Tour</T>
             </button>
             <div className={`demo-data-toggle ${demoData.enabled ? "enabled" : "disabled"}`} aria-label="Demo data controls">
               <span>{demoData.label}</span>
               <small>{formatCount(demoData.visibleRows)} visible / {formatCount(demoData.demoRows)} demo</small>
-              <button onClick={() => updateDemoData("load")} type="button">Load local demo data</button>
-              <button onClick={() => updateDemoData("disable")} type="button">Disable demo data</button>
+              <button onClick={() => updateDemoData("load")} type="button"><T>Load local demo data</T></button>
+              <button onClick={() => updateDemoData("disable")} type="button"><T>Disable demo data</T></button>
             </div>
-            <button className="icon-button" title="Refresh data" onClick={refreshAll} disabled={refreshing} type="button">
+            <button className="icon-button" title={t("Refresh data")} onClick={refreshAll} disabled={refreshing} type="button">
               <RefreshCw className={refreshing ? "spin" : ""} size={18} />
             </button>
-            <button className="logout-button" onClick={onLogout} type="button">Logout</button>
+            <button className="logout-button" onClick={onLogout} type="button"><T>Logout</T></button>
           </div>
         </header>
 
@@ -916,6 +977,7 @@ class AuthError extends Error {
 const isLocalDev = import.meta.env.DEV || import.meta.env.VITE_APP_ENV !== "production";
 
 function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
+  const t = useT();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -980,29 +1042,29 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
 
       <section className="login-panel" aria-label="Admin sign in">
         <div className="login-card-emblem"><img src={janVaaniLogo} alt="JanVaani AI" /></div>
-        <h2>Welcome Back</h2>
-        <p>Sign in to continue to JanVaani AI</p>
+        <h2><T>Welcome Back</T></h2>
+        <p><T>Sign in to continue to JanVaani AI</T></p>
         <form onSubmit={login}>
           <label>
-            Email or Mobile Number
+            <T>Email or Mobile Number</T>
             <span className="login-input-wrap">
               <Mail size={21} />
-              <input autoFocus autoComplete="username" onChange={(event) => setUsername(event.target.value)} placeholder="Enter your email or mobile number" type="text" value={username} />
+              <input autoFocus autoComplete="username" onChange={(event) => setUsername(event.target.value)} placeholder={t("Enter your email or mobile number")} type="text" value={username} />
             </span>
           </label>
           <label>
-            Password
+            <T>Password</T>
             <span className="login-input-wrap">
               <Lock size={21} />
-              <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" type={showPassword ? "text" : "password"} value={password} />
-              <button aria-label={showPassword ? "Hide password" : "Show password"} className="login-password-toggle" onClick={() => setShowPassword((value) => !value)} type="button">
+              <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder={t("Enter your password")} type={showPassword ? "text" : "password"} value={password} />
+              <button aria-label={showPassword ? t("Hide password") : t("Show password")} className="login-password-toggle" onClick={() => setShowPassword((value) => !value)} type="button">
                 {showPassword ? <Eye size={21} /> : <EyeOff size={21} />}
               </button>
             </span>
           </label>
           <div className="login-row">
-            <label className="remember-row"><input defaultChecked type="checkbox" /> Remember me</label>
-            <button className="link-button" type="button">Forgot Password?</button>
+            <label className="remember-row"><input defaultChecked type="checkbox" /> <T>Remember me</T></label>
+            <button className="link-button" type="button"><T>Forgot Password?</T></button>
           </div>
           {isLocalDev ? (
             <div className="login-test-hint">
@@ -1016,7 +1078,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
           {error ? <div className="login-error">{error}</div> : null}
           <button className="login-submit" disabled={busy || !password.trim()} type="submit">
             {busy ? <RefreshCw className="spin" size={18} /> : null}
-            Sign In
+            <T>Sign In</T>
             <ArrowRight size={22} />
           </button>
         </form>
