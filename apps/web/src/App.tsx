@@ -825,7 +825,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "explorer" ? <DataExplorerPage dashboard={dashboard} demoData={demoData} /> : null}
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
-        {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} /> : null}
+        {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
         {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} /> : null}
         {page === "reports" ? <ReportsPage dashboard={dashboard} /> : null}
         {page === "compare" ? <ComparePage /> : null}
@@ -1128,19 +1128,27 @@ function downloadTextFile(filename: string, content: string) {
 }
 
 function HealthGauge({ score, signals, confidence }: { score: number; signals: number; confidence: number }) {
-  // Single arc ring: 270° track, filled proportional to score/100
-  const SIZE = 276;
+  // Clean 270° donut gauge, filled proportional to score/100.
+  const SIZE = 260;
   const cx = SIZE / 2;
   const cy = SIZE / 2;
-  const R = 128;
-  const SW = 9;
-  const START = 225; // bottom-left, arc opens at bottom
-  const TOTAL = 270; // ends at bottom-right (225 + 270 = 495 = 135°)
-  const arcColor = score >= 80 ? "#22c55e" : score >= 60 ? "#f59e0b" : "#ef4444";
+  const R = 112;
+  const SW = 16;
+  const START = 225; // bottom-left, arc opens at the bottom
+  const TOTAL = 270; // ends bottom-right
+  const band = score >= 80 ? "good" : score >= 60 ? "fair" : "low";
+  const gradId = "gauge-grad";
+  const gradStops =
+    band === "good"
+      ? ["#34d399", "#059669"]
+      : band === "fair"
+        ? ["#fbbf24", "#f59e0b"]
+        : ["#fb7185", "#e11d48"];
+  const label = band === "good" ? "Healthy" : band === "fair" ? "Moderate" : "Needs attention";
 
   function arc(startDeg: number, spanDeg: number) {
     if (spanDeg <= 0) return "";
-    const toRad = (d: number) => (d - 90) * Math.PI / 180;
+    const toRad = (d: number) => ((d - 90) * Math.PI) / 180;
     const x1 = cx + R * Math.cos(toRad(startDeg));
     const y1 = cy + R * Math.sin(toRad(startDeg));
     const x2 = cx + R * Math.cos(toRad(startDeg + spanDeg));
@@ -1149,18 +1157,30 @@ function HealthGauge({ score, signals, confidence }: { score: number; signals: n
   }
 
   const trackD = arc(START, TOTAL);
-  const fillD = arc(START, (score / 100) * TOTAL);
+  const fillD = arc(START, (Math.max(0, Math.min(100, score)) / 100) * TOTAL);
 
   return (
-    <div className="overview-score-orb-wrap">
-      <svg className="overview-score-arc" viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} aria-hidden="true">
-        <path d={trackD} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth={SW} strokeLinecap="round" />
-        <path d={fillD} fill="none" stroke={arcColor} strokeWidth={SW} strokeLinecap="round" />
-      </svg>
-      <div className="overview-score-orb">
-        <span>Constituency Health</span>
-        <strong>{score}</strong>
-        <small>{confidence}% AI confidence · {formatCount(signals)} citizen signals</small>
+    <div className="health-gauge">
+      <div className="health-gauge-ring">
+        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width="100%" height="100%" aria-hidden="true">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor={gradStops[0]} />
+              <stop offset="100%" stopColor={gradStops[1]} />
+            </linearGradient>
+          </defs>
+          <path d={trackD} fill="none" stroke="#dfe3ec" strokeWidth={SW} strokeLinecap="round" />
+          <path d={fillD} fill="none" stroke={`url(#${gradId})`} strokeWidth={SW} strokeLinecap="round" />
+        </svg>
+        <div className="health-gauge-center">
+          <span className="health-gauge-eyebrow">Constituency Health</span>
+          <strong className="health-gauge-score">{score}<em>/100</em></strong>
+          <span className={`health-gauge-badge health-gauge-badge--${band}`}>{label}</span>
+        </div>
+      </div>
+      <div className="health-gauge-meta">
+        <div><strong>{confidence}%</strong><span>AI confidence</span></div>
+        <div><strong>{formatCount(signals)}</strong><span>citizen signals</span></div>
       </div>
     </div>
   );
@@ -3106,17 +3126,104 @@ function buildManagedProjects(projects: RankedProject[]): ManagedProject[] {
   });
 }
 
-function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
+type RecMapPoint = { projectId: string; lat: number; lng: number; ward: string; category: string; score: number; band: string };
+
+function RecommendationMap({ maps, points, selectedId, onSelect }: {
+  maps: ClientConfig["maps"];
+  points: RecMapPoint[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const [ready, setReady] = useState(false);
+  const bandColor = (band: string) => (band === "High" ? "#ef4444" : band === "Medium" ? "#f59e0b" : "#22c55e");
+
+  useEffect(() => {
+    if (!maps.enabled || !maps.apiKey || points.length === 0 || !mapRef.current) {
+      setReady(false);
+      return;
+    }
+    let cancelled = false;
+    loadGoogleMaps(maps.apiKey, maps.mapId)
+      .then(() => {
+        if (cancelled || !mapRef.current || !window.google?.maps) return;
+        const bounds = new window.google.maps.LatLngBounds();
+        points.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+        const map = new window.google.maps.Map(mapRef.current, {
+          center: points[0],
+          zoom: points.length > 1 ? 5 : 11,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          clickableIcons: false,
+          gestureHandling: "cooperative",
+          ...(maps.mapId ? { mapId: maps.mapId } : {}),
+          styles: [
+            { featureType: "poi", stylers: [{ visibility: "off" }] },
+            { featureType: "transit", stylers: [{ visibility: "off" }] }
+          ]
+        });
+        points.forEach((p) => {
+          const marker = new window.google!.maps!.Marker!({
+            map,
+            position: { lat: p.lat, lng: p.lng },
+            title: `${p.ward} · ${p.category} · score ${p.score}`,
+            label: { text: String(p.score), color: "#fff", fontSize: "11px", fontWeight: "700" },
+            icon: {
+              path: window.google!.maps!.SymbolPath!.CIRCLE,
+              scale: p.projectId === selectedId ? 16 : 13,
+              fillColor: bandColor(p.band),
+              fillOpacity: 1,
+              strokeColor: "#fff",
+              strokeWeight: 2
+            }
+          }) as { addListener: (ev: string, cb: () => void) => void };
+          marker.addListener("click", () => onSelect(p.projectId));
+        });
+        if (points.length > 1) map.fitBounds(bounds, 48);
+        setReady(true);
+      })
+      .catch(() => setReady(false));
+    return () => { cancelled = true; };
+  }, [maps.enabled, maps.apiKey, maps.mapId, points, selectedId, onSelect]);
+
+  // When Google isn't configured/ready, fall back to the same live OpenStreetMap
+  // tile map the main GIS page uses — real geography, no key required.
+  const fallbackHotspots = points.map((p) => ({
+    ward: p.ward,
+    category: p.category,
+    intensity: p.score,
+    lat: p.lat,
+    lng: p.lng,
+    projectId: p.projectId
+  }));
+
+  return (
+    <div className="rec-gmap-wrap">
+      {maps.enabled ? <div ref={mapRef} className="rec-gmap" /> : null}
+      {!ready ? (
+        <FallbackSignalMap hotspots={fallbackHotspots} selectedProjectId={selectedId} selectProject={onSelect} />
+      ) : null}
+    </div>
+  );
+}
+
+function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: ClientConfig["maps"] }) {
   const [category, setCategory] = useState("All Categories");
   const [selectedRecommendationId, setSelectedRecommendationId] = useState("");
   const recommendations = useMemo(() => buildManagedProjects(dashboard.projects)
-    .map((project) => ({
-      ...project,
-      recommendationScore: Math.round(project.score * 0.48 + project.urgencyScore * 2.1 + project.demandScore * 0.72 + project.confidence * 18),
-      costBenefit: Math.round((project.citizenImpact / Math.max(1, project.budgetCr * 100000)) * 100),
-      priorityBand: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
-    }))
-    .sort((a, b) => b.recommendationScore - a.recommendationScore), [dashboard.projects]);
+    .map((project, index) => {
+      const matchingHotspot = dashboard.hotspots.find((hotspot) => hotspot.ward === project.ward && hotspot.category === project.category) ?? dashboard.hotspots[index];
+      return {
+        ...project,
+        recommendationScore: Math.round(project.score * 0.48 + project.urgencyScore * 2.1 + project.demandScore * 0.72 + project.confidence * 18),
+        costBenefit: Math.round((project.citizenImpact / Math.max(1, project.budgetCr * 100000)) * 100),
+        priorityBand: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low",
+        lat: matchingHotspot?.lat ?? seededLatLng(index).lat,
+        lng: matchingHotspot?.lng ?? seededLatLng(index).lng
+      };
+    })
+    .sort((a, b) => b.recommendationScore - a.recommendationScore), [dashboard.projects, dashboard.hotspots]);
   const filtered = category === "All Categories" ? recommendations : recommendations.filter((project) => project.category === category || (category === "Healthcare" && project.category === "Health"));
   const top = filtered.find((project) => project.id === selectedRecommendationId) ?? filtered[0] ?? recommendations[0];
   const categories = ["All Categories", "Roads", "Healthcare", "Water", "Education", "Employment"];
@@ -3148,17 +3255,31 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
       </section>
 
       <section className="panel rec-filterbar">
-        {categories.map((item) => (
-          <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)} type="button">{item}</button>
-        ))}
+        <div className="rec-filter-tabs">
+          {categories.map((item) => (
+            <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)} type="button">{item}</button>
+          ))}
+        </div>
+        <div className="rec-jump-links">
+          <span>Jump to</span>
+          <button type="button" onClick={() => document.getElementById("rec-analytics")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Analytics</button>
+          <button type="button" onClick={() => document.getElementById("rec-table")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Full Table</button>
+        </div>
       </section>
 
       <section className="rec-layout">
         <section className="panel rec-ranked-list">
           <PanelTitle title="AI-Ranked Recommendations" icon={Scale} detail={`${filtered.length} projects scored`} />
-          <div className="rec-card-list">
-            {filtered.slice(0, 6).map((project, index) => (
-              <article className={`rec-card ${project.priorityBand.toLowerCase()}`} key={project.id}>
+          <div className="rec-card-list rec-card-list--scroll">
+            {filtered.map((project, index) => (
+              <article
+                className={`rec-card ${project.priorityBand.toLowerCase()} ${project.id === top?.id ? "selected" : ""}`}
+                key={project.id}
+                onClick={() => setSelectedRecommendationId(project.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedRecommendationId(project.id); } }}
+              >
                 <div className="rec-card-top">
                   <span>#{index + 1}</span>
                   <mark>{project.priorityBand} Priority</mark>
@@ -3182,36 +3303,55 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
           </div>
         </section>
 
-        <section className="panel rec-map-panel">
-          <PanelTitle title="Affected Regions Map" icon={MapPinned} detail="priority heat overlay" />
-          <div className="rec-map">
-            {filtered.slice(0, 12).map((project, index) => (
-              <button className={`rec-map-dot ${project.priorityBand.toLowerCase()}`} key={project.id} onClick={() => setSelectedRecommendationId(project.id)} style={{ left: `${12 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 25}%` }} type="button">
-                {project.recommendationScore}
-              </button>
-            ))}
-            <span className="rec-map-boundary">District demand surface</span>
+        <section className="panel rec-map-column">
+          <div className="rec-map-block">
+            <PanelTitle title="Affected Regions Map" icon={MapPinned} detail="priority hotspots" />
+            <RecommendationMap
+              maps={maps}
+              points={filtered.slice(0, 20).map((project) => ({
+                projectId: project.id,
+                lat: project.lat,
+                lng: project.lng,
+                ward: project.ward,
+                category: project.category,
+                score: project.recommendationScore,
+                band: project.priorityBand
+              }))}
+              selectedId={top?.id ?? ""}
+              onSelect={setSelectedRecommendationId}
+            />
+            <div className="rec-legend">
+              <div className="rec-legend-keys"><span className="high">High</span><span className="medium">Medium</span><span className="low">Low</span></div>
+              <span className="rec-legend-hint"><MapPin size={12} /> Tap a marker to view reasoning</span>
+            </div>
           </div>
-          <div className="rec-legend"><span className="high">High</span><span className="medium">Medium</span><span className="low">Low</span></div>
-        </section>
 
-        <section className="panel rec-reasoning">
-          <PanelTitle title="AI Reasoning" icon={Bot} detail={top?.title ?? "No project"} />
-          <p className="action-status" role="status">{top ? `Selected recommendation: ${top.ward} (${top.priorityBand} priority).` : "No recommendation selected."}</p>
-          {top ? (
-            <>
-              <p>{top.rationale}</p>
-              <ul>
-                <li>Citizen demand contributes {top.demandScore} demand points and {formatCount(top.demandCount)} direct signals.</li>
-                <li>Public dataset confidence is {Math.round(top.confidence * 100)}% with {top.evidence.length} supporting evidence items.</li>
-                <li>Expected impact reaches {formatCount(top.citizenImpact)} beneficiaries for ₹{top.budgetCr.toFixed(1)} Cr.</li>
-              </ul>
-            </>
-          ) : <p>No recommendations match this filter.</p>}
+          <div className="rec-reasoning-block">
+            <div className="rec-reasoning-head">
+              <span className="rec-reasoning-title"><Bot size={16} /> AI Reasoning</span>
+              {top ? (
+                <span className="rec-reasoning-selected">
+                  {top.title}
+                  <b className={top.priorityBand.toLowerCase()}>{top.ward}</b>
+                  <em>{top.department} · {top.district} · {top.priorityBand} priority</em>
+                </span>
+              ) : null}
+            </div>
+            {top ? (
+              <>
+                <p>{top.rationale}</p>
+                <ul>
+                  <li>Citizen demand contributes {top.demandScore} demand points and {formatCount(top.demandCount)} direct signals.</li>
+                  <li>Public dataset confidence is {Math.round(top.confidence * 100)}% with {top.evidence.length} supporting evidence items.</li>
+                  <li>Expected impact reaches {formatCount(top.citizenImpact)} beneficiaries for ₹{top.budgetCr.toFixed(1)} Cr.</li>
+                </ul>
+              </>
+            ) : <p>No recommendations match this filter.</p>}
+          </div>
         </section>
       </section>
 
-      <section className="rec-analytics-grid">
+      <section className="rec-analytics-grid" id="rec-analytics">
         <section className="panel rec-cost">
           <PanelTitle title="Cost-Benefit Analysis" icon={Database} detail="beneficiaries per budget unit" />
           {filtered.slice(0, 5).map((project) => (
@@ -3239,11 +3379,11 @@ function RecommendationsPage({ dashboard }: { dashboard: DashboardResponse }) {
         </section>
       </section>
 
-      <section className="panel rec-table-card">
+      <section className="panel rec-table-card" id="rec-table">
         <PanelTitle title="Project Ranking Table" icon={FileText} detail="decision-ready queue" />
         <div className="rec-table">
           <div className="table-head"><b>Project</b><b>Category</b><b>Score</b><b>Budget</b><b>Beneficiaries</b><b>Priority</b></div>
-          {filtered.slice(0, 8).map((project) => (
+          {filtered.map((project) => (
             <div key={project.id}>
               <span>{project.title}</span>
               <span>{project.category}</span>
