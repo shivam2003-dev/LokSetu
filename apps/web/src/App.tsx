@@ -271,6 +271,22 @@ type RagStatusResponse = {
 };
 
 type Hotspot = DashboardResponse["hotspots"][number];
+type MapHotspot = Hotspot & { projectId: string; confidence: number; batchPosition: number };
+
+const gisLayers = [
+  { label: "Roads", color: "#ef4444", active: true },
+  { label: "Schools", color: "#f59e0b", active: true },
+  { label: "Hospitals", color: "#22c55e", active: true },
+  { label: "PHCs", color: "#14b8a6", active: true },
+  { label: "Water Pipelines", color: "#3b82f6", active: true },
+  { label: "Citizen Complaints", color: "#e11d48", active: true },
+  { label: "Development Projects", color: "#0f766e", active: true },
+  { label: "Flood Zones", color: "#06b6d4", active: false },
+  { label: "Weather", color: "#64748b", active: false },
+  { label: "Population Density", color: "#e11d48", active: true },
+  { label: "Satellite Imagery", color: "#475569", active: false },
+  { label: "Demand Heatmaps", color: "#dc2626", active: true }
+];
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
 type TileFallbackState = {
   zoom: number;
@@ -432,6 +448,33 @@ const fallbackProject: RankedProject = {
   safeguards: ["Personal identity removed from MP view", "Human approval required before allocation"],
   status: "shortlist"
 };
+
+function resolveProjectLocation(project: Pick<RankedProject, "state" | "district" | "ward" | "category" | "lat" | "lng" | "mpId" | "mpName">, _index: number, hotspots: DashboardResponse["hotspots"] = []) {
+  const matchingHotspot = hotspots.find((hotspot) => hotspot.ward === project.ward && hotspot.category === project.category) ?? hotspots.find((hotspot) => hotspot.ward === project.ward);
+  if (matchingHotspot) {
+    return {
+      state: project.state,
+      district: project.district,
+      ward: project.ward,
+      lat: matchingHotspot.lat,
+      lng: matchingHotspot.lng,
+      mpId: project.mpId,
+      mpName: project.mpName
+    };
+  }
+  if (typeof project.lat === "number" && typeof project.lng === "number") {
+    return {
+      state: project.state,
+      district: project.district,
+      ward: project.ward,
+      lat: project.lat,
+      lng: project.lng,
+      mpId: project.mpId,
+      mpName: project.mpName
+    };
+  }
+  return null;
+}
 
 const fallbackDashboard: DashboardResponse = {
   generatedAt: new Date().toISOString(),
@@ -1365,17 +1408,17 @@ function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardRespon
           <PanelTitle title="Demand Hotspots" icon={MapPinned} detail="affected regions" />
           <RecommendationMap
             maps={maps}
-            points={projects.slice(0, 20).map((project, index) => {
-              const hs = dashboard.hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? dashboard.hotspots[index];
-              return {
+            points={projects.slice(0, 20).flatMap((project, index) => {
+              const location = resolveProjectLocation(project, index, dashboard.hotspots);
+              return location ? [{
                 projectId: project.id,
-                lat: hs?.lat ?? seededLatLng(index).lat,
-                lng: hs?.lng ?? seededLatLng(index).lng,
+                lat: location.lat,
+                lng: location.lng,
                 ward: project.ward,
                 category: project.category,
                 score: project.score,
                 band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
-              };
+              }] : [];
             })}
             selectedId={selectedHotspotId}
             onSelect={setSelectedHotspotId}
@@ -1518,22 +1561,22 @@ function IssueMap({
   const [mapState, setMapState] = useState<MapLoadState>(maps.enabled ? "idle" : "fallback");
   const [fallbackReason, setFallbackReason] = useState(maps.enabled ? "" : "Map SDK key is not configured.");
   const [gisAction, setGisAction] = useState("Ready to run GIS analysis.");
-  const hotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
+  const [activeLayers, setActiveLayers] = useState<Record<string, boolean>>(() => Object.fromEntries(gisLayers.map((layer) => [layer.label, layer.active])));
+  const [issueFilter, setIssueFilter] = useState("All issue types");
+  const [confidenceFilter, setConfidenceFilter] = useState("High confidence");
+  const [timelineValue, setTimelineValue] = useState(72);
+  const [mapOverlay, setMapOverlay] = useState<"hotspots" | "clusters" | "heatmap">("hotspots");
+  const allHotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
+  const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
+    const issueMatches = issueFilter === "All issue types" || normalizedIssueFilter(issueFilter) === normalizedIssueFilter(hotspot.category);
+    const confidenceMatches =
+      confidenceFilter === "All confidence levels"
+        || (confidenceFilter === "High confidence" && hotspot.confidence >= 0.75)
+        || (confidenceFilter === "Needs verification" && hotspot.confidence < 0.75);
+    const timelineMatches = hotspot.batchPosition <= timelineValue;
+    return issueMatches && confidenceMatches && timelineMatches && categoryLayerEnabled(hotspot.category, activeLayers);
+  }), [activeLayers, allHotspots, confidenceFilter, issueFilter, timelineValue]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
-  const gisLayers = [
-    { label: "Roads", color: "#ef4444", active: true },
-    { label: "Schools", color: "#f59e0b", active: true },
-    { label: "Hospitals", color: "#22c55e", active: true },
-    { label: "PHCs", color: "#14b8a6", active: true },
-    { label: "Water Pipelines", color: "#3b82f6", active: true },
-    { label: "Citizen Complaints", color: "#e11d48", active: true },
-    { label: "Development Projects", color: "#0f766e", active: true },
-    { label: "Flood Zones", color: "#06b6d4", active: false },
-    { label: "Weather", color: "#64748b", active: false },
-    { label: "Population Density", color: "#e11d48", active: true },
-    { label: "Satellite Imagery", color: "#475569", active: false },
-    { label: "Demand Heatmaps", color: "#dc2626", active: true }
-  ];
 
   useEffect(() => {
     if (!maps.enabled || hotspots.length === 0 || !mapRef.current) {
@@ -1670,7 +1713,15 @@ function IssueMap({
             <div className="gis-layer-list">
               {gisLayers.map((layer) => (
                 <label key={layer.label}>
-                  <input type="checkbox" defaultChecked={layer.active} />
+                  <input
+                    type="checkbox"
+                    checked={Boolean(activeLayers[layer.label])}
+                    onChange={(event) => {
+                      const checked = event.currentTarget.checked;
+                      setActiveLayers((current) => ({ ...current, [layer.label]: checked }));
+                      setGisAction(`${layer.label} layer ${checked ? "enabled" : "hidden"}; ${hotspots.length} signals match the current view.`);
+                    }}
+                  />
                   <i style={{ background: layer.color }} />
                   <span>{layer.label}</span>
                 </label>
@@ -1679,14 +1730,22 @@ function IssueMap({
           </section>
           <section>
             <h4>Filters</h4>
-            <select aria-label="GIS issue filter" defaultValue="All issue types">
+            <select aria-label="GIS issue filter" value={issueFilter} onChange={(event) => {
+              setIssueFilter(event.currentTarget.value);
+              setGisAction(`${event.currentTarget.value} issue filter applied.`);
+            }}>
               <option>All issue types</option>
               <option>Roads</option>
               <option>Healthcare</option>
               <option>Water Supply</option>
               <option>Education</option>
+              <option>Sanitation</option>
+              <option>Power</option>
             </select>
-            <select aria-label="GIS confidence filter" defaultValue="High confidence">
+            <select aria-label="GIS confidence filter" value={confidenceFilter} onChange={(event) => {
+              setConfidenceFilter(event.currentTarget.value);
+              setGisAction(`${event.currentTarget.value} filter applied to ranked hotspot evidence.`);
+            }}>
               <option>High confidence</option>
               <option>All confidence levels</option>
               <option>Needs verification</option>
@@ -1694,14 +1753,18 @@ function IssueMap({
           </section>
           <section>
             <h4>Timeline</h4>
-            <input aria-label="GIS timeline slider" defaultValue="72" max="100" min="0" type="range" />
-            <div className="gis-time-row"><span>Jan</span><b>Current batch</b><span>Dec</span></div>
+            <input aria-label="GIS timeline slider" value={timelineValue} max="100" min="20" type="range" onChange={(event) => {
+              const next = Number(event.currentTarget.value);
+              setTimelineValue(next);
+              setGisAction(`Timeline window moved to ${timelineLabel(next)}; map now uses matching batch signals.`);
+            }} />
+            <div className="gis-time-row"><span>Jan</span><b>{timelineLabel(timelineValue)}</b><span>Dec</span></div>
           </section>
           <section>
             <h4>Analysis</h4>
             <div className="gis-tool-grid">
               <button onClick={() => setGisAction(`Route analysis created from ${selectedProject.ward} to nearest delivery cluster.`)} type="button">Route analysis</button>
-              <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} hotspots checked.`)} type="button">Buffer 2 km</button>
+              <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} filtered hotspots checked.`)} type="button">Buffer 2 km</button>
               <button onClick={() => setGisAction(`Flood overlap checked for ${selectedProject.district}; at-risk layers highlighted.`)} type="button">Flood overlap</button>
               <button onClick={() => setGisAction(`${boundaryLevel} boundary clip applied to current demand layer.`)} type="button">Boundary clip</button>
             </div>
@@ -1710,13 +1773,13 @@ function IssueMap({
         </aside>
 
         <section className="gis-map-panel">
-          <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""}`}>
+          <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""} overlay-${mapOverlay}`}>
             <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
             {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
             <div className="gis-map-actions" aria-label="GIS map tools">
-              <button onClick={() => setGisAction(`AI hotspot detection refreshed ${hotspots.length} ward signals.`)} type="button">AI hotspot detection</button>
-              <button onClick={() => setGisAction(`${clusters.clusters.length} cluster markers loaded on the map.`)} type="button">Cluster markers</button>
-              <button onClick={() => setGisAction("Demand heatmap overlay toggled for current filters.")} type="button">Demand heatmap</button>
+              <button className={mapOverlay === "hotspots" ? "active" : ""} aria-pressed={mapOverlay === "hotspots"} onClick={() => { setMapOverlay("hotspots"); setGisAction(`AI hotspot detection refreshed ${hotspots.length} filtered ward signals.`); }} type="button">AI hotspot detection</button>
+              <button className={mapOverlay === "clusters" ? "active" : ""} aria-pressed={mapOverlay === "clusters"} onClick={() => { setMapOverlay("clusters"); setGisAction(`${clusters.clusters.length} cluster markers loaded for visible map signals.`); }} type="button">Cluster markers</button>
+              <button className={mapOverlay === "heatmap" ? "active" : ""} aria-pressed={mapOverlay === "heatmap"} onClick={() => { setMapOverlay("heatmap"); setGisAction(`Demand heatmap overlay enabled for ${issueFilter.toLowerCase()} / ${confidenceFilter.toLowerCase()}.`); }} type="button">Demand heatmap</button>
             </div>
             <div className="gis-scale">5 km</div>
           </div>
@@ -1728,6 +1791,7 @@ function IssueMap({
                 <small>{hotspot.ward} · score {hotspot.intensity}</small>
               </button>
             ))}
+            {!hotspots.length ? <p className="empty-state">No hotspots match the selected GIS layers and filters.</p> : null}
           </div>
         </section>
 
@@ -2144,29 +2208,46 @@ function boundaryOrder(level: BoundaryLevel) {
   return ["state", "district", "constituency", "ward"].indexOf(level);
 }
 
-function buildMapHotspots(dashboard: DashboardResponse): Array<Hotspot & { projectId: string }> {
+function buildMapHotspots(dashboard: DashboardResponse): MapHotspot[] {
   const projects = dashboard.projects.length ? dashboard.projects : [fallbackProject];
-  return projects.slice(0, 8).map((project, index) => {
-    const matchingHotspot = dashboard.hotspots.find((hotspot) => hotspot.ward === project.ward && hotspot.category === project.category) ?? dashboard.hotspots[index];
-    return {
+  return projects.slice(0, 8).flatMap((project, index) => {
+    const location = resolveProjectLocation(project, index, dashboard.hotspots);
+    return location ? [{
       ward: project.ward,
       category: project.category,
       intensity: project.score,
-      lat: project.lat ?? seededLatLng(index).lat,
-      lng: project.lng ?? seededLatLng(index).lng,
-      projectId: project.id
-    };
+      lat: location.lat,
+      lng: location.lng,
+      projectId: project.id,
+      confidence: project.confidence,
+      batchPosition: Math.min(100, 28 + index * 9)
+    }] : [];
   });
 }
 
-function seededLatLng(index: number) {
-  const seed = [
-    { lat: 28.62, lng: 77.3 },
-    { lat: 20.01, lng: 73.79 },
-    { lat: 13.08, lng: 80.27 },
-    { lat: 22.57, lng: 88.36 }
-  ];
-  return seed[index % seed.length];
+function normalizedIssueFilter(value: string) {
+  const lower = value.toLowerCase();
+  if (lower.includes("health")) return "health";
+  if (lower.includes("water")) return "water";
+  return lower;
+}
+
+function categoryLayerEnabled(category: string, activeLayers: Record<string, boolean>) {
+  const normalized = normalizedIssueFilter(category);
+  if (normalized === "roads") return Boolean(activeLayers.Roads);
+  if (normalized === "education") return Boolean(activeLayers.Schools);
+  if (normalized === "health") return Boolean(activeLayers.Hospitals || activeLayers.PHCs);
+  if (normalized === "water") return Boolean(activeLayers["Water Pipelines"]);
+  if (normalized === "sanitation") return Boolean(activeLayers["Citizen Complaints"] || activeLayers["Demand Heatmaps"]);
+  if (normalized === "power" || normalized === "employment" || normalized === "digital access") return Boolean(activeLayers["Development Projects"]);
+  return Boolean(activeLayers["Development Projects"]);
+}
+
+function timelineLabel(value: number) {
+  if (value < 40) return "Q1 batch";
+  if (value < 65) return "Mid-year batch";
+  if (value < 86) return "Current batch";
+  return "Full year";
 }
 
 function indiaProjection(lat: number, lng: number) {
@@ -2699,17 +2780,17 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
           <CollapsiblePanel title="Evidence Map" icon={MapPinned}>
             <RecommendationMap
               maps={maps}
-              points={projects.slice(0, 20).map((project, index) => {
-                const hs = hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? hotspots[index];
-                return {
+              points={projects.slice(0, 20).flatMap((project, index) => {
+                const location = resolveProjectLocation(project, index, hotspots);
+                return location ? [{
                   projectId: project.id,
-                  lat: project.lat ?? seededLatLng(index).lat,
-                  lng: project.lng ?? seededLatLng(index).lng,
+                  lat: location.lat,
+                  lng: location.lng,
                   ward: project.ward,
                   category: project.category,
                   score: project.score,
                   band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
-                };
+                }] : [];
               })}
               selectedId={selectedProject?.id ?? ""}
               onSelect={setProjectId}
@@ -2801,6 +2882,37 @@ const knowledgeDocs: KnowledgeDoc[] = [
   { id: "kb-minutes-08", title: "MP Review Meeting Minutes", kind: "Meeting Minutes", owner: "MP Office", updated: "May 2026", status: "indexed", chunks: 54, citations: 13, summary: "Action items, officer commitments, procurement blockers, and next-review dates from constituency meetings." },
   { id: "kb-circular-09", title: "Government Circulars · Health and Roads", kind: "Government Circular", owner: "Govt Portal", updated: "Apr 2026", status: "indexed", chunks: 63, citations: 11, summary: "Circulars covering maintenance grants, PHC staffing norms, and emergency monsoon response procedures." }
 ];
+
+type ExplorerFilters = {
+  state: string;
+  district: string;
+  category: string;
+  confidence: string;
+  dateRange: string;
+};
+
+function uniqueSorted(values: string[]) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function buildExplorerQuery(filters: ExplorerFilters) {
+  const where = [
+    filters.state !== "All states" ? `state = '${filters.state.replaceAll("'", "''")}'` : "",
+    filters.district !== "All districts" ? `district = '${filters.district.replaceAll("'", "''")}'` : "",
+    filters.category !== "All categories" ? `category = '${filters.category.replaceAll("'", "''")}'` : "",
+    `confidence >= ${Number(filters.confidence).toFixed(2)}`,
+    filters.dateRange === "Starting H1 2026" ? "start_date < DATE '2026-07-01'" : "",
+    filters.dateRange === "Starting H2 2026" ? "start_date >= DATE '2026-07-01'" : "",
+    filters.dateRange === "Due before Sep 2026" ? "completion_date < DATE '2026-09-01'" : ""
+  ].filter(Boolean);
+  return [
+    "SELECT ward, district, category, priority_score, confidence, start_date, completion_date",
+    "FROM loksetu.ranked_projects",
+    where.length ? `WHERE ${where.join("\n  AND ")}` : "",
+    "ORDER BY priority_score DESC",
+    "LIMIT 50;"
+  ].filter(Boolean).join("\n");
+}
 
 function KnowledgeBasePage() {
   const [selectedDocId, setSelectedDocId] = useState(knowledgeDocs[0].id);
@@ -2958,11 +3070,40 @@ function KnowledgeBasePage() {
 
 function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardResponse; demoData: DemoDataStatus }) {
   const [queryNotice, setQueryNotice] = useState("Query not run yet.");
-  const [activeExplorerFilter, setActiveExplorerFilter] = useState("No filter selected.");
+  const [queryRan, setQueryRan] = useState(false);
+  const [explorerFilters, setExplorerFilters] = useState({
+    state: "All states",
+    district: "All districts",
+    category: "All categories",
+    confidence: "0.75",
+    dateRange: "All timelines"
+  });
   const [intakeAudit, setIntakeAudit] = useState<IntakeAuditResponse | null>(null);
   const [selectedIntakeId, setSelectedIntakeId] = useState("");
   const [pipelineNotice, setPipelineNotice] = useState("Scheduled batch mode. Use on-demand run during evaluation.");
   const rows = buildManagedProjects(dashboard.projects).slice(0, 8);
+  const stateOptions = ["All states", ...uniqueSorted(rows.map((row) => row.state))];
+  const districtOptions = ["All districts", ...uniqueSorted(rows.filter((row) => explorerFilters.state === "All states" || row.state === explorerFilters.state).map((row) => row.district))];
+  const categoryOptions = ["All categories", ...uniqueSorted(rows.map((row) => row.category))];
+  const queryRows = rows.filter((row) => {
+    const matchesState = explorerFilters.state === "All states" || row.state === explorerFilters.state;
+    const matchesDistrict = explorerFilters.district === "All districts" || row.district === explorerFilters.district;
+    const matchesCategory = explorerFilters.category === "All categories" || row.category === explorerFilters.category;
+    const matchesConfidence = row.confidence >= Number(explorerFilters.confidence);
+    const matchesDate = explorerFilters.dateRange === "All timelines"
+      || (explorerFilters.dateRange === "Starting H1 2026" && row.startDate < "2026-07-01")
+      || (explorerFilters.dateRange === "Starting H2 2026" && row.startDate >= "2026-07-01")
+      || (explorerFilters.dateRange === "Due before Sep 2026" && row.completionDate < "2026-09-01");
+    return matchesState && matchesDistrict && matchesCategory && matchesConfidence && matchesDate;
+  });
+  const activeQueryFilters = [
+    explorerFilters.state !== "All states" ? `state=${explorerFilters.state}` : "",
+    explorerFilters.district !== "All districts" ? `district=${explorerFilters.district}` : "",
+    explorerFilters.category !== "All categories" ? `category=${explorerFilters.category}` : "",
+    `confidence>=${Math.round(Number(explorerFilters.confidence) * 100)}%`,
+    explorerFilters.dateRange !== "All timelines" ? `timeline=${explorerFilters.dateRange}` : ""
+  ].filter(Boolean);
+  const queryText = buildExplorerQuery(explorerFilters);
   const selectedIntake = intakeAudit?.entries.find((entry) => entry.rawIntakeId === selectedIntakeId) ?? intakeAudit?.entries[0];
   const rawStatus = intakeAudit?.rawStatus ?? {};
   const rawIntakeRows = Object.values(rawStatus).reduce((sum, count) => sum + count, 0);
@@ -3110,13 +3251,74 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
         <section className="panel explorer-query-card">
           <PanelTitle title="Query Builder" icon={Database} detail="reviewed source query" />
           <div className="explorer-query-box">
-            <code>{`SELECT ward, category, priority_score, confidence\nFROM janvaani.projects\nWHERE confidence >= 0.75\nORDER BY priority_score DESC\nLIMIT 50;`}</code>
-            <button onClick={() => setQueryNotice(`Query returned ${rows.length} reviewed project rows.`)} type="button">Run query</button>
+            <code>{queryText}</code>
+            <button onClick={() => { setQueryRan(true); setQueryNotice(`Query returned ${queryRows.length} reviewed project rows.`); }} type="button">Run query</button>
           </div>
-          <div className="explorer-filter-row">
-            {["State", "District", "Category", "Confidence", "Date range"].map((item) => <button className={activeExplorerFilter === item ? "active" : ""} key={item} onClick={() => setActiveExplorerFilter(item)} type="button">{item}</button>)}
+          <div className="explorer-filter-row" aria-label="Explorer query filters">
+            <label>
+              <span>State</span>
+              <select value={explorerFilters.state} onChange={(event) => {
+                const value = event.currentTarget.value;
+                setExplorerFilters((current) => ({ ...current, state: value, district: "All districts" }));
+              }}>
+                {stateOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>District</span>
+              <select value={districtOptions.includes(explorerFilters.district) ? explorerFilters.district : "All districts"} onChange={(event) => {
+                const value = event.currentTarget.value;
+                setExplorerFilters((current) => ({ ...current, district: value }));
+              }}>
+                {districtOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Category</span>
+              <select value={explorerFilters.category} onChange={(event) => {
+                const value = event.currentTarget.value;
+                setExplorerFilters((current) => ({ ...current, category: value }));
+              }}>
+                {categoryOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Confidence</span>
+              <select value={explorerFilters.confidence} onChange={(event) => {
+                const value = event.currentTarget.value;
+                setExplorerFilters((current) => ({ ...current, confidence: value }));
+              }}>
+                <option value="0">All confidence</option>
+                <option value="0.75">75% and above</option>
+                <option value="0.85">85% and above</option>
+              </select>
+            </label>
+            <label>
+              <span>Date range</span>
+              <select value={explorerFilters.dateRange} onChange={(event) => {
+                const value = event.currentTarget.value;
+                setExplorerFilters((current) => ({ ...current, dateRange: value }));
+              }}>
+                <option>All timelines</option>
+                <option>Starting H1 2026</option>
+                <option>Starting H2 2026</option>
+                <option>Due before Sep 2026</option>
+              </select>
+            </label>
           </div>
-          <p className="action-status" role="status">{queryNotice} Active filter: {activeExplorerFilter}</p>
+          <p className="action-status" role="status">{queryNotice} Active filters: {activeQueryFilters.length ? activeQueryFilters.join(" · ") : "none"}</p>
+          {queryRan ? (
+            <div className="explorer-query-results" aria-label="Query results">
+              {queryRows.slice(0, 5).map((row) => (
+                <article key={row.id}>
+                  <strong>{row.ward}</strong>
+                  <span>{row.category} · {row.district}</span>
+                  <b>{row.score}</b>
+                </article>
+              ))}
+              {!queryRows.length ? <p className="empty-state">No ranked project rows match the selected query filters.</p> : null}
+            </div>
+          ) : null}
         </section>
 
         <div className="explorer-side-stack">
@@ -3280,17 +3482,17 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
           <PanelTitle title="District Project Map" icon={MapPinned} detail="interactive portfolio geography" />
           <RecommendationMap
             maps={maps}
-            points={managedProjects.slice(0, 20).map((project, index) => {
-              const hs = dashboard.hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? dashboard.hotspots[index];
-              return {
+            points={managedProjects.slice(0, 20).flatMap((project, index) => {
+              const location = resolveProjectLocation(project, index, dashboard.hotspots);
+              return location ? [{
                 projectId: project.id,
-                lat: hs?.lat ?? seededLatLng(index).lat,
-                lng: hs?.lng ?? seededLatLng(index).lng,
+                lat: location.lat,
+                lng: location.lng,
                 ward: project.ward,
                 category: project.category,
                 score: project.score,
                 band: project.deliveryStatus === "completed" ? "Low" : project.deliveryStatus === "delayed" ? "High" : "Medium"
-              };
+              }] : [];
             })}
             selectedId={selectedProjectId}
             onSelect={setSelectedProjectId}
@@ -3382,12 +3584,20 @@ function buildManagedProjects(projects: RankedProject[]): ManagedProject[] {
     ? source
     : templates.map((template, index) => {
       const base = source[index % source.length] ?? fallbackProject;
+      const exactSource = source.find((project) => project.ward === template.ward && project.category === template.category);
+      const locationSource = exactSource ?? base;
       return {
         ...base,
         id: `${base.id}-portfolio-${index}`,
-        title: template.title,
-        category: template.category,
-        ward: template.ward,
+        title: exactSource ? template.title : base.title,
+        category: exactSource ? template.category : base.category,
+        ward: locationSource.ward,
+        state: locationSource.state,
+        district: locationSource.district,
+        lat: locationSource.lat,
+        lng: locationSource.lng,
+        mpId: locationSource.mpId,
+        mpName: locationSource.mpName,
         score: Math.max(58, Math.min(99, base.score - (index % 5) * 4 + (index % 2) * 3)),
         demandCount: Math.max(28, base.demandCount + index * 17),
         confidence: Math.max(0.68, Math.min(0.97, base.confidence - (index % 4) * 0.035)),
@@ -3504,14 +3714,13 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
   const [selectedRecommendationId, setSelectedRecommendationId] = useState("");
   const recommendations = useMemo(() => buildManagedProjects(dashboard.projects)
     .map((project, index) => {
-      const matchingHotspot = dashboard.hotspots.find((hotspot) => hotspot.ward === project.ward && hotspot.category === project.category) ?? dashboard.hotspots[index];
+      const location = resolveProjectLocation(project, index, dashboard.hotspots);
       return {
         ...project,
+        ...(location ? { state: location.state, district: location.district, ward: location.ward, lat: location.lat, lng: location.lng, mpId: location.mpId, mpName: location.mpName } : {}),
         recommendationScore: Math.round(project.score * 0.48 + project.urgencyScore * 2.1 + project.demandScore * 0.72 + project.confidence * 18),
         costBenefit: Math.round((project.citizenImpact / Math.max(1, project.budgetCr * 100000)) * 100),
-        priorityBand: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low",
-        lat: matchingHotspot?.lat ?? seededLatLng(index).lat,
-        lng: matchingHotspot?.lng ?? seededLatLng(index).lng
+        priorityBand: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
       };
     })
     .sort((a, b) => b.recommendationScore - a.recommendationScore), [dashboard.projects, dashboard.hotspots]);
@@ -3599,7 +3808,7 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
             <PanelTitle title="Affected Regions Map" icon={MapPinned} detail="priority hotspots" />
             <RecommendationMap
               maps={maps}
-              points={filtered.slice(0, 20).map((project) => ({
+              points={filtered.slice(0, 20).flatMap((project) => (typeof project.lat === "number" && typeof project.lng === "number" ? [{
                 projectId: project.id,
                 lat: project.lat,
                 lng: project.lng,
@@ -3607,7 +3816,7 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
                 category: project.category,
                 score: project.recommendationScore,
                 band: project.priorityBand
-              }))}
+              }] : []))}
               selectedId={top?.id ?? ""}
               onSelect={setSelectedRecommendationId}
             />
@@ -3782,17 +3991,17 @@ function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: 
           <PanelTitle title="Map Snapshot" icon={MapPinned} detail="affected regions" />
           <RecommendationMap
             maps={maps}
-            points={projects.slice(0, 20).map((project, index) => {
-              const hs = dashboard.hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? dashboard.hotspots[index];
-              return {
+            points={projects.slice(0, 20).flatMap((project, index) => {
+              const location = resolveProjectLocation(project, index, dashboard.hotspots);
+              return location ? [{
                 projectId: project.id,
-                lat: hs?.lat ?? seededLatLng(index).lat,
-                lng: hs?.lng ?? seededLatLng(index).lng,
+                lat: location.lat,
+                lng: location.lng,
                 ward: project.ward,
                 category: project.category,
                 score: project.score,
                 band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
-              };
+              }] : [];
             })}
             selectedId={selectedMapId}
             onSelect={setSelectedMapId}

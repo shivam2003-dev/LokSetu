@@ -3141,6 +3141,12 @@ meter::-moz-meter-bar {
   backdrop-filter: blur(8px);
 }
 
+.gis-map-actions button.active {
+  border-color: #1780ff;
+  background: rgba(239, 246, 255, 0.96);
+  color: #0a5fd0;
+}
+
 .gis-scale {
   position: absolute;
   right: 16px;
@@ -9436,6 +9442,14 @@ button.problem-row.selected {
 .explorer-query-box button { width: fit-content; background: #1780ff; color: #fff; border-color: #1780ff; }
 .explorer-filter-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .explorer-filter-row button.active { border-color: #1780ff; background: #eef2ff; color: #0a5fd0; }
+.explorer-filter-row label { display: grid; gap: 5px; min-width: 145px; flex: 1 1 145px; }
+.explorer-filter-row label span { color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: 0.4px; text-transform: uppercase; }
+.explorer-filter-row select { width: 100%; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); padding: 0 10px; font-size: 12px; font-weight: 850; }
+.explorer-query-results { display: grid; gap: 8px; }
+.explorer-query-results article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; padding: 9px 10px; }
+.explorer-query-results strong { color: var(--ink); font-size: 12.5px; }
+.explorer-query-results span { color: var(--muted); font-size: 11.5px; font-weight: 750; }
+.explorer-query-results b { grid-row: 1 / span 2; grid-column: 2; color: #0a5fd0; font-size: 14px; }
 .explorer-schema-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .explorer-schema-list span { border-radius: 999px; background: #eef2ff; color: #0a5fd0; padding: 7px 9px; font-family: var(--font-mono); font-size: 10px; font-weight: 800; }
 .explorer-quality-list { display: grid; gap: 8px; }

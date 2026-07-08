@@ -122,7 +122,7 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByRole("button", { name: "district", exact: true }).click();
     await expect(page.locator(".boundary-list button").first()).toContainText(/production boundary connector|local-simplified-boundary/);
     await page.getByRole("button", { name: "All India" }).click();
-    await expect(page.locator(".hotspot-row")).toHaveCount(8);
+    await expect(page.locator(".hotspot-row").first()).toBeVisible();
     await page.locator(".hotspot-row").nth(1).click();
     await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
     await expect(page.getByText("Issue drilldown")).toBeVisible();
@@ -302,9 +302,10 @@ test.describe("MP/admin web functional flow", () => {
     await page.goto("/#explorer");
     await page.getByRole("button", { name: "Run query" }).click();
     await expect(page.locator(".action-status").filter({ hasText: "Query returned" })).toBeVisible();
-    await page.getByRole("button", { name: "Category" }).click();
-    await expect(page.locator(".action-status").filter({ hasText: "Active filter: Category" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Category" })).toHaveClass(/active/);
+    await page.getByLabel("Explorer query filters").getByLabel("Category").selectOption("Roads");
+    await expect(page.locator(".explorer-query-box code")).toContainText("category = 'Roads'");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByLabel("Query results")).toBeVisible();
 
     await page.goto("/#projects");
     const docDownload = page.waitForEvent("download");
@@ -331,6 +332,29 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".action-status").filter({ hasText: "Constituency Summary exported as PDF" })).toBeVisible();
     await page.getByRole("button", { name: "Share secure link" }).click();
     await expect(page.locator(".action-status").filter({ hasText: "Secure link created for Constituency Summary" })).toBeVisible();
+  });
+
+  test("map and explorer controls are backed by live dashboard data", async ({ page }) => {
+    await loginIfNeeded(page);
+
+    await page.goto("/#map");
+    await page.getByLabel("GIS issue filter").selectOption("Roads");
+    await expect(page.locator(".hotspot-row").first()).toContainText("Roads");
+    await page.getByRole("button", { name: "Demand heatmap" }).click();
+    await expect(page.getByRole("button", { name: "Demand heatmap" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByLabel("GIS timeline slider").fill("100");
+    await expect(page.locator(".gis-control-panel .action-status")).toContainText("Full year");
+
+    await page.goto("/#explorer");
+    const queryFilters = page.getByLabel("Explorer query filters");
+    await queryFilters.getByLabel("Category").selectOption("Roads");
+    await expect(page.locator(".explorer-query-box code")).toContainText("category = 'Roads'");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByLabel("Query results")).toBeVisible();
+    await expect(page.getByText(/Query returned \d+ reviewed project rows/)).toBeVisible();
+
+    await page.goto("/#recommendations");
+    await expect(page.getByText(/Central Delhi · Samrala Road/)).toHaveCount(0);
   });
 
   test("maps fallback works without a browser key", async ({ page }) => {
