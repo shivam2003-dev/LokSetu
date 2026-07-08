@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "concurrently \"PORT=18080 npm run dev -w services/api\" \"npm run dev -w apps/web\" \"VITE_API_BASE_URL=http://127.0.0.1:18080 npm run dev -w apps/citizen\"",
     "local": "bash scripts/start-local.sh",
+    "local:nodocker": "bash scripts/start-local-nodocker.sh",
     "local:k8s": "bash scripts/start-local-k8s-argocd.sh",
     "build": "npm run build -w services/api && npm run build -w services/rag-api && npm run build -w apps/web && npm run build -w apps/citizen",
     "lint": "npm run lint -w services/api && npm run lint -w services/rag-api && npm run lint -w apps/web && npm run lint -w apps/citizen",
