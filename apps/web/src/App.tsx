@@ -4,6 +4,7 @@ import {
   Bot,
   Briefcase,
   Building2,
+  ChevronDown,
   Construction,
   CheckCircle2,
   Database,
@@ -32,6 +33,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Sparkles,
   Star,
   Target,
   Trash2,
@@ -900,6 +902,8 @@ class AuthError extends Error {
   }
 }
 
+const isLocalDev = import.meta.env.DEV || import.meta.env.VITE_APP_ENV !== "production";
+
 function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -915,7 +919,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify(username.trim() ? { username: username.trim(), password } : { password })
       });
       const payload = await response.json() as { token?: string; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Login failed");
@@ -989,8 +993,17 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
             <label className="remember-row"><input defaultChecked type="checkbox" /> Remember me</label>
             <button className="link-button" type="button">Forgot Password?</button>
           </div>
+          {isLocalDev ? (
+            <div className="login-test-hint">
+              <span>Local dev —</span>
+              <button type="button" onClick={() => { setUsername(""); setPassword("local-dev"); }}>
+                click to fill password
+              </button>
+              <code>local-dev</code>
+            </div>
+          ) : null}
           {error ? <div className="login-error">{error}</div> : null}
-          <button className="login-submit" disabled={busy || !username.trim() || !password.trim()} type="submit">
+          <button className="login-submit" disabled={busy || !password.trim()} type="submit">
             {busy ? <RefreshCw className="spin" size={18} /> : null}
             Sign In
             <ArrowRight size={22} />
@@ -1114,74 +1127,40 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-type GaugeSegment = { label: string; value: number; color: string };
-
-function HealthGauge({ score, segments, signals }: { score: number; segments: GaugeSegment[]; signals: number }) {
-  const SIZE = 220;
+function HealthGauge({ score, signals, confidence }: { score: number; signals: number; confidence: number }) {
+  // Single arc ring: 270° track, filled proportional to score/100
+  const SIZE = 276;
   const cx = SIZE / 2;
   const cy = SIZE / 2;
-  const R = 88;
-  const strokeW = 10;
-  const GAP_DEG = 4;
-  // Arc spans 270° starting from 135° (bottom-left), going clockwise
-  const TOTAL_DEG = 270;
-  const START_DEG = 135;
-  const totalGap = GAP_DEG * segments.length;
-  const arcAvail = TOTAL_DEG - totalGap;
+  const R = 128;
+  const SW = 9;
+  const START = 225; // bottom-left, arc opens at bottom
+  const TOTAL = 270; // ends at bottom-right (225 + 270 = 495 = 135°)
+  const arcColor = score >= 80 ? "#22c55e" : score >= 60 ? "#f59e0b" : "#ef4444";
 
-  function polar(deg: number, r: number): [number, number] {
-    const rad = (deg - 90) * (Math.PI / 180);
-    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
-  }
-
-  function arcPath(startDeg: number, spanDeg: number, r: number): string {
+  function arc(startDeg: number, spanDeg: number) {
     if (spanDeg <= 0) return "";
-    const [x1, y1] = polar(startDeg, r);
-    const [x2, y2] = polar(startDeg + spanDeg, r);
-    const large = spanDeg > 180 ? 1 : 0;
-    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+    const toRad = (d: number) => (d - 90) * Math.PI / 180;
+    const x1 = cx + R * Math.cos(toRad(startDeg));
+    const y1 = cy + R * Math.sin(toRad(startDeg));
+    const x2 = cx + R * Math.cos(toRad(startDeg + spanDeg));
+    const y2 = cy + R * Math.sin(toRad(startDeg + spanDeg));
+    return `M ${x1} ${y1} A ${R} ${R} 0 ${spanDeg > 180 ? 1 : 0} 1 ${x2} ${y2}`;
   }
 
-  // Track background arc
-  const trackPath = arcPath(START_DEG, TOTAL_DEG, R);
-
-  // Build segment arcs — each proportional to its value (0-100)
-  let cursor = START_DEG;
-  const segmentArcs = segments.map((seg) => {
-    const span = (seg.value / 100) * (arcAvail / segments.length);
-    const path = arcPath(cursor, span, R);
-    const labelDeg = cursor + span / 2;
-    const [dotX, dotY] = polar(labelDeg, R + 22);
-    cursor += span + GAP_DEG;
-    return { ...seg, path, dotX, dotY };
-  });
-
-  // Score color
-  const scoreColor = score >= 80 ? "#22c55e" : score >= 60 ? "#f59e0b" : "#ef4444";
+  const trackD = arc(START, TOTAL);
+  const fillD = arc(START, (score / 100) * TOTAL);
 
   return (
-    <div className="health-gauge">
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE}>
-        {/* Track */}
-        <path d={trackPath} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={strokeW} strokeLinecap="round" />
-        {/* Colored segments */}
-        {segmentArcs.map((seg) => (
-          <path key={seg.label} d={seg.path} fill="none" stroke={seg.color} strokeWidth={strokeW} strokeLinecap="round" />
-        ))}
-        {/* Score */}
-        <text x={cx} y={cy - 10} textAnchor="middle" dominantBaseline="middle" fill={scoreColor} fontSize="44" fontWeight="800" fontFamily="var(--font-display, system-ui)">{score}</text>
-        <text x={cx} y={cy + 22} textAnchor="middle" dominantBaseline="middle" fill="rgba(255,255,255,0.5)" fontSize="11" fontWeight="700" letterSpacing="1">HEALTH SCORE</text>
-        {/* Signal count */}
-        <text x={cx} y={SIZE - 18} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="11" fontWeight="700">{formatCount(signals)} citizen signals</text>
+    <div className="overview-score-orb-wrap">
+      <svg className="overview-score-arc" viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} aria-hidden="true">
+        <path d={trackD} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth={SW} strokeLinecap="round" />
+        <path d={fillD} fill="none" stroke={arcColor} strokeWidth={SW} strokeLinecap="round" />
       </svg>
-      {/* Legend */}
-      <div className="health-gauge-legend">
-        {segmentArcs.map((seg) => (
-          <span key={seg.label}>
-            <em style={{ background: seg.color }} />
-            {seg.label} <b>{seg.value}%</b>
-          </span>
-        ))}
+      <div className="overview-score-orb">
+        <span>Constituency Health</span>
+        <strong>{score}</strong>
+        <small>{confidence}% AI confidence · {formatCount(signals)} citizen signals</small>
       </div>
     </div>
   );
@@ -1224,16 +1203,7 @@ function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; se
             <button onClick={() => setPage("map")} type="button">View GIS map</button>
           </div>
         </div>
-        <HealthGauge
-          score={healthScore}
-          segments={[
-            { label: "AI Confidence", value: avgConfidence, color: "#0ea5e9" },
-            { label: "Signal Quality", value: 100 - Math.min(42, dashboard.totals.botRisk === "high" ? 38 : dashboard.totals.botRisk === "medium" ? 18 : 6), color: "#22c55e" },
-            { label: "Delivery", value: Math.round(average(projects.map((p) => p.progress))), color: "#f59e0b" },
-            { label: "Coverage", value: Math.min(100, dashboard.totals.wards * 4 + 48), color: "#8b5cf6" },
-          ]}
-          signals={totalDemand}
-        />
+        <HealthGauge score={healthScore} signals={totalDemand} confidence={avgConfidence} />
       </section>
 
       <section className="overview-kpi-grid">
@@ -2136,6 +2106,23 @@ function loadMapplsMaps(key: string): Promise<void> {
   return window.__loksetuMapplsPromise;
 }
 
+function CollapsiblePanel({ title, icon: Icon, children, defaultOpen = false }: {
+  title: string; icon: typeof FileText; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={`copilot-collapsible ${open ? "is-open" : ""}`}>
+      <button className="copilot-collapsible-header" onClick={() => setOpen((v) => !v)} type="button">
+        <div className="panel-title" style={{ margin: 0 }}>
+          <h3><Icon size={18} /> {title}</h3>
+        </div>
+        <ChevronDown size={15} className="copilot-collapsible-chevron" />
+      </button>
+      {open ? <div className="copilot-collapsible-body">{children}</div> : null}
+    </section>
+  );
+}
+
 function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[] }) {
   const prompts = ["Compare roads vs healthcare", "Which villages lack PHCs?", "Show delayed projects", "Summarize citizen feedback"];
   const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
@@ -2158,6 +2145,7 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState("Assistant actions ready.");
   const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -2246,6 +2234,8 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
     setActionNotice(`${format} generated and downloaded.`);
   }
 
+  const latestAnswerId = [...messages].reverse().find((m) => m.answer)?.id;
+
   return (
     <section className="rag-command-page">
       <header className="rag-hero">
@@ -2254,9 +2244,8 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
           <p>Ask anything. Answers are backed by real data and sources.</p>
         </div>
         <div className="rag-hero-actions">
-          <span>AI Confidence <b>{confidence}%</b></span>
-          <button onClick={() => { setHistoryOpen((value) => !value); setActionNotice(historyOpen ? "History closed." : "History opened."); }} type="button">History</button>
-          <button className="primary" onClick={() => { setMessages((current) => current.slice(0, 1)); setActionNotice("Started a new query thread."); }} type="button">New Query</button>
+          <button onClick={() => { setHistoryOpen((v) => !v); setActionNotice(historyOpen ? "History closed." : "History opened."); }} type="button">History</button>
+          <button className="primary" onClick={() => { setMessages((c) => c.slice(0, 1)); setActionNotice("Started a new query thread."); }} type="button">New Query</button>
         </div>
       </header>
       {historyOpen ? (
@@ -2267,142 +2256,185 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
       ) : null}
       <p className="action-status" role="status">{actionNotice}</p>
 
-      <section className="rag-filters" aria-label="RAG filters">
-        <label>Mode
-          <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)} aria-label="RAG mode">
-            <option value="online">Online mode</option>
-            <option value="submitted">Submitted issue mode</option>
-            <option value="all">All mode</option>
-          </select>
-        </label>
-        <label>State
-          <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}>
-            {["Punjab", "Delhi", "Uttar Pradesh", "Tamil Nadu", "West Bengal", "Maharashtra"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-        <label>District
-          <select value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}>
-            {["Ludhiana", "Central Delhi", "Lucknow", "Chennai", "Kolkata", "Nashik Rural"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-        <label>Constituency
-          <select value={constituencyFilter} onChange={(event) => setConstituencyFilter(event.target.value)}>
-            {["Ludhiana South", "Central Delhi", "Lucknow", "Chennai Central", "Kolkata East"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-        <label>Time Range
-          <select value={timeRange} onChange={(event) => setTimeRange(event.target.value)}>
-            {["Last 30 Days", "Last 1 Year", "Last 2 Years", "Current Batch"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-        <label>Topic
-          <select value={topic} onChange={(event) => setTopic(event.target.value)}>
-            {["Roads", "Water", "Healthcare", "Education", "Employment", "Sanitation"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-      </section>
+      <div className="copilot-layout">
 
-      <section className="rag-layout">
-        <main className="rag-main">
-          <form className="rag-query-box" onSubmit={(event) => { event.preventDefault(); askCopilot(); }}>
-            <input aria-label="RAG question" value={question} onChange={(event) => setQuestion(event.target.value)} />
-            <button className="primary" disabled={busy || !question.trim()} type="submit">Ask AI</button>
-          </form>
-          <div className="prompt-strip rag-prompts">
-            <span>Suggested Questions:</span>
-            {prompts.map((prompt) => <button disabled={busy} key={prompt} onClick={() => askFollowUp(prompt)} type="button">{prompt}</button>)}
-          </div>
-          {error ? <div className="error-state">{error}</div> : null}
-          {streamingSteps.length ? (
-            <div className="rag-stream-status" role="status" aria-live="polite">
-              {streamingSteps.map((step, index) => <span key={`${step}-${index}`}>{step}</span>)}
-            </div>
-          ) : null}
+        {/* ── LEFT — chat thread + composer ── */}
+        <main className="copilot-chat-col">
+          <section className="panel copilot-thread" aria-label="Chat thread" ref={threadRef}>
 
-          <section className="panel rag-answer-card" aria-label="AI answer">
-            <header>
-              <strong>AI Answer</strong>
-              <mark>{latestAnswer ? `${latestAnswer.mode ?? mode} grounded` : `${mode} ready`}</mark>
-            </header>
-            <div className="rag-answer-grid">
-              <div ref={threadRef}>
-                {latestAnswer ? <AnswerContent text={latestAnswer.answer} /> : <p>Ask a question to retrieve online sources, submitted issues, or both. Current mode: {mode}.</p>}
-                {busy ? <p>Retrieving JanVaani records and preparing a grounded answer...</p> : null}
-                <h4>AI Recommendation</h4>
-                <ul className="check-list">
-                  {(latestAnswer?.suggestedActions ?? ["Use a specific ward, district, and topic for better grounding.", "Switch modes to control source coverage."]).slice(0, 4).map((item) => <li key={item}>{item}</li>)}
-                </ul>
+            {/* Welcome / empty state */}
+            {messages.length <= 1 ? (
+              <div className="copilot-welcome">
+                <Bot size={40} className="copilot-welcome-icon" />
+                <p>Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today.</p>
+                <div className="copilot-followup-chips">
+                  {["Why is River Market high priority?", "Which scheme can fund this?", "What changed since yesterday?", "Generate a district-officer briefing."].map((chip) => (
+                    <button key={chip} disabled={busy} onClick={() => askFollowUp(chip)} type="button" className="copilot-chip">{chip}</button>
+                  ))}
+                </div>
               </div>
-              <aside>
-                <Metric label="Expected Impact" value={selectedProject ? `${formatCount(Math.max(1, selectedProject.demandCount * 1800))}` : "2.1 Lakh"} detail="Citizens benefited" />
-                <Metric label="Confidence Score" value={`${confidence}%`} detail={`Based on ${sourceCounts.length} source groups`} />
-              </aside>
-            </div>
+            ) : null}
+
+            {/* Message bubbles */}
+            {messages.map((msg) => (
+              <div key={msg.id} className={msg.role === "user" ? "copilot-msg copilot-msg--user" : "copilot-msg copilot-msg--ai"}>
+                {msg.role === "assistant" ? (
+                  <div className="copilot-msg-avatar" aria-hidden="true"><Bot size={16} /></div>
+                ) : null}
+                <div className="copilot-msg-body">
+                  {msg.answer ? <AnswerContent text={msg.answer.answer} /> : <p>{msg.text}</p>}
+                  {msg.answer ? (
+                    <div className="copilot-msg-meta">
+                      <mark className="copilot-confidence-badge">{msg.answer.confidence ?? confidence}% confidence</mark>
+                      <span className="copilot-source-count">{buildGroundingSources(msg.answer, ragStatus).length} source groups</span>
+                    </div>
+                  ) : null}
+                  {msg.answer && msg.id === latestAnswerId ? (
+                    <div className="copilot-ai-recs">
+                      <h4>AI Recommendation</h4>
+                      <ul className="check-list">
+                        {(msg.answer.suggestedActions ?? ["Use a specific ward, district, and topic for better grounding.", "Switch modes to control source coverage."]).slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+
+            {streamingSteps.length ? (
+              <div className="copilot-msg copilot-msg--ai" role="status" aria-live="polite">
+                <div className="copilot-msg-avatar" aria-hidden="true"><Bot size={16} /></div>
+                <div className="copilot-thinking-steps">
+                  {streamingSteps.map((step, index) => (
+                    <span key={`${step}-${index}`} className="copilot-thinking-pill" style={{ animationDelay: `${index * 0.15}s` }}>{step}</span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {error ? <div className="error-state">{error}</div> : null}
           </section>
 
-          <section className="rag-evidence-grid">
-            <section className="panel rag-evidence-list" aria-label="Key evidence">
-              <PanelTitle title="Key Evidence" icon={CheckCircle2} />
+          {/* Composer */}
+          <div className="copilot-input-area">
+            <div className="copilot-suggested-chips">
+              {prompts.map((p) => (
+                <button key={p} disabled={busy} onClick={() => askFollowUp(p)} type="button" className="copilot-chip copilot-chip--sm">{p}</button>
+              ))}
+            </div>
+            <div className="copilot-composer-wrap">
+              {filtersOpen ? (
+                <div className="copilot-advanced-filters">
+                  <label>State<select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>{["Punjab","Delhi","Uttar Pradesh","Tamil Nadu","West Bengal","Maharashtra"].map((item) => <option key={item}>{item}</option>)}</select></label>
+                  <label>District<select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)}>{["Ludhiana","Central Delhi","Lucknow","Chennai","Kolkata","Nashik Rural"].map((item) => <option key={item}>{item}</option>)}</select></label>
+                  <label>Constituency<select value={constituencyFilter} onChange={(e) => setConstituencyFilter(e.target.value)}>{["Ludhiana South","Central Delhi","Lucknow","Chennai Central","Kolkata East"].map((item) => <option key={item}>{item}</option>)}</select></label>
+                  <label>Time Range<select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>{["Last 30 Days","Last 1 Year","Last 2 Years","Current Batch"].map((item) => <option key={item}>{item}</option>)}</select></label>
+                  <label>Topic<select value={topic} onChange={(e) => setTopic(e.target.value)}>{["Roads","Water","Healthcare","Education","Employment","Sanitation"].map((item) => <option key={item}>{item}</option>)}</select></label>
+                </div>
+              ) : null}
+              <form className="copilot-composer" onSubmit={(event) => { event.preventDefault(); askCopilot(); }}>
+                <textarea
+                  className="copilot-input"
+                  aria-label="Ask a question"
+                  value={question}
+                  rows={2}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); askCopilot(); } }}
+                  placeholder="Ask about any priority, project, source, or budget path…"
+                />
+                <div className="copilot-composer-toolbar">
+                  <div className="copilot-mode-toggle" role="group" aria-label="Answer mode">
+                    {([
+                      { value: "all", label: "All", icon: Sparkles },
+                      { value: "submitted", label: "Submitted Issues", icon: MessageSquareText },
+                      { value: "online", label: "Online", icon: Globe2 }
+                    ] as const).map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          className={`copilot-mode-btn ${mode === item.value ? "active" : ""}`}
+                          onClick={() => setMode(item.value)}
+                          aria-pressed={mode === item.value}
+                          title={`${item.label} sources`}
+                        >
+                          <Icon size={15} /> <span>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button className="copilot-filter-toggle" type="button" onClick={() => setFiltersOpen((v) => !v)} aria-expanded={filtersOpen}>
+                    Filters {filtersOpen ? "▲" : "▼"}
+                  </button>
+                  <div style={{ flex: 1 }} />
+                  <button className="copilot-send-btn" disabled={busy || !question.trim()} type="submit">
+                    <Send size={15} /> Ask AI
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </main>
+
+        {/* ── RIGHT — sidebar panels ── */}
+        <aside className="copilot-sidebar">
+          <div className="copilot-metrics">
+            <Metric
+              label="Expected Impact"
+              value={selectedProject ? formatCount(Math.max(1, selectedProject.demandCount * 1800)) : "2.1 Lakh"}
+              detail="Citizens benefited"
+            />
+            <Metric
+              label="Confidence Score"
+              value={`${confidence}%`}
+              detail={`Based on ${sourceCounts.length} source groups`}
+            />
+          </div>
+          <div className="copilot-accordion">
+          <CollapsiblePanel title="Export Answer" icon={FileText}>
+            <div className="rag-export-grid">
+              {["Export PDF","Export Word","Export PPT","Share Answer"].map((item) => <button key={item} onClick={() => exportAnswer(item)} type="button">{item}</button>)}
+            </div>
+          </CollapsiblePanel>
+          <CollapsiblePanel title="Key Evidence" icon={CheckCircle2}>
+            <div className="rag-evidence-list">
               {(evidenceItems.length ? evidenceItems : [{ type: "mode", id: "waiting", title: "No answer yet", snippet: "Run a query to see retrieved sources." }]).map((item, index) => (
                 <article key={`${item.type}-${item.id}`}>
                   <span>{index + 1}</span>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <p>{item.snippet}</p>
-                  </div>
+                  <div><strong>{item.title}</strong><p>{item.snippet}</p></div>
                   <mark>{Math.max(88, confidence - index)}% Match</mark>
                 </article>
               ))}
-            </section>
-            <section className="panel rag-map-card" aria-label="Evidence map">
-              <PanelTitle title="Evidence Map" icon={MapPinned} detail="View Full Map" />
-              <div className="rag-evidence-map">
-                {Array.from({ length: 42 }, (_, index) => <i key={index} style={{ left: `${8 + (index * 17) % 84}%`, top: `${12 + (index * 23) % 72}%` }} />)}
-                <strong>{districtFilter}</strong>
-              </div>
-            </section>
-          </section>
-
-          <section className="rag-bottom-grid">
-            <section className="panel">
-              <PanelTitle title="Timeline of Events" icon={TrendingUp} />
-              <div className="rag-timeline">{["Jul 2024", "Sep 2024", "Nov 2024", "Mar 2025", "Jul 2025", "Jul 2026"].map((item) => <span key={item}>{item}</span>)}</div>
-            </section>
-            <section className="panel">
-              <PanelTitle title="Related Projects" icon={Briefcase} />
-              <div className="rag-project-list">
-                {relatedProjects.map((project) => <button key={project.id} onClick={() => setProjectId(project.id)} type="button"><strong>{project.title}</strong><span>{project.status}</span></button>)}
-              </div>
-            </section>
-            <section className="panel">
-              <PanelTitle title="Ask Follow-up" icon={MessageSquareText} />
-              <div className="rag-followups">{(latestAnswer?.followUpQuestions ?? prompts).slice(0, 4).map((item) => <button disabled={busy} key={item} onClick={() => askFollowUp(item)} type="button">{item}</button>)}</div>
-            </section>
-          </section>
-        </main>
-
-        <aside className="rag-source-rail">
-          <section className="panel">
-            <PanelTitle title={`Grounded By (${sourceCounts.reduce((sum, item) => sum + item.count, 0)} Sources)`} icon={Database} detail="View All" />
+            </div>
+          </CollapsiblePanel>
+          <CollapsiblePanel title="Evidence Map" icon={MapPinned}>
+            <div className="rag-evidence-map">
+              {Array.from({ length: 42 }, (_, index) => <i key={index} style={{ left: `${8 + (index * 17) % 84}%`, top: `${12 + (index * 23) % 72}%` }} />)}
+              <strong>{districtFilter}</strong>
+            </div>
+          </CollapsiblePanel>
+          <CollapsiblePanel title="Related Projects" icon={Briefcase}>
+            <div className="rag-project-list">
+              {relatedProjects.map((project) => <button key={project.id} onClick={() => setProjectId(project.id)} type="button"><strong>{project.title}</strong><span>{project.status}</span></button>)}
+            </div>
+          </CollapsiblePanel>
+          <CollapsiblePanel title="Timeline of Events" icon={TrendingUp}>
+            <div className="rag-timeline">{["Jul 2024","Sep 2024","Nov 2024","Mar 2025","Jul 2025","Jul 2026"].map((item) => <span key={item}>{item}</span>)}</div>
+          </CollapsiblePanel>
+          <CollapsiblePanel title={`Grounded By (${sourceCounts.reduce((sum, item) => sum + item.count, 0)} Sources)`} icon={Database}>
             <div className="rag-grounded-list">
               {sourceCounts.map((item) => <button key={item.label} onClick={() => setActionNotice(`${item.label} selected with ${formatCount(item.count)} supporting records.`)} type="button"><span>{item.icon}</span><strong>{item.label}</strong><em>{formatCount(item.count)}</em></button>)}
             </div>
-          </section>
-          <section className="panel">
-            <PanelTitle title="How AI Reached This Answer" icon={Scale} detail="View Details" />
+          </CollapsiblePanel>
+          <CollapsiblePanel title="How AI Reached This Answer" icon={Scale}>
             <div className="rag-donut-card">
               <strong>{confidence}%<span>Confidence</span></strong>
               {sourceCounts.slice(0, 6).map((item) => <p key={item.label}>{item.label}<b>{Math.max(4, Math.round((item.count / Math.max(1, sourceCounts[0]?.count ?? 1)) * 42))}%</b></p>)}
             </div>
-          </section>
-          <section className="panel">
-            <PanelTitle title="Export Answer" icon={FileText} />
-            <div className="rag-export-grid">
-              {["Export PDF", "Export Word", "Export PPT", "Share Answer"].map((item) => <button key={item} onClick={() => exportAnswer(item)} type="button">{item}</button>)}
-            </div>
-          </section>
+          </CollapsiblePanel>
+          </div>
         </aside>
-      </section>
+      </div>
     </section>
   );
 }
