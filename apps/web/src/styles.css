@@ -7197,6 +7197,12 @@ button.problem-row.selected {
   display: grid;
   gap: 8px;
 }
+.rag-export-grid button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.rag-export-grid button svg { color: #5b35f5; flex-shrink: 0; }
 
 .rag-project-list button,
 .rag-followups button,
@@ -9418,23 +9424,27 @@ button.problem-row.selected {
 .reports-table mark { justify-self: start; border-radius: 999px; background: #eef2ff; color: #4338ca; padding: 5px 8px; font-size: 10px; font-weight: 900; text-transform: uppercase; }
 .reports-share-card div { display: flex; gap: 10px; flex-wrap: wrap; }
 
-.recommendations-page { display: grid; gap: 16px; min-width: 0; }
-.rec-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(480px, 0.9fr); gap: 22px; align-items: center; padding: 22px; background: linear-gradient(135deg, #fff, #f8fbff); }
-.rec-hero h3 { margin: 0; color: var(--ink); font-family: var(--font-display); font-size: 30px; font-weight: 850; letter-spacing: -0.4px; }
-.rec-hero p { margin: 7px 0 0; color: var(--muted); line-height: 1.55; }
-.rec-impact-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.rec-impact-grid article { border: 1px solid var(--line); border-radius: 11px; background: #fff; padding: 13px; }
-.rec-impact-grid span { display: block; color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: 0.7px; text-transform: uppercase; }
-.rec-impact-grid strong { display: block; margin-top: 6px; color: var(--ink); font-family: var(--font-display); font-size: 20px; font-weight: 850; }
-.rec-filterbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 12px; position: sticky; top: 0; z-index: 6; }
+.recommendations-page { display: grid; gap: 12px; min-width: 0; }
+.rec-header { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
+.rec-header-top { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 12px 16px; }
+.rec-header-title h3 { margin: 2px 0 0; }
+.rec-header-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--line); background: #fafbfe; position: sticky; top: 0; z-index: 6; }
+.rec-header-title h3 { margin: 2px 0 0; color: var(--ink); font-family: var(--font-display); font-size: 19px; font-weight: 850; letter-spacing: -0.3px; }
+.rec-impact-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.rec-impact-grid article { display: flex; align-items: baseline; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: #f8fafc; padding: 5px 12px; }
+.rec-impact-grid span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.3px; text-transform: uppercase; }
+.rec-impact-grid strong { color: var(--ink); font-family: var(--font-display); font-size: 14px; font-weight: 850; }
+
 .rec-filter-tabs { display: flex; gap: 9px; flex-wrap: wrap; }
 .rec-jump-links { display: inline-flex; align-items: center; gap: 8px; }
 .rec-jump-links span { color: var(--muted); font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; }
 .rec-jump-links button { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #dbe0ea; border-radius: 8px; background: #f8fafc; color: #475569; padding: 7px 11px; font-size: 12px; font-weight: 800; cursor: pointer; transition: border-color 0.12s, color 0.12s; }
 .rec-jump-links button:hover { border-color: #5b35f5; color: #5b35f5; }
 .rec-jump-links button::after { content: "\2193"; font-weight: 700; }
-.rec-filterbar button { border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); padding: 9px 12px; font-size: 12px; font-weight: 850; }
-.rec-filterbar button.active { border-color: #245c3d; background: #eaf7ef; color: #166534; box-shadow: inset 0 0 0 1px rgba(22, 101, 52, 0.12); }
+.rec-filter-tabs button { border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); padding: 8px 13px; font-size: 12px; font-weight: 800; cursor: pointer; transition: border-color 0.12s, background 0.12s, color 0.12s; }
+.rec-filter-tabs button:hover { border-color: #b9c0d4; }
+.rec-filter-tabs button:focus-visible { outline: none; }
+.rec-filter-tabs button.active { border-color: #5b35f5; background: #f1f0ff; color: #4c1ed9; }
 .rec-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; height: 760px; }
 .rec-map-column { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .rec-map-block { display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
@@ -9452,9 +9462,9 @@ button.problem-row.selected {
 .rec-map-hint { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: #64748b; font-size: 12px; font-weight: 600; }
 .rec-map-hint svg { color: #5b35f5; flex-shrink: 0; }
 .rec-ranked-list, .rec-map-panel, .rec-reasoning, .rec-cost, .rec-districts, .rec-budget, .rec-table-card { display: grid; gap: 14px; align-content: start; padding: 16px; }
-.rec-ranked-list { display: flex; flex-direction: column; gap: 14px; align-content: initial; min-height: 0; overflow: hidden; }
+.rec-ranked-list { display: flex; flex-direction: column; gap: 14px; align-content: initial; align-self: start; max-height: 100%; min-height: 0; overflow: hidden; }
 .rec-card-list { display: grid; gap: 12px; }
-.rec-card-list--scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.rec-card-list--scroll { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .rec-card-list--scroll::-webkit-scrollbar { width: 8px; }
 .rec-card-list--scroll::-webkit-scrollbar-thumb { background: #dbe0ea; border-radius: 999px; }
 .rec-card { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 13px; background: #fff; padding: 14px; cursor: pointer; transition: border-color 0.14s, box-shadow 0.14s; }
@@ -9833,7 +9843,7 @@ button.problem-row.selected {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .rec-filterbar button {
+  .rec-filter-tabs button {
     flex: 1 1 140px;
   }
 

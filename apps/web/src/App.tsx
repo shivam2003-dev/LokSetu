@@ -13,6 +13,10 @@ import {
   Eye,
   EyeOff,
   FileText,
+  FileType,
+  Presentation,
+  Printer,
+  Share2,
   Flag,
   Globe2,
   GraduationCap,
@@ -44,6 +48,7 @@ import {
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import PptxGenJS from "pptxgenjs";
 import { DemandSignalsPage } from "./DemandSignals";
 
 const janVaaniLogo = "/images/JanVaniRobo.png";
@@ -817,7 +822,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
-        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} /> : null}
+        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} /> : null}
         {page === "priorities" ? <PriorityDeskPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} setPage={setPage} /> : null}
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
@@ -826,8 +831,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
         {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
-        {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} /> : null}
-        {page === "reports" ? <ReportsPage dashboard={dashboard} /> : null}
+        {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
+        {page === "reports" ? <ReportsPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
         {page === "compare" ? <ComparePage /> : null}
         {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
       </section>
@@ -1186,8 +1191,9 @@ function HealthGauge({ score, signals, confidence }: { score: number; signals: n
   );
 }
 
-function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; setPage: (page: Page) => void }) {
+function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"] }) {
   const projects = buildManagedProjects(dashboard.projects);
+  const [selectedHotspotId, setSelectedHotspotId] = useState("");
   const topPriorities = projects.slice(0, 5);
   const totalDemand = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
   const avgConfidence = Math.round(average(dashboard.projects.map((project) => project.confidence)) * 100) || 86;
@@ -1266,12 +1272,23 @@ function OverviewPage({ dashboard, setPage }: { dashboard: DashboardResponse; se
 
         <section className="panel overview-map-panel">
           <PanelTitle title="Demand Hotspots" icon={MapPinned} detail="affected regions" />
-          <div className="overview-mini-map">
-            {topPriorities.slice(0, 8).map((project, index) => (
-              <i key={project.id} style={{ left: `${14 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 32}%` }}>{project.score}</i>
-            ))}
-            <span>Constituency boundary</span>
-          </div>
+          <RecommendationMap
+            maps={maps}
+            points={projects.slice(0, 20).map((project, index) => {
+              const hs = dashboard.hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? dashboard.hotspots[index];
+              return {
+                projectId: project.id,
+                lat: hs?.lat ?? seededLatLng(index).lat,
+                lng: hs?.lng ?? seededLatLng(index).lng,
+                ward: project.ward,
+                category: project.category,
+                score: project.score,
+                band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
+              };
+            })}
+            selectedId={selectedHotspotId}
+            onSelect={setSelectedHotspotId}
+          />
         </section>
       </section>
 
@@ -2249,9 +2266,75 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
 
   function exportAnswer(format: string) {
     const text = latestAnswer?.answer ?? messages[messages.length - 1]?.text ?? "No answer generated yet.";
-    const filename = `janvaani-answer-${format.toLowerCase().replaceAll(" ", "-")}.txt`;
-    downloadTextFile(filename, `JanVaani AI ${format}\n\n${text}`);
-    setActionNotice(`${format} generated and downloaded.`);
+    const heading = latestAnswer ? `AI Answer · ${latestAnswer.confidence ?? confidence}% confidence` : "JanVaani AI Answer";
+    const sources = latestAnswer?.citations?.map((c, i) => `[${i + 1}] ${c.title}`).join("\n") ?? "";
+
+    if (format === "Export PDF") {
+      const win = window.open("", "_blank");
+      if (!win) { setActionNotice("Allow pop-ups to export the PDF."); return; }
+      win.document.write(`<!doctype html><html><head><title>JanVaani AI Answer</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#0f172a;line-height:1.6}h1{font-size:20px}h2{font-size:14px;color:#475569;margin-top:28px}p{white-space:pre-wrap}small{color:#94a3b8}</style></head><body><h1>${heading}</h1><p>${text.replace(/</g, "&lt;")}</p>${sources ? `<h2>Sources</h2><p>${sources.replace(/</g, "&lt;")}</p>` : ""}<small>Generated by JanVaani AI</small></body></html>`);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 300);
+      setActionNotice("PDF export opened — use the print dialog to save as PDF.");
+      return;
+    }
+
+    if (format === "Share Answer") {
+      const shareText = `JanVaani AI Answer\n\n${text}${sources ? `\n\nSources:\n${sources}` : ""}`;
+      if (navigator.share) {
+        navigator.share({ title: "JanVaani AI Answer", text: shareText }).then(() => setActionNotice("Answer shared.")).catch(() => setActionNotice("Share cancelled."));
+      } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(shareText).then(() => setActionNotice("Answer copied to clipboard.")).catch(() => setActionNotice("Could not copy answer."));
+      } else {
+        setActionNotice("Sharing is not supported in this browser.");
+      }
+      return;
+    }
+
+    if (format === "Export Word") {
+      // .doc via HTML — opens natively in Microsoft Word.
+      const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>JanVaani AI Answer</title></head><body><h1>${heading}</h1><p>${text.replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>${sources ? `<h3>Sources</h3><p>${sources.replace(/\n/g, "<br/>")}</p>` : ""}</body></html>`;
+      const blob = new Blob([html], { type: "application/msword" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "janvaani-answer.doc";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setActionNotice("Word document downloaded.");
+      return;
+    }
+
+    // Export PPT → real .pptx via pptxgenjs
+    try {
+      const pptx = new PptxGenJS();
+      pptx.defineLayout({ name: "WIDE", width: 13.33, height: 7.5 });
+      pptx.layout = "WIDE";
+
+      const title = pptx.addSlide();
+      title.background = { color: "0B1B3A" };
+      title.addText("JanVaani AI", { x: 0.6, y: 2.6, w: 12, h: 0.8, fontSize: 40, bold: true, color: "FFFFFF" });
+      title.addText(heading, { x: 0.6, y: 3.5, w: 12, h: 0.6, fontSize: 20, color: "9DB2CE" });
+
+      const body = pptx.addSlide();
+      body.addText("AI Answer", { x: 0.6, y: 0.4, w: 12, h: 0.6, fontSize: 26, bold: true, color: "0B1B3A" });
+      body.addText(text, { x: 0.6, y: 1.2, w: 12.1, h: 5.6, fontSize: 15, color: "1F2A44", valign: "top", lineSpacingMultiple: 1.2 });
+
+      if (sources) {
+        const src = pptx.addSlide();
+        src.addText("Sources", { x: 0.6, y: 0.4, w: 12, h: 0.6, fontSize: 26, bold: true, color: "0B1B3A" });
+        src.addText(sources, { x: 0.6, y: 1.2, w: 12.1, h: 5.6, fontSize: 15, color: "1F2A44", valign: "top", lineSpacingMultiple: 1.3 });
+      }
+
+      pptx.writeFile({ fileName: "janvaani-answer.pptx" })
+        .then(() => setActionNotice("PowerPoint (.pptx) downloaded."))
+        .catch(() => setActionNotice("Could not generate the presentation."));
+    } catch {
+      setActionNotice("Could not generate the presentation.");
+    }
   }
 
   const latestAnswerId = [...messages].reverse().find((m) => m.answer)?.id;
@@ -2413,7 +2496,14 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
           <div className="copilot-accordion">
           <CollapsiblePanel title="Export Answer" icon={FileText}>
             <div className="rag-export-grid">
-              {["Export PDF","Export Word","Export PPT","Share Answer"].map((item) => <button key={item} onClick={() => exportAnswer(item)} type="button">{item}</button>)}
+              {([
+                { label: "Export PDF", icon: Printer },
+                { label: "Export Word", icon: FileType },
+                { label: "Export PPT", icon: Presentation },
+                { label: "Share Answer", icon: Share2 }
+              ] as const).map(({ label, icon: Icon }) => (
+                <button key={label} onClick={() => exportAnswer(label)} type="button"><Icon size={15} /> {label}</button>
+              ))}
             </div>
           </CollapsiblePanel>
           <CollapsiblePanel title="Key Evidence" icon={CheckCircle2}>
@@ -2889,7 +2979,7 @@ type ManagedProject = RankedProject & {
   deliveryStatus: ManagedProjectStatus;
 };
 
-function ProjectsManagementPage({ dashboard }: { dashboard: DashboardResponse }) {
+function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: ClientConfig["maps"] }) {
   const managedProjects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
   const [selectedProjectId, setSelectedProjectId] = useState(managedProjects[0]?.id ?? fallbackProject.id);
   const [projectAction, setProjectAction] = useState("Project actions ready.");
@@ -2996,14 +3086,23 @@ function ProjectsManagementPage({ dashboard }: { dashboard: DashboardResponse })
 
         <section className="panel pm-map-card">
           <PanelTitle title="District Project Map" icon={MapPinned} detail="interactive portfolio geography" />
-          <div className="pm-district-map">
-            {managedProjects.slice(0, 10).map((project, index) => (
-              <button className={`pm-map-pin ${project.deliveryStatus}`} key={project.id} onClick={() => setSelectedProjectId(project.id)} style={{ left: `${14 + (index % 5) * 18}%`, top: `${18 + Math.floor(index / 5) * 38}%` }} type="button">
-                {index + 1}
-              </button>
-            ))}
-            <span>District boundary</span>
-          </div>
+          <RecommendationMap
+            maps={maps}
+            points={managedProjects.slice(0, 20).map((project, index) => {
+              const hs = dashboard.hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? dashboard.hotspots[index];
+              return {
+                projectId: project.id,
+                lat: hs?.lat ?? seededLatLng(index).lat,
+                lng: hs?.lng ?? seededLatLng(index).lng,
+                ward: project.ward,
+                category: project.category,
+                score: project.score,
+                band: project.deliveryStatus === "completed" ? "Low" : project.deliveryStatus === "delayed" ? "High" : "Medium"
+              };
+            })}
+            selectedId={selectedProjectId}
+            onSelect={setSelectedProjectId}
+          />
         </section>
 
         <section className="panel pm-spend">
@@ -3240,30 +3339,30 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
 
   return (
     <section className="recommendations-page">
-      <section className="panel rec-hero">
-        <div>
-          <p className="eyebrow">AI Recommendations</p>
-          <h3>Prioritized development investments</h3>
-          <p>Rank projects using citizen demand, public datasets, urgency, confidence, budget fit, and expected constituency impact.</p>
+      <section className="panel rec-header">
+        <div className="rec-header-top">
+          <div className="rec-header-title">
+            <p className="eyebrow">AI Recommendations</p>
+            <h3>Prioritized development investments</h3>
+          </div>
+          <div className="rec-impact-grid">
+            <article><span>Budget</span><strong>₹{totalBudget.toFixed(1)} Cr</strong></article>
+            <article><span>Beneficiaries</span><strong>{formatCount(totalBeneficiaries)}</strong></article>
+            <article><span>Top Confidence</span><strong>{top ? Math.round(top.confidence * 100) : 0}%</strong></article>
+            <article><span>High Priority</span><strong>{filtered.filter((project) => project.priorityBand === "High").length}</strong></article>
+          </div>
         </div>
-        <div className="rec-impact-grid">
-          <article><span>Recommended Budget</span><strong>₹{totalBudget.toFixed(1)} Cr</strong></article>
-          <article><span>Beneficiaries</span><strong>{formatCount(totalBeneficiaries)}</strong></article>
-          <article><span>Top Confidence</span><strong>{top ? Math.round(top.confidence * 100) : 0}%</strong></article>
-          <article><span>High Priority</span><strong>{filtered.filter((project) => project.priorityBand === "High").length}</strong></article>
-        </div>
-      </section>
-
-      <section className="panel rec-filterbar">
-        <div className="rec-filter-tabs">
-          {categories.map((item) => (
-            <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)} type="button">{item}</button>
-          ))}
-        </div>
-        <div className="rec-jump-links">
-          <span>Jump to</span>
-          <button type="button" onClick={() => document.getElementById("rec-analytics")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Analytics</button>
-          <button type="button" onClick={() => document.getElementById("rec-table")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Full Table</button>
+        <div className="rec-header-bottom">
+          <div className="rec-filter-tabs">
+            {categories.map((item) => (
+              <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)} type="button">{item}</button>
+            ))}
+          </div>
+          <div className="rec-jump-links">
+            <span>Jump to</span>
+            <button type="button" onClick={() => document.getElementById("rec-analytics")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Analytics</button>
+            <button type="button" onClick={() => document.getElementById("rec-table")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Full Table</button>
+          </div>
         </div>
       </section>
 
@@ -3399,8 +3498,9 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
   );
 }
 
-function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
+function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: ClientConfig["maps"] }) {
   const projects = buildManagedProjects(dashboard.projects);
+  const [selectedMapId, setSelectedMapId] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState("Monthly Report");
   const [reportAction, setReportAction] = useState("Report actions ready.");
   const templates = [
@@ -3488,10 +3588,23 @@ function ReportsPage({ dashboard }: { dashboard: DashboardResponse }) {
 
         <section className="panel report-map-card">
           <PanelTitle title="Map Snapshot" icon={MapPinned} detail="affected regions" />
-          <div className="report-map">
-            {projects.slice(0, 8).map((project, index) => <i key={project.id} style={{ left: `${12 + (index % 4) * 22}%`, top: `${18 + Math.floor(index / 4) * 30}%` }}>{project.score}</i>)}
-            <span>Constituency boundary</span>
-          </div>
+          <RecommendationMap
+            maps={maps}
+            points={projects.slice(0, 20).map((project, index) => {
+              const hs = dashboard.hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? dashboard.hotspots[index];
+              return {
+                projectId: project.id,
+                lat: hs?.lat ?? seededLatLng(index).lat,
+                lng: hs?.lng ?? seededLatLng(index).lng,
+                ward: project.ward,
+                category: project.category,
+                score: project.score,
+                band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
+              };
+            })}
+            selectedId={selectedMapId}
+            onSelect={setSelectedMapId}
+          />
         </section>
 
         <section className="panel report-citations-card">
