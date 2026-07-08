@@ -20,7 +20,7 @@ test.describe("MP/admin web functional flow", () => {
 
     // Overview is the post-login homepage; the priority desk remains the core workflow page.
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-    await expect(page.getByText("Constituency Health", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Constituency intelligence command center" })).toBeVisible();
     await page.goto("/#priorities");
     await expect(page.getByRole("heading", { name: "Ranked development priorities" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Ranked priority queue" })).toBeVisible();
@@ -143,7 +143,7 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page.locator(".hotspot-row").first()).toContainText("Aminabad Basti");
 
-    await expect(page.getByRole("link", { name: "Open JanVaani" })).toHaveAttribute("href", expectedCitizenAppUrl);
+    await expect(page.getByRole("link", { name: "Apni Awaaz" })).toHaveAttribute("href", expectedCitizenAppUrl);
 
     // Web Signals is the Demand Signals Intelligence dashboard.
     await page.getByRole("button", { name: "Demand Signals" }).click();
@@ -184,21 +184,23 @@ test.describe("MP/admin web functional flow", () => {
 
     await page.getByRole("button", { name: /AI Assistant/ }).click();
     await expect(page.getByRole("heading", { name: "Grounded AI Assistant", level: 3 })).toBeVisible();
-    await expect(page.getByLabel("RAG filters")).toBeVisible();
-    await page.getByLabel("RAG mode").selectOption("submitted");
+    const answerMode = page.getByRole("group", { name: "Answer mode" });
+    await expect(answerMode).toBeVisible();
+    await answerMode.getByRole("button", { name: "Submitted Issues" }).click();
+    await expect(answerMode.getByRole("button", { name: "Submitted Issues" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByLabel("India search and locality controls")).toHaveCount(0);
-    await expect(page.getByLabel("AI answer")).toBeVisible();
+    await expect(page.getByLabel("Chat thread")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Key Evidence" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Evidence Map" })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Grounded By/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "How AI Reached This Answer" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Ask Follow-up" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Export Answer" })).toBeVisible();
-    await page.getByLabel("RAG question").fill("latest submitted issue");
+    await page.getByLabel("Ask a question").fill("latest submitted issue");
     await page.getByRole("button", { name: "Ask AI" }).click();
-    await expect(page.getByLabel("AI answer").getByText(/Latest processed submission|No processed citizen submissions/i).first()).toBeVisible();
-    await page.getByLabel("RAG mode").selectOption("online");
-    await page.getByLabel("RAG question").fill("hi");
+    await expect(page.locator(".copilot-msg--ai").filter({ hasText: /Latest processed submission|No processed citizen submissions|submitted citizen/i }).last()).toBeVisible();
+    await answerMode.getByRole("button", { name: "Online" }).click();
+    await expect(answerMode.getByRole("button", { name: "Online" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByLabel("Ask a question").fill("hi");
     await page.getByRole("button", { name: "Ask AI" }).click();
     await expect(page.getByText("Ask me about constituency priorities")).toBeVisible();
     await expect(page.getByText("Copilot query failed")).toHaveCount(0);
@@ -215,7 +217,7 @@ test.describe("MP/admin web functional flow", () => {
   test("all sidebar navigation buttons route to their own working dashboards on every screen size", async ({ page }) => {
     const nav = page.getByLabel("JanVaani navigation");
     const cases = [
-      { button: "Overview", heading: "Overview", marker: "Constituency Health" },
+      { button: "Overview", heading: "Overview", marker: "Constituency intelligence command center" },
       { button: "Demand Signals", heading: "What the web says citizens need", marker: "Demand Signal Score" },
       { button: /AI Assistant/, heading: "Ask why a work ranks high", marker: "Grounded AI Assistant" },
       { button: "Recommendations", heading: "AI-ranked development recommendations", marker: "Project Ranking Table" },
@@ -286,10 +288,11 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".action-status").filter({ hasText: "History opened" })).toBeVisible();
     await page.locator(".rag-grounded-list button").first().click();
     await expect(page.locator(".action-status").filter({ hasText: /selected with .* supporting records/ })).toBeVisible();
-    const answerDownload = page.waitForEvent("download");
+    const answerPopup = page.waitForEvent("popup");
     await page.getByRole("button", { name: "Export PDF" }).click();
-    await answerDownload;
-    await expect(page.locator(".action-status").filter({ hasText: "Export PDF generated" })).toBeVisible();
+    const popup = await answerPopup;
+    await popup.close();
+    await expect(page.locator(".action-status").filter({ hasText: "PDF export opened" })).toBeVisible();
 
     await page.goto("/#knowledge");
     await page.getByRole("button", { name: "Choose files" }).click();
@@ -311,8 +314,11 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".action-status").filter({ hasText: "Before media selected" })).toBeVisible();
 
     await page.goto("/#recommendations");
-    await page.locator(".rec-map-dot").first().click();
-    await expect(page.locator(".action-status").filter({ hasText: "Selected recommendation:" })).toBeVisible();
+    const recommendation = page.locator(".rec-card").nth(1);
+    const recommendationTitle = await recommendation.locator("h4").innerText();
+    await recommendation.click();
+    await expect(recommendation).toHaveClass(/selected/);
+    await expect(page.locator(".rec-reasoning-selected")).toContainText(recommendationTitle);
 
     await page.goto("/#reports");
     await page.getByRole("button", { name: "Constituency Summary" }).click();
