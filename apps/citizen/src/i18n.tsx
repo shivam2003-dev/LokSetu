@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { UI_STRINGS } from "./uiStrings.js";
+import { CITIZEN_TRANSLATIONS, CITIZEN_BUNDLED_LANGUAGES } from "./translations/index.js";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 // Bump this version whenever the UI_STRINGS set changes so stale per-language
@@ -55,8 +56,12 @@ function isEnglishUi(language: string): boolean {
 }
 
 export function I18nProvider({ language, children }: { language: string; children: ReactNode }) {
-  const [translations, setTranslations] = useState<TranslationMap>(() => readCache(language) ?? {});
-  const [ready, setReady] = useState(() => isEnglishUi(language) || Boolean(readCache(language)));
+  const [translations, setTranslations] = useState<TranslationMap>(
+    () => CITIZEN_TRANSLATIONS[language] ?? readCache(language) ?? {}
+  );
+  const [ready, setReady] = useState(
+    () => isEnglishUi(language) || Boolean(CITIZEN_TRANSLATIONS[language]) || Boolean(readCache(language))
+  );
 
   useEffect(() => {
     if (isEnglishUi(language)) {
@@ -64,12 +69,21 @@ export function I18nProvider({ language, children }: { language: string; childre
       setReady(true);
       return;
     }
+    // 1. Bundled static translations — instant, no network needed
+    const bundled = CITIZEN_TRANSLATIONS[language] ?? null;
+    if (bundled) {
+      setTranslations(bundled);
+      setReady(true);
+      return;
+    }
+    // 2. localStorage cache
     const cached = readCache(language);
     if (cached) {
       setTranslations(cached);
       setReady(true);
       return;
     }
+    // 3. Fetch from API (non-bundled languages)
     let cancelled = false;
     setReady(false);
     fetch(`${apiBase}/api/citizen/ui-translations`, {
@@ -82,26 +96,13 @@ export function I18nProvider({ language, children }: { language: string; childre
         if (cancelled) return;
         const map = payload?.translations ?? {};
         setTranslations(map);
-        // Only persist non-empty results. Caching an empty map would make the
-        // language appear "translated" (a cache hit) and block future retries.
         if (Object.keys(map).length) {
-          try {
-            localStorage.setItem(cacheKey(language), JSON.stringify(map));
-          } catch {
-            // Ignore quota / privacy-mode storage failures; translation still works this session.
-          }
+          try { localStorage.setItem(cacheKey(language), JSON.stringify(map)); } catch { /* quota */ }
         }
       })
-      .catch(() => {
-        // Network failure: keep English. The app remains fully usable.
-        if (!cancelled) setTranslations({});
-      })
-      .finally(() => {
-        if (!cancelled) setReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => { if (!cancelled) setTranslations({}); })
+      .finally(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
   }, [language]);
 
   const t = useCallback((source: string) => translations[source] ?? source, [translations]);
