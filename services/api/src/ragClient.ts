@@ -125,7 +125,7 @@ export async function ragServiceStatus() {
       graph: "langgraph",
       tracing: "langsmith",
       context: "langchain-document",
-      nodes: ["embed_query", "hybrid_retrieve", "rerank_context", "grounded_answer"]
+      nodes: ["embed_query", "hybrid_retrieve", "rerank_context", "evaluate_retrieval", "grounded_answer"]
     },
     corpusDocuments: payload.stats.chunks,
     bySource: payload.documents.reduce<Record<string, number>>((acc, document) => {

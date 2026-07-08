@@ -224,7 +224,7 @@ test.describe("API functional flow", () => {
     expect(copilotPayload.answer).not.toContain("Kalindi Nagar");
     expect(copilotPayload.answer).not.toContain(globalPriorities.projects[0].title);
     expect(copilotPayload.guardrails.length).toBeGreaterThan(0);
-    expect(["not-configured", "pgvector-hybrid", "pgvector-hybrid-no-match"]).toContain(copilotPayload.retrieval.mode);
+    expect(["not-configured", "pgvector-hybrid", "pgvector-hybrid-no-match", "pgvector-hybrid-crag", "pgvector-hybrid-crag-ambiguous", "pgvector-hybrid-crag-no-match"]).toContain(copilotPayload.retrieval.mode);
     expect(JSON.stringify(copilotPayload)).not.toContain("username");
 
     const onlineAnswer = await api.post("/api/copilot/query", {
@@ -243,6 +243,25 @@ test.describe("API functional flow", () => {
     for (const item of onlinePayload.citations as Array<{ url?: string }>) {
       expect(item.url).toMatch(/^https?:\/\//);
     }
+
+    const chipQuestions = [
+      "Compare roads vs healthcare",
+      "Which villages lack PHCs?",
+      "Show delayed projects",
+      "Summarize citizen feedback"
+    ];
+    const chipAnswers = await Promise.all(chipQuestions.map(async (question) => {
+      const answer = await api.post("/api/copilot/query", {
+        data: { role: "mp", language: "English", mode: "submitted", question }
+      });
+      await expect(answer).toBeOK();
+      return (await answer.json()) as { answer: string };
+    }));
+    expect(new Set(chipAnswers.map((item) => item.answer)).size).toBe(chipQuestions.length);
+    expect(chipAnswers[0].answer).toContain("Roads vs healthcare");
+    expect(chipAnswers[1].answer).not.toContain("Top current priorities");
+    expect(chipAnswers[2].answer).not.toContain("Top current priorities");
+    expect(chipAnswers[3].answer).toContain("Citizen feedback summary");
 
     const shortGreeting = await api.post("/api/copilot/query", {
       data: { role: "mp", language: "English", question: "hi" }

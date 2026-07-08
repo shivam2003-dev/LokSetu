@@ -8,7 +8,8 @@ import { cacheHits, indexedChunks, indexedDocuments, retrievalMisses, stageLaten
 import { RagAnswer, RagQuery, RetrievalResult } from "./types.js";
 
 const noResultAnswer = "No indexed documents match the query.";
-const graphNodes = ["embed_query", "hybrid_retrieve", "rerank_context", "grounded_answer"];
+const graphNodes = ["embed_query", "hybrid_retrieve", "rerank_context", "evaluate_retrieval", "grounded_answer"];
+type CragAction = "correct" | "ambiguous" | "incorrect";
 
 type RagConfig = ReturnType<typeof config>;
 type RagIndexStats = RagAnswer["index"];
@@ -30,6 +31,8 @@ const RagGraphState = Annotation.Root({
   keyword: Annotation<RetrievalResult[]>({ reducer: (_left, right) => right, default: () => [] }),
   retrieved: Annotation<RetrievalResult[]>({ reducer: (_left, right) => right, default: () => [] }),
   contextDocuments: Annotation<Document[]>({ reducer: (_left, right) => right, default: () => [] }),
+  cragAction: Annotation<CragAction>(),
+  cragReason: Annotation<string>(),
   stats: Annotation<RagIndexStats>(),
   answer: Annotation<string>(),
   llmLatencyMs: Annotation<number>()
@@ -128,8 +131,27 @@ const rerankContextNode = traceable(async (state: RagGraphStateType) => {
   processOutputs: (outputs) => ({ retrieved: outputs.retrieved.length, documents: outputs.stats.documents, chunks: outputs.stats.chunks })
 });
 
+const evaluateRetrievalNode = traceable(async (state: RagGraphStateType) => {
+  const evaluation = evaluateRetrievalQuality(state.input.question, state.retrieved, state.minimumConfidence);
+  return {
+    cragAction: evaluation.action,
+    cragReason: evaluation.reason,
+    retrieved: evaluation.action === "incorrect" ? [] : state.retrieved,
+    contextDocuments: evaluation.action === "incorrect" ? [] : state.contextDocuments
+  };
+}, {
+  name: "loksetu.rag.evaluate_retrieval",
+  run_type: "chain",
+  tags: ["loksetu", "rag", "crag", "retrieval-evaluator"],
+  processInputs: (inputs) => {
+    const state = inputs;
+    return { question: state.input.question.slice(0, 240), retrieved: state.retrieved.length, minimumConfidence: state.minimumConfidence };
+  },
+  processOutputs: (outputs) => ({ action: outputs.cragAction, reason: outputs.cragReason })
+});
+
 const groundedAnswerNode = traceable(async (state: RagGraphStateType) => {
-  if (state.retrieved.length === 0 || (state.requireCitations && state.retrieved.every((item) => !item.sourceUrl && !item.sourceUri))) {
+  if (state.cragAction === "incorrect" || state.retrieved.length === 0 || (state.requireCitations && state.retrieved.every((item) => !item.sourceUrl && !item.sourceUri))) {
     retrievalMisses.inc();
     return {
       answer: noResultAnswer,
@@ -157,11 +179,13 @@ const ragGraph = new StateGraph(RagGraphState)
   .addNode("embed_query", async (state: RagGraphStateType) => embedQueryNode(state))
   .addNode("hybrid_retrieve", async (state: RagGraphStateType) => hybridRetrieveNode(state))
   .addNode("rerank_context", async (state: RagGraphStateType) => rerankContextNode(state))
+  .addNode("evaluate_retrieval", async (state: RagGraphStateType) => evaluateRetrievalNode(state))
   .addNode("grounded_answer", async (state: RagGraphStateType) => groundedAnswerNode(state))
   .addEdge(START, "embed_query")
   .addEdge("embed_query", "hybrid_retrieve")
   .addEdge("hybrid_retrieve", "rerank_context")
-  .addEdge("rerank_context", "grounded_answer")
+  .addEdge("rerank_context", "evaluate_retrieval")
+  .addEdge("evaluate_retrieval", "grounded_answer")
   .addEdge("grounded_answer", END)
   .compile();
 
@@ -199,7 +223,7 @@ const tracedRunRagGraph = traceable(async (input: RagQuery): Promise<RagAnswer> 
         totalLatencyMs: Date.now() - started
       },
       index: state.stats,
-      retrievalMode: "pgvector-hybrid-no-match",
+      retrievalMode: "pgvector-hybrid-crag-no-match",
       orchestration: orchestrationMeta()
     };
   }
@@ -223,7 +247,7 @@ const tracedRunRagGraph = traceable(async (input: RagQuery): Promise<RagAnswer> 
       totalLatencyMs: Date.now() - started
     },
     index: state.stats,
-    retrievalMode: "pgvector-hybrid",
+    retrievalMode: state.cragAction === "ambiguous" ? "pgvector-hybrid-crag-ambiguous" : "pgvector-hybrid-crag",
     orchestration: orchestrationMeta()
   };
 }, {
@@ -264,6 +288,24 @@ export function isRelevantToQuery(question: string, item: RetrievalResult, simil
   const overlap = queryTokens.filter((token) => contentTokens.has(token));
   if (overlap.length > 0 || item.keywordScore > 0.05) return true;
   return item.vectorScore >= Math.max(0.62, similarityThreshold * 6);
+}
+
+export function evaluateRetrievalQuality(question: string, retrieved: RetrievalResult[], minimumConfidence: number): { action: CragAction; reason: string } {
+  if (!retrieved.length) return { action: "incorrect", reason: "no retrieved chunks survived relevance filtering" };
+  const queryTokens = meaningfulTokens(question);
+  const best = retrieved[0];
+  const bestOverlap = queryTokens.length ? tokenOverlapRatio(queryTokens, `${best.title} ${best.section ?? ""} ${best.content} ${JSON.stringify(best.metadata ?? {})}`) : 1;
+  const hasStrongEvidence = best.confidence >= Math.max(minimumConfidence, 0.42) && (bestOverlap >= 0.18 || best.keywordScore > 0.12);
+  const hasUsableEvidence = best.confidence >= minimumConfidence && (bestOverlap > 0 || best.keywordScore > 0.04 || best.vectorScore >= 0.62);
+  if (hasStrongEvidence) return { action: "correct", reason: `best chunk confidence ${best.confidence.toFixed(2)} with query overlap ${bestOverlap.toFixed(2)}` };
+  if (hasUsableEvidence) return { action: "ambiguous", reason: `weak but usable retrieval confidence ${best.confidence.toFixed(2)} with query overlap ${bestOverlap.toFixed(2)}` };
+  return { action: "incorrect", reason: `retrieval confidence ${best.confidence.toFixed(2)} or query overlap ${bestOverlap.toFixed(2)} too low` };
+}
+
+function tokenOverlapRatio(queryTokens: string[], value: string) {
+  if (!queryTokens.length) return 1;
+  const contentTokens = new Set(meaningfulTokens(value));
+  return queryTokens.filter((token) => contentTokens.has(token)).length / queryTokens.length;
 }
 
 function meaningfulTokens(value: string) {

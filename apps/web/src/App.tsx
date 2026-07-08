@@ -341,27 +341,39 @@ const tourStorageKey = "janvaaniTourComplete";
 const tourSteps: Array<{ page: Page; title: string; body: string; action: string }> = [
   {
     page: "overview",
-    title: "Start with constituency health",
-    body: "Overview gives the MP a 360 degree readout: demand, risk, projects, alerts, citizen satisfaction, and AI priority score.",
-    action: "Use this as the evaluator landing view."
+    title: "Start with live constituency health",
+    body: "Overview shows demand, risk, projects, alerts, citizen satisfaction, and the current AI priority score for the selected constituency.",
+    action: "Use this as the MP office command view."
   },
   {
     page: "overview",
     title: "Citizen submission starts the flow",
-    body: "Open JanVaani from the sidebar to submit a citizen issue. The API ingests it, deduplicates signals, ranks demand, and updates dashboards.",
-    action: "Click Open JanVaani for the public submission journey."
+    body: "Open Apni Awaaz to submit a citizen issue. LokSetu ingests it, deduplicates signals, ranks demand, and updates dashboards.",
+    action: "Open Apni Awaaz for the public submission journey."
   },
   {
     page: "signals",
     title: "Demand Signals explains what citizens need",
     body: "Signals combine citizen intake, official rows, documents, news, web sources, search trends, and connector status into ranked issues.",
-    action: "Use state, district, ward, and issue filters to show Delhi demo data."
+    action: "Use this page to inspect source freshness before trusting a recommendation."
   },
   {
     page: "copilot",
-    title: "RAG answers are grounded",
-    body: "The AI Assistant has Online, Submitted Issue, and All modes. Answers cite evidence from reports, complaints, documents, weather, maps, and web signals.",
-    action: "Ask why a road, school, water, or health issue is ranked."
+    title: "AI answers must prove their source",
+    body: "The AI Assistant has All, Submitted Issues, and Online modes. Weak RAG retrieval says no answer instead of repeating a stale fallback.",
+    action: "Ask a specific question and check the references beside the answer."
+  },
+  {
+    page: "knowledge",
+    title: "Knowledge Base controls RAG",
+    body: "Knowledge Base shows indexed documents, vector status, source coverage, and citation health for the assistant.",
+    action: "Use it to confirm the corpus before asking policy or project questions."
+  },
+  {
+    page: "explorer",
+    title: "Data Explorer checks raw evidence",
+    body: "Data Explorer exposes rows and dimensions behind dashboard claims so teams can verify source data before acting.",
+    action: "Open it when a chart, ranking, or AI answer needs audit evidence."
   },
   {
     page: "recommendations",
@@ -384,14 +396,14 @@ const tourSteps: Array<{ page: Page; title: string; body: string; action: string
   {
     page: "reports",
     title: "Reports package the decision",
-    body: "Generate official Monthly, Budget, Demand Signals, Infrastructure, Development, and AI Recommendation reports with exports.",
+    body: "Generate official monthly, budget, demand-signal, infrastructure, development, and AI recommendation reports with exports.",
     action: "Use export buttons for presentation-ready files."
   },
   {
     page: "settings",
     title: "Admin controls keep it governed",
-    body: "Settings cover users, roles, API keys, integrations, vector database health, indexing, audit logs, security, billing, and backups.",
-    action: "Verify connection status and data-source health here."
+    body: "Settings cover users, roles, integrations, vector database health, indexing, audit logs, security, billing, and backups.",
+    action: "Verify connection status and RAG health here."
   }
 ];
 
@@ -937,7 +949,7 @@ function TourOverlay({
   const step = steps[current];
   const isSubmissionStep = current === 1;
   return (
-    <section className="tour-overlay" role="dialog" aria-modal="true" aria-label="JanVaani evaluator tour">
+    <section className="tour-overlay" role="dialog" aria-modal="true" aria-label="LokSetu product tour">
       <div className="tour-card">
         <header>
           <span>Solution tour</span>
@@ -951,7 +963,7 @@ function TourOverlay({
         <mark>{step.action}</mark>
         <footer>
           <button disabled={current === 0} onClick={onBack} type="button">Back</button>
-          {isSubmissionStep ? <button className="secondary" onClick={onOpenCitizen} type="button">Open JanVaani</button> : null}
+          {isSubmissionStep ? <button className="secondary" onClick={onOpenCitizen} type="button">Open Apni Awaaz</button> : null}
           <button className="primary" onClick={onNext} type="button">{current === steps.length - 1 ? "Finish" : "Next"}</button>
         </footer>
       </div>
@@ -2335,24 +2347,18 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
   const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
   const [language, setLanguage] = useState("English");
   const [mode, setMode] = useState<"online" | "submitted" | "all">("all");
-  const [stateFilter, setStateFilter] = useState("Punjab");
-  const [districtFilter, setDistrictFilter] = useState("Ludhiana");
-  const [constituencyFilter, setConstituencyFilter] = useState("Ludhiana South");
-  const [timeRange, setTimeRange] = useState("Last 2 Years");
-  const [topic, setTopic] = useState("Roads");
   const [question, setQuestion] = useState("Why are road complaints increasing in Ludhiana South?");
   const [projectId, setProjectId] = useState("");
   const [messages, setMessages] = useState<Array<{ id: string; role: "assistant" | "user"; text: string; answer?: CopilotAnswer }>>([
     {
       id: "welcome",
       role: "assistant",
-      text: "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current JanVaani AI intelligence corpus and cite the supporting records."
+      text: "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current LokSetu intelligence corpus and cite the supporting records."
     }
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState("Assistant actions ready.");
   const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -2387,19 +2393,15 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
     if (!cleanQuestion || busy) return;
     setBusy(true);
     setError("");
-    setStreamingSteps(["Understanding question and filters"]);
+    setStreamingSteps(["Understanding question"]);
     const userMessage = { id: `user-${Date.now()}`, role: "user" as const, text: cleanQuestion };
     setMessages((current) => [...current, userMessage]);
     if (cleanQuestion === question.trim()) setQuestion("");
-    const groundedQuestion = [
-      cleanQuestion,
-      `Filters: state=${stateFilter}; district=${districtFilter}; constituency=${constituencyFilter}; timeRange=${timeRange}; topic=${topic}; mode=${mode}.`
-    ].join("\n");
     try {
       setStreamingSteps((steps) => [...steps, mode === "online" ? "Fetching live web/news/social signals" : mode === "submitted" ? "Searching submitted citizen issues" : "Searching submitted issues and online signals"]);
       const response = await apiFetch("/api/copilot/query", {
         method: "POST",
-        body: JSON.stringify({ role, mode, language, question: groundedQuestion, projectId: projectId || undefined })
+        body: JSON.stringify({ role, mode, language, question: cleanQuestion, projectId: projectId || undefined })
       });
       if (!response.ok) {
         let message = "Copilot query failed";
@@ -2439,13 +2441,13 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
 
   function exportAnswer(format: string) {
     const text = latestAnswer?.answer ?? messages[messages.length - 1]?.text ?? "No answer generated yet.";
-    const heading = latestAnswer ? `AI Answer · ${latestAnswer.confidence ?? confidence}% confidence` : "JanVaani AI Answer";
+    const heading = latestAnswer ? `AI Answer · ${latestAnswer.confidence ?? confidence}% confidence` : "LokSetu AI Answer";
     const sources = latestAnswer?.citations?.map((c, i) => `[${i + 1}] ${c.title}${c.url ? ` - ${c.url}` : ""}`).join("\n") ?? "";
 
     if (format === "Export PDF") {
       const win = window.open("", "_blank");
       if (!win) { setActionNotice("Allow pop-ups to export the PDF."); return; }
-      win.document.write(`<!doctype html><html><head><title>JanVaani AI Answer</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#0f172a;line-height:1.6}h1{font-size:20px}h2{font-size:14px;color:#475569;margin-top:28px}p{white-space:pre-wrap}small{color:#94a3b8}</style></head><body><h1>${heading}</h1><p>${text.replace(/</g, "&lt;")}</p>${sources ? `<h2>Sources</h2><p>${sources.replace(/</g, "&lt;")}</p>` : ""}<small>Generated by JanVaani AI</small></body></html>`);
+      win.document.write(`<!doctype html><html><head><title>LokSetu AI Answer</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#0f172a;line-height:1.6}h1{font-size:20px}h2{font-size:14px;color:#475569;margin-top:28px}p{white-space:pre-wrap}small{color:#94a3b8}</style></head><body><h1>${heading}</h1><p>${text.replace(/</g, "&lt;")}</p>${sources ? `<h2>Sources</h2><p>${sources.replace(/</g, "&lt;")}</p>` : ""}<small>Generated by LokSetu AI</small></body></html>`);
       win.document.close();
       win.focus();
       setTimeout(() => win.print(), 300);
@@ -2454,9 +2456,9 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
     }
 
     if (format === "Share Answer") {
-      const shareText = `JanVaani AI Answer\n\n${text}${sources ? `\n\nSources:\n${sources}` : ""}`;
+      const shareText = `LokSetu AI Answer\n\n${text}${sources ? `\n\nSources:\n${sources}` : ""}`;
       if (navigator.share) {
-        navigator.share({ title: "JanVaani AI Answer", text: shareText }).then(() => setActionNotice("Answer shared.")).catch(() => setActionNotice("Share cancelled."));
+        navigator.share({ title: "LokSetu AI Answer", text: shareText }).then(() => setActionNotice("Answer shared.")).catch(() => setActionNotice("Share cancelled."));
       } else if (navigator.clipboard) {
         navigator.clipboard.writeText(shareText).then(() => setActionNotice("Answer copied to clipboard.")).catch(() => setActionNotice("Could not copy answer."));
       } else {
@@ -2467,12 +2469,12 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
 
     if (format === "Export Word") {
       // .doc via HTML — opens natively in Microsoft Word.
-      const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>JanVaani AI Answer</title></head><body><h1>${heading}</h1><p>${text.replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>${sources ? `<h3>Sources</h3><p>${sources.replace(/\n/g, "<br/>")}</p>` : ""}</body></html>`;
+      const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>LokSetu AI Answer</title></head><body><h1>${heading}</h1><p>${text.replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>${sources ? `<h3>Sources</h3><p>${sources.replace(/\n/g, "<br/>")}</p>` : ""}</body></html>`;
       const blob = new Blob([html], { type: "application/msword" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "janvaani-answer.doc";
+      link.download = "loksetu-answer.doc";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -2489,7 +2491,7 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
 
       const title = pptx.addSlide();
       title.background = { color: "0B1B3A" };
-      title.addText("JanVaani AI", { x: 0.6, y: 2.6, w: 12, h: 0.8, fontSize: 40, bold: true, color: "FFFFFF" });
+      title.addText("LokSetu AI", { x: 0.6, y: 2.6, w: 12, h: 0.8, fontSize: 40, bold: true, color: "FFFFFF" });
       title.addText(heading, { x: 0.6, y: 3.5, w: 12, h: 0.6, fontSize: 20, color: "9DB2CE" });
 
       const body = pptx.addSlide();
@@ -2502,7 +2504,7 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
         src.addText(sources, { x: 0.6, y: 1.2, w: 12.1, h: 5.6, fontSize: 15, color: "1F2A44", valign: "top", lineSpacingMultiple: 1.3 });
       }
 
-      pptx.writeFile({ fileName: "janvaani-answer.pptx" })
+      pptx.writeFile({ fileName: "loksetu-answer.pptx" })
         .then(() => setActionNotice("PowerPoint (.pptx) downloaded."))
         .catch(() => setActionNotice("Could not generate the presentation."));
     } catch {
@@ -2611,15 +2613,6 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
               ))}
             </div>
             <div className="copilot-composer-wrap">
-              {filtersOpen ? (
-                <div className="copilot-advanced-filters">
-                  <label>State<select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>{["Punjab","Delhi","Uttar Pradesh","Tamil Nadu","West Bengal","Maharashtra"].map((item) => <option key={item}>{item}</option>)}</select></label>
-                  <label>District<select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)}>{["Ludhiana","Central Delhi","Lucknow","Chennai","Kolkata","Nashik Rural"].map((item) => <option key={item}>{item}</option>)}</select></label>
-                  <label>Constituency<select value={constituencyFilter} onChange={(e) => setConstituencyFilter(e.target.value)}>{["Ludhiana South","Central Delhi","Lucknow","Chennai Central","Kolkata East"].map((item) => <option key={item}>{item}</option>)}</select></label>
-                  <label>Time Range<select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>{["Last 30 Days","Last 1 Year","Last 2 Years","Current Batch"].map((item) => <option key={item}>{item}</option>)}</select></label>
-                  <label>Topic<select value={topic} onChange={(e) => setTopic(e.target.value)}>{["Roads","Water","Healthcare","Education","Employment","Sanitation"].map((item) => <option key={item}>{item}</option>)}</select></label>
-                </div>
-              ) : null}
               <form className="copilot-composer" onSubmit={(event) => { event.preventDefault(); askCopilot(); }}>
                 <textarea
                   className="copilot-input"
@@ -2652,9 +2645,6 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
                       );
                     })}
                   </div>
-                  <button className="copilot-filter-toggle" type="button" onClick={() => setFiltersOpen((v) => !v)} aria-expanded={filtersOpen}>
-                    Filters {filtersOpen ? "▲" : "▼"}
-                  </button>
                   <div style={{ flex: 1 }} />
                   <button className="copilot-send-btn" disabled={busy || !question.trim()} type="submit">
                     <Send size={15} /> Ask AI

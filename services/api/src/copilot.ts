@@ -89,13 +89,14 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
       });
   const ragUnavailable = !ragResponse && intent !== "greeting";
   const directAnswer = buildDirectAnswer(query.role, intent, question, project, daily, submissions, projects, mode, onlineContext, onlineSources);
+  const ragHasAnswer = Boolean(ragResponse && ragResponse.retrieved.length > 0 && !isNoMatchAnswer(ragResponse.answer));
   const answer = intent === "greeting"
     ? buildAnswer(query.role, intent, question, project, daily)
     : mode === "online"
       ? directAnswer ?? buildNoOnlineAnswer()
-    : ragResponse && ragResponse.retrieved.length > 0
+    : ragHasAnswer && ragResponse
       ? ragResponse.answer
-      : directAnswer ?? "RAG service is not configured. No production retrieval was executed.";
+      : directAnswer ?? buildNoEvidenceAnswer(mode);
   const retrievedContext = ragResponse?.retrieved.map((item) => ({
     id: item.id,
     title: item.title,
@@ -103,9 +104,9 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     snippet: item.content.slice(0, 260),
     score: Number(item.confidence.toFixed(4))
   })) ?? [];
-  const evidence = retrievedContext.length
+  const evidence = ragHasAnswer && retrievedContext.length
     ? retrievedContext.slice(0, 5).map((item) => ({ type: item.sourceType, text: item.snippet }))
-    : buildDirectEvidence(project, submissions, projects, mode, onlineContext, onlineSources);
+    : buildDirectEvidence(project, submissions, projects, mode, onlineContext, onlineSources, intent);
   const citations = ragResponse?.citations.map((item) =>
     citation("rag_chunk", item.chunkId, `${item.document}${item.page ? ` page ${item.page}` : ""}`, item.source ?? item.documentId, item.sourceUrl)
   ) ?? [];
@@ -121,7 +122,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     agent,
     intent,
     answer,
-    confidence: ragResponse?.retrieved.length ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : directAnswer ? 72 : project ? Math.round(project.confidence * 100) : 0,
+    confidence: ragHasAnswer && ragResponse ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : directAnswer && !isNoMatchAnswer(directAnswer) ? 72 : project ? Math.round(project.confidence * 100) : 0,
     evidence,
     citations: dedupeCitations(mode === "submitted" ? citations : [...onlineCitations, ...citations]),
     retrieval: {
@@ -164,6 +165,10 @@ function classifyIntent(question: string) {
   if (/^(hi|hello|hey|namaste|namaskar|hola)$/i.test(firstLine)) return "greeting";
   if (/(last|latest|recent|newest).*(submitted|submission|problem|complaint|issue)|submitted problem|recent problem/.test(lower)) return "latest_submission";
   if (/(architecture|technical|how.*built|how.*build|rag|retrieval|embedding|pgvector|vertex)/.test(lower)) return "technical_rag";
+  if (/(compare|versus| vs ).*(road|roads).*(health|healthcare|clinic|phc)|(health|healthcare|clinic|phc).*(compare|versus| vs ).*(road|roads)/.test(lower)) return "compare_services";
+  if (/(village|villages|ward|wards).*(lack|missing|without).*(phc|primary health|clinic)|(phc|primary health|clinic).*(lack|missing|without)/.test(lower)) return "phc_gap";
+  if (/(delayed|delay|blocked|behind schedule|stalled|overdue).*(project|projects|work|works)|show delayed/.test(lower)) return "delayed_projects";
+  if (/(citizen feedback|feedback summary|summarize citizen|summarise citizen|complaints summary)/.test(lower)) return "citizen_feedback";
   if (lower.includes("why")) return "explain_priority";
   if (lower.includes("top") || lower.includes("rank")) return "ranked_priorities";
   if (lower.includes("budget") || lower.includes("fund")) return "funding_path";
@@ -311,6 +316,10 @@ function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string
       ...projects.slice(0, 5).map((item, index) => `${index + 1}. ${item.title} (${item.category}, ${item.ward}) - score ${item.score}; ${item.rationale}`)
     ].join("\n");
   }
+  if (intent === "compare_services") return buildCategoryComparison(projects, ["Roads", "Health"]);
+  if (intent === "phc_gap") return buildPhcGapAnswer(projects);
+  if (intent === "delayed_projects") return buildDelayedProjectsAnswer(projects);
+  if (intent === "citizen_feedback") return buildCitizenFeedbackAnswer(submissions);
   if (intent === "briefing") {
     return [
       "Current constituency briefing:",
@@ -335,30 +344,93 @@ function buildNoOnlineAnswer() {
   return "No live online references were available for this query. Switch to Submitted Issues for local LokSetu records or retry Online when public connectors respond.";
 }
 
-function buildDirectEvidence(project: RankedProject | undefined, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string, onlineSources: OnlineSource[] = []) {
+function buildNoEvidenceAnswer(mode: CopilotMode) {
+  if (mode === "submitted") return "No submitted issue or indexed RAG evidence matched this question. Try Online mode for live public sources, or ask a question tied to a known ward, project, or receipt.";
+  return "No local RAG, submitted issue, or online evidence matched this question. I do not have enough grounded context to answer.";
+}
+
+function buildDirectEvidence(project: RankedProject | undefined, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string, onlineSources: OnlineSource[] = [], intent = "constituency_question") {
   const evidence: Array<{ type: string; text: string; url?: string }> = [];
-  if (mode !== "submitted" && onlineSources.length) {
+  if (mode === "online") {
     evidence.push(...onlineSources.slice(0, 3).map((source, index) => ({
       type: "Online reference",
       text: `[${index + 1}] ${source.title}: ${source.snippet}`,
       url: source.url
     })));
-  } else if (mode !== "submitted" && onlineContext) {
+    return evidence.slice(0, 6);
+  }
+  if (mode !== "submitted" && onlineContext && onlineSources.length) {
     evidence.push(...onlineContext.split("\n").slice(0, 3).map((item) => ({ type: "Online signal", text: item })));
   }
   if (project) {
     evidence.push(...project.evidence.slice(0, 4).map((item) => ({ type: "Project evidence", text: `${project.title}: ${item}` })));
     evidence.push({ type: "Ranked project", text: `${project.ward}, ${project.district}: score ${project.score}, confidence ${Math.round(project.confidence * 100)}%, demand ${project.demandCount}.` });
   }
-  evidence.push(...projects.slice(0, 3).map((item, index) => ({
-    type: "Priority queue",
-    text: `Rank ${index + 1}: ${item.title} in ${item.ward}; ${item.category}; score ${item.score}; ${item.rationale}`
-  })));
-  evidence.push(...submissions.slice(-3).reverse().map((item) => ({
-    type: "Citizen submission",
-    text: `${item.category} in ${item.ward}, ${item.district}: ${item.normalizedText || item.text}`
-  })));
+  if (["ranked_priorities", "compare_services", "delayed_projects", "briefing"].includes(intent)) {
+    evidence.push(...projects.slice(0, 3).map((item, index) => ({
+      type: "Priority queue",
+      text: `Rank ${index + 1}: ${item.title} in ${item.ward}; ${item.category}; score ${item.score}; ${item.rationale}`
+    })));
+  }
+  if (["latest_submission", "citizen_feedback", "briefing"].includes(intent)) {
+    evidence.push(...submissions.slice(-3).reverse().map((item) => ({
+      type: "Citizen submission",
+      text: `${item.category} in ${item.ward}, ${item.district}: ${item.normalizedText || item.text}`
+    })));
+  }
   return evidence.slice(0, 6);
+}
+
+function buildCategoryComparison(projects: RankedProject[], categories: string[]) {
+  const stats = categories.map((category) => {
+    const items = projects.filter((project) => normalizeCategory(project.category) === normalizeCategory(category));
+    return {
+      category,
+      count: items.length,
+      demand: items.reduce((sum, item) => sum + item.demandCount, 0),
+      averageScore: items.length ? Math.round(items.reduce((sum, item) => sum + item.score, 0) / items.length) : 0,
+      top: items.sort((a, b) => b.score - a.score)[0]
+    };
+  });
+  if (stats.every((item) => item.count === 0)) return "No road or healthcare project evidence is available in the current LokSetu queue.";
+  return [
+    "Roads vs healthcare:",
+    ...stats.map((item) => `${item.category}: ${item.count} projects, ${item.demand} citizen signals, average score ${item.averageScore}${item.top ? `; top issue is ${item.top.title} in ${item.top.ward}` : ""}.`)
+  ].join("\n");
+}
+
+function buildPhcGapAnswer(projects: RankedProject[]) {
+  const healthProjects = projects.filter((project) => ["health", "healthcare"].includes(normalizeCategory(project.category)) || /phc|clinic|health/i.test(`${project.title} ${project.rationale}`));
+  const phcSpecific = healthProjects.filter((project) => /phc|primary health|clinic/i.test(`${project.title} ${project.rationale} ${project.evidence.join(" ")}`));
+  if (!phcSpecific.length) return "No village-level PHC gap evidence is available in the current LokSetu RAG/submitted corpus. I found no grounded source that lists villages lacking PHCs.";
+  return [
+    "Current PHC/clinic access signals:",
+    ...phcSpecific.slice(0, 5).map((project) => `- ${project.ward}, ${project.district}: ${project.title}; ${project.rationale}`)
+  ].join("\n");
+}
+
+function buildDelayedProjectsAnswer(projects: RankedProject[]) {
+  const delayed = projects.filter((project) => /delay|delayed|blocked|stalled|behind|risk|overdue/i.test(`${project.status} ${project.rationale} ${project.evidence.join(" ")}`));
+  if (!delayed.length) return "No delayed project evidence is available in the current LokSetu project queue. I will not mark a project delayed without a matching status, milestone, or source record.";
+  return [
+    "Delayed or at-risk projects:",
+    ...delayed.slice(0, 5).map((project) => `- ${project.title} in ${project.ward}: status ${project.status}; score ${project.score}; ${project.rationale}`)
+  ].join("\n");
+}
+
+function buildCitizenFeedbackAnswer(submissions: Submission[]) {
+  if (!submissions.length) return "No citizen feedback submissions are available in the current corpus.";
+  const byCategory = submissions.reduce<Record<string, number>>((acc, submission) => {
+    acc[submission.category] = (acc[submission.category] ?? 0) + 1;
+    return acc;
+  }, {});
+  const topCategories = Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const latest = [...submissions].sort((a, b) => Date.parse(b.processedAt ?? b.createdAt) - Date.parse(a.processedAt ?? a.createdAt)).slice(0, 3);
+  return [
+    "Citizen feedback summary:",
+    `Top categories: ${topCategories.map(([category, count]) => `${category} (${count})`).join(", ")}.`,
+    ...latest.map((submission) => `- ${submission.ward}, ${submission.district}: ${submission.normalizedText || submission.text}`)
+  ].join("\n");
 }
 
 function primaryQuestion(question: string) {
@@ -387,9 +459,20 @@ function limitWords(text: string, maxWords: number) {
 function pickProject(question: string, projects: RankedProject[]) {
   const lower = question.toLowerCase();
   return projects.find((project) =>
-    [project.title, project.category, project.ward, project.district, project.state]
+    [project.title, project.ward, project.district, project.state]
       .some((value) => lower.includes(value.toLowerCase()))
   );
+}
+
+function normalizeCategory(value: string) {
+  const lower = value.toLowerCase();
+  if (lower.includes("health")) return "health";
+  if (lower.includes("road")) return "roads";
+  return lower;
+}
+
+function isNoMatchAnswer(answer: string) {
+  return /^(no indexed documents match|no submitted issue|no local rag|no live online references|no .* evidence)/i.test(answer.trim());
 }
 
 function buildAnswer(_role: CopilotRole, intent: string, _question: string, _project: RankedProject | undefined, _daily: ReturnType<typeof buildDailyIntelligence>) {

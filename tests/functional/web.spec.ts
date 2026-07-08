@@ -189,6 +189,7 @@ test.describe("MP/admin web functional flow", () => {
     await answerMode.getByRole("button", { name: "Submitted Issues" }).click();
     await expect(answerMode.getByRole("button", { name: "Submitted Issues" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByLabel("India search and locality controls")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Filters/ })).toHaveCount(0);
     await expect(page.getByLabel("Chat thread")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Key Evidence" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Evidence Map" })).toBeVisible();
