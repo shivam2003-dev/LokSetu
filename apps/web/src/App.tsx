@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PptxGenJS from "pptxgenjs";
+const apniAwaazLogo = "/images/ApniAwaaz.png";
 import { DemandSignalsPage } from "./DemandSignals";
 import { WebI18nProvider, useT, useWebI18n } from "./i18n.js";
 
@@ -826,8 +827,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         </nav>
         <div className="sidebar-footer">
           <a className="citizen-link" href={effectiveCitizenAppUrl}>
-            <Send size={16} />
-            <T>Open JanVaani</T>
+            <img src={apniAwaazLogo} alt="Apni Awaaz" className="citizen-link-logo" />
+            Apni Awaaz
           </a>
           <div className={`status-pill ${apiConnected ? "connected" : "disconnected"}`}>
             <CheckCircle2 size={16} />
