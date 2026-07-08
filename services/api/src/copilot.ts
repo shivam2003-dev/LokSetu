@@ -97,6 +97,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     : ragHasAnswer && ragResponse
       ? ragResponse.answer
       : directAnswer ?? buildNoEvidenceAnswer(mode);
+  const answerHasEvidence = !isNoMatchAnswer(answer);
   const retrievedContext = ragResponse?.retrieved.map((item) => ({
     id: item.id,
     title: item.title,
@@ -122,7 +123,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     agent,
     intent,
     answer,
-    confidence: ragHasAnswer && ragResponse ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : directAnswer && !isNoMatchAnswer(directAnswer) ? 72 : project ? Math.round(project.confidence * 100) : 0,
+    confidence: ragHasAnswer && ragResponse ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : answerHasEvidence && project ? Math.round(project.confidence * 100) : answerHasEvidence ? 72 : 0,
     evidence,
     citations: dedupeCitations(mode === "submitted" ? citations : [...onlineCitations, ...citations]),
     retrieval: {
@@ -134,7 +135,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
       latencyMs: ragResponse?.metrics.totalLatencyMs ?? Date.now() - started
     },
     retrievedContext,
-    suggestedActions: suggestedActions(query.role, intent, project),
+    suggestedActions: answerHasEvidence ? suggestedActions(query.role, intent, project) : noAnswerActions(mode),
     followUpQuestions: followUps(query.role, project),
     guardrails: [
       `Retrieval mode: ${mode}. Online answers use public web/news connector results with visible references.`,
@@ -488,6 +489,12 @@ function suggestedActions(role: CopilotRole, intent: string, project: RankedProj
   if (role === "citizen") return ["Track this project on the public board.", "Add more evidence if the problem is still active.", "Share the public project link with neighbours."];
   if (intent === "funding_path") return ["Request district cost estimate.", "Map eligible schemes.", "Check tender and budget history.", "Prepare MP office note."];
   return ["Open the project room.", "Review supporting evidence.", "Assign district officer follow-up.", "Publish privacy-safe status update."];
+}
+
+function noAnswerActions(mode: CopilotMode) {
+  if (mode === "online") return ["Retry Online later when public connectors respond.", "Switch to Submitted Issues to search local LokSetu reports."];
+  if (mode === "submitted") return ["Ask with a known ward, project, receipt, or source.", "Switch to Online for public web sources."];
+  return ["Ask with a known ward, project, receipt, or source.", "Try Online or Submitted Issues mode to narrow the source set."];
 }
 
 function followUps(role: CopilotRole, project: RankedProject | undefined) {
