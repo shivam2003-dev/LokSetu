@@ -227,6 +227,23 @@ test.describe("API functional flow", () => {
     expect(["not-configured", "pgvector-hybrid", "pgvector-hybrid-no-match"]).toContain(copilotPayload.retrieval.mode);
     expect(JSON.stringify(copilotPayload)).not.toContain("username");
 
+    const onlineAnswer = await api.post("/api/copilot/query", {
+      data: {
+        role: "mp",
+        language: "English",
+        mode: "online",
+        question: "Why are road complaints increasing in Ludhiana South?"
+      }
+    });
+    await expect(onlineAnswer).toBeOK();
+    const onlinePayload = await onlineAnswer.json();
+    expect(onlinePayload.mode).toBe("online");
+    expect(onlinePayload.answer.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(100);
+    expect(onlinePayload.answer).not.toContain("Online mode summary");
+    for (const item of onlinePayload.citations as Array<{ url?: string }>) {
+      expect(item.url).toMatch(/^https?:\/\//);
+    }
+
     const shortGreeting = await api.post("/api/copilot/query", {
       data: { role: "mp", language: "English", question: "hi" }
     });

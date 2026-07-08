@@ -4335,6 +4335,7 @@ meter::-moz-meter-bar {
   padding-top: 4px;
 }
 
+.message-citations a,
 .message-citations span {
   border: 1px solid rgba(47, 107, 240, 0.14);
   border-radius: 999px;
@@ -4347,6 +4348,16 @@ meter::-moz-meter-bar {
   padding: 6px 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.message-citations a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.message-citations a:hover {
+  border-color: rgba(47, 107, 240, 0.32);
+  background: #eef5ff;
 }
 
 .message-meta {
@@ -7166,9 +7177,18 @@ button.problem-row.selected {
   font-weight: 850;
 }
 
-.rag-evidence-list strong {
+.rag-evidence-list strong,
+.rag-evidence-link {
   display: block;
+  color: var(--ink);
   font-size: 12px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.rag-evidence-link:hover {
+  color: var(--blue);
+  text-decoration: underline;
 }
 
 .rag-evidence-list p {

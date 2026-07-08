@@ -250,14 +250,15 @@ type CopilotAnswer = {
   intent: string;
   answer: string;
   confidence: number;
-  evidence: Array<{ type: string; text: string }>;
-  citations: Array<{ type: string; id: string; title: string; snippet: string }>;
+  evidence: Array<{ type: string; text: string; url?: string }>;
+  citations: Array<{ type: string; id: string; title: string; snippet: string; url?: string }>;
   retrieval: { mode: string; embeddingStore: string; corpusDocuments: number; retrieved: number; latencyMs: number };
   retrievedContext: Array<{ id: string; title: string; sourceType: string; snippet: string; score: number }>;
   suggestedActions: string[];
   followUpQuestions: string[];
   guardrails: string[];
 };
+type CopilotEvidenceItem = { type: string; id: string; title: string; snippet: string; url?: string };
 
 type RagStatusResponse = {
   mode: string;
@@ -2359,9 +2360,12 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
   const latestAnswer = [...messages].reverse().find((message) => message.answer)?.answer ?? null;
   const confidence = latestAnswer?.confidence ?? 97;
   const sourceCounts = buildGroundingSources(latestAnswer, ragStatus);
-  const evidenceItems = (
-    latestAnswer?.evidence.length
-      ? latestAnswer.evidence.map((item, index) => ({ type: item.type, id: `evidence-${index}`, title: item.type, snippet: item.text }))
+  const onlineCitationItems = latestAnswer?.mode === "online" && latestAnswer.citations.length ? latestAnswer.citations : null;
+  const evidenceItems: CopilotEvidenceItem[] = (
+    onlineCitationItems
+      ? onlineCitationItems
+      : latestAnswer?.evidence.length
+      ? latestAnswer.evidence.map((item, index) => ({ type: item.type, id: `evidence-${index}`, title: item.type, snippet: item.text, url: item.url }))
       : latestAnswer?.citations.length
         ? latestAnswer.citations
         : latestAnswer?.retrievedContext.map((item) => ({
@@ -2436,7 +2440,7 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
   function exportAnswer(format: string) {
     const text = latestAnswer?.answer ?? messages[messages.length - 1]?.text ?? "No answer generated yet.";
     const heading = latestAnswer ? `AI Answer · ${latestAnswer.confidence ?? confidence}% confidence` : "JanVaani AI Answer";
-    const sources = latestAnswer?.citations?.map((c, i) => `[${i + 1}] ${c.title}`).join("\n") ?? "";
+    const sources = latestAnswer?.citations?.map((c, i) => `[${i + 1}] ${c.title}${c.url ? ` - ${c.url}` : ""}`).join("\n") ?? "";
 
     if (format === "Export PDF") {
       const win = window.open("", "_blank");
@@ -2555,6 +2559,19 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
                 ) : null}
                 <div className="copilot-msg-body">
                   {msg.answer ? <AnswerContent text={msg.answer.answer} /> : <p>{msg.text}</p>}
+                  {msg.answer?.citations.length ? (
+                    <div className="message-citations" aria-label="Answer references">
+                      {msg.answer.citations.slice(0, 5).map((item, index) => (
+                        item.url ? (
+                          <a key={`${item.type}-${item.id}`} href={item.url} target="_blank" rel="noreferrer">
+                            [{index + 1}] {item.title}
+                          </a>
+                        ) : (
+                          <span key={`${item.type}-${item.id}`}>[{index + 1}] {item.title}</span>
+                        )
+                      ))}
+                    </div>
+                  ) : null}
                   {msg.answer ? (
                     <div className="copilot-msg-meta">
                       <mark className="copilot-confidence-badge">{msg.answer.confidence ?? confidence}% confidence</mark>
@@ -2680,7 +2697,10 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
               {(evidenceItems.length ? evidenceItems : [{ type: "mode", id: "waiting", title: "No answer yet", snippet: "Run a query to see retrieved sources." }]).map((item, index) => (
                 <article key={`${item.type}-${item.id}`}>
                   <span>{index + 1}</span>
-                  <div><strong>{item.title}</strong><p>{item.snippet}</p></div>
+                  <div>
+                    {item.url ? <a className="rag-evidence-link" href={item.url} target="_blank" rel="noreferrer">{item.title}</a> : <strong>{item.title}</strong>}
+                    <p>{item.snippet}</p>
+                  </div>
                   <mark>{Math.max(88, confidence - index)}% Match</mark>
                 </article>
               ))}

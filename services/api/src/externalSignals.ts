@@ -72,6 +72,7 @@ export async function fetchXSignals(query: string, bearerToken = process.env.X_B
   const signals = (parsed.data ?? []).map((post) => normalizeSignal({
     id: `x-${post.id}`,
     source: "x",
+    url: `https://x.com/i/web/status/${post.id}`,
     text: post.text,
     author: post.author_id,
     language: post.lang,

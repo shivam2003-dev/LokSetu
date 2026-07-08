@@ -1,5 +1,6 @@
 import { buildDailyIntelligence, intelligenceSourceGroups } from "./intelligence.js";
 import { fallbackRun, fetchGdeltSignals, fetchNewsSignals, fetchXSignals } from "./externalSignals.js";
+import type { ExternalSignalRun } from "./externalSignals.js";
 import { ingestRagDocuments, queryRagService, ragServiceStatus, reindexRagDocuments } from "./ragClient.js";
 import { RankedProject, Submission } from "./types.js";
 
@@ -12,6 +13,16 @@ export type CopilotQuery = {
   language?: string;
   projectId?: string;
   mode?: CopilotMode;
+};
+
+type OnlineSource = {
+  id: string;
+  provider: string;
+  title: string;
+  snippet: string;
+  url?: string;
+  publishedAt?: string;
+  mode: ExternalSignalRun["mode"];
 };
 
 export const copilotAgents = [
@@ -59,8 +70,9 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
   const onlineRuns = intent !== "greeting" && (mode === "online" || mode === "all") ? await fetchOnlineRuns(question) : [];
   const liveOnlineRuns = onlineRuns.filter((run) => run.mode === "live");
   if (liveOnlineRuns.length) await indexOnlineRuns(question, liveOnlineRuns);
-  const onlineContext = liveOnlineRuns
-    .flatMap((run) => run.signals.map((signal) => `${run.provider}: ${signal.title ?? signal.text} ${signal.url ?? ""}`))
+  const onlineSources = buildOnlineSources(liveOnlineRuns.length ? liveOnlineRuns : onlineRuns);
+  const onlineContext = onlineSources
+    .map((source, index) => `[${index + 1}] ${source.provider}: ${source.title}. ${source.snippet}${source.url ? ` ${source.url}` : ""}`)
     .slice(0, 8)
     .join("\n");
   const retrievalQuestion = buildRetrievalQuestion(question, intent, project, projects, submissions, mode, onlineContext);
@@ -76,9 +88,11 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
         metadata
       });
   const ragUnavailable = !ragResponse && intent !== "greeting";
-  const directAnswer = buildDirectAnswer(query.role, intent, question, project, daily, submissions, projects, mode, onlineContext);
+  const directAnswer = buildDirectAnswer(query.role, intent, question, project, daily, submissions, projects, mode, onlineContext, onlineSources);
   const answer = intent === "greeting"
     ? buildAnswer(query.role, intent, question, project, daily)
+    : mode === "online"
+      ? directAnswer ?? buildNoOnlineAnswer()
     : ragResponse && ragResponse.retrieved.length > 0
       ? ragResponse.answer
       : directAnswer ?? "RAG service is not configured. No production retrieval was executed.";
@@ -91,10 +105,13 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
   })) ?? [];
   const evidence = retrievedContext.length
     ? retrievedContext.slice(0, 5).map((item) => ({ type: item.sourceType, text: item.snippet }))
-    : buildDirectEvidence(project, submissions, projects, mode, onlineContext);
+    : buildDirectEvidence(project, submissions, projects, mode, onlineContext, onlineSources);
   const citations = ragResponse?.citations.map((item) =>
-    citation("rag_chunk", item.chunkId, `${item.document}${item.page ? ` page ${item.page}` : ""}`, item.sourceUrl ?? item.source ?? item.documentId)
+    citation("rag_chunk", item.chunkId, `${item.document}${item.page ? ` page ${item.page}` : ""}`, item.source ?? item.documentId, item.sourceUrl)
   ) ?? [];
+  const onlineCitations = onlineSources
+    .slice(0, 5)
+    .map((source, index) => citation("online_signal", source.id, `${source.title} (${source.provider})`, `${source.snippet} [${index + 1}]`, source.url));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -106,7 +123,7 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     answer,
     confidence: ragResponse?.retrieved.length ? Math.round((ragResponse.citations[0]?.confidence ?? 0) * 100) : directAnswer ? 72 : project ? Math.round(project.confidence * 100) : 0,
     evidence,
-    citations: dedupeCitations(citations),
+    citations: dedupeCitations(mode === "submitted" ? citations : [...onlineCitations, ...citations]),
     retrieval: {
       mode: ragResponse?.retrievalMode ?? (ragUnavailable ? "not-configured" : "greeting"),
       embeddingStore: ragResponse ? "postgres-pgvector-hnsw" : "none",
@@ -119,8 +136,8 @@ export async function answerCopilot(query: CopilotQuery, projects: RankedProject
     suggestedActions: suggestedActions(query.role, intent, project),
     followUpQuestions: followUps(query.role, project),
     guardrails: [
-      `Retrieval mode: ${mode}. Online mode indexes public connector results when RAG service is available.`,
-      "Grounded only in current JanVaani project, source, public online, and submitted issue data.",
+      `Retrieval mode: ${mode}. Online answers use public web/news connector results with visible references.`,
+      "Grounded only in current LokSetu project, source, public online, and submitted issue data.",
       "No personal citizen identity is exposed; privacy aliases are used.",
       "Funding, eligibility, and emergency guidance require official human confirmation."
     ]
@@ -157,7 +174,7 @@ function classifyIntent(question: string) {
 }
 
 async function fetchOnlineRuns(question: string) {
-  const query = `${question} India civic issue`;
+  const query = `${primaryQuestion(question)} India civic issue`;
   const runs = [];
   try {
     runs.push(await fetchXSignals(query));
@@ -175,6 +192,34 @@ async function fetchOnlineRuns(question: string) {
     runs.push(fallbackRun("news", query));
   }
   return runs.filter((run) => run.signals.length > 0);
+}
+
+function buildOnlineSources(runs: ExternalSignalRun[]): OnlineSource[] {
+  const seen = new Set<string>();
+  const sources = runs.flatMap((run) =>
+    run.signals.map((signal) => {
+      const title = cleanSourceText(signal.title ?? signal.text);
+      const snippet = cleanSourceText(signal.text || signal.title || "Online signal");
+      return {
+        id: signal.id,
+        provider: run.provider,
+        title: title || `${run.provider} source`,
+        snippet: snippet || title || `${run.provider} source`,
+        url: signal.url,
+        publishedAt: signal.publishedAt,
+        mode: run.mode
+      } satisfies OnlineSource;
+    })
+  );
+  return sources
+    .filter((source) => source.mode === "live" || source.url)
+    .filter((source) => {
+      const key = source.url ?? `${source.provider}:${source.title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
 }
 
 async function indexOnlineRuns(question: string, runs: Awaited<ReturnType<typeof fetchOnlineRuns>>) {
@@ -243,15 +288,10 @@ function buildRetrievalQuestion(question: string, intent: string, project: Ranke
   return [question, `Retrieval mode: ${mode}`, selectedProject, mode !== "submitted" ? onlineContext : ""].filter(Boolean).join("\n\n");
 }
 
-function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string, project: RankedProject | undefined, daily: ReturnType<typeof buildDailyIntelligence>, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string) {
-  if (mode === "online" && onlineContext) {
-    return [
-      "Online mode summary from public connectors:",
-      ...onlineContext.split("\n").slice(0, 5).map((item) => `- ${item}`)
-    ].join("\n");
-  }
+function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string, project: RankedProject | undefined, daily: ReturnType<typeof buildDailyIntelligence>, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string, onlineSources: OnlineSource[] = []) {
+  if (mode === "online" && onlineSources.length) return buildOnlineAnswer(onlineSources);
   if (mode === "online") {
-    return "No live online connector results were available for this query. Add valid connector credentials or switch to submitted issue mode to search the local JanVaani corpus.";
+    return buildNoOnlineAnswer();
   }
   if (intent === "latest_submission") {
     const latest = [...submissions].sort((a, b) => Date.parse(b.processedAt ?? b.createdAt) - Date.parse(a.processedAt ?? a.createdAt))[0];
@@ -281,9 +321,29 @@ function buildDirectAnswer(_role: CopilotRole, intent: string, _question: string
   return null;
 }
 
-function buildDirectEvidence(project: RankedProject | undefined, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string) {
-  const evidence: Array<{ type: string; text: string }> = [];
-  if (mode !== "submitted" && onlineContext) {
+function buildOnlineAnswer(onlineSources: OnlineSource[]) {
+  const topSources = onlineSources.slice(0, 3);
+  const claims = topSources.map((source, index) => `${summarizeSource(source)} [${index + 1}]`);
+  return limitWords([
+    "Online sources indicate",
+    claims.join(" "),
+    "Use these as live signals and confirm against submitted issues and official records."
+  ].join(" "), 100);
+}
+
+function buildNoOnlineAnswer() {
+  return "No live online references were available for this query. Switch to Submitted Issues for local LokSetu records or retry Online when public connectors respond.";
+}
+
+function buildDirectEvidence(project: RankedProject | undefined, submissions: Submission[], projects: RankedProject[], mode: CopilotMode, onlineContext: string, onlineSources: OnlineSource[] = []) {
+  const evidence: Array<{ type: string; text: string; url?: string }> = [];
+  if (mode !== "submitted" && onlineSources.length) {
+    evidence.push(...onlineSources.slice(0, 3).map((source, index) => ({
+      type: "Online reference",
+      text: `[${index + 1}] ${source.title}: ${source.snippet}`,
+      url: source.url
+    })));
+  } else if (mode !== "submitted" && onlineContext) {
     evidence.push(...onlineContext.split("\n").slice(0, 3).map((item) => ({ type: "Online signal", text: item })));
   }
   if (project) {
@@ -299,6 +359,29 @@ function buildDirectEvidence(project: RankedProject | undefined, submissions: Su
     text: `${item.category} in ${item.ward}, ${item.district}: ${item.normalizedText || item.text}`
   })));
   return evidence.slice(0, 6);
+}
+
+function primaryQuestion(question: string) {
+  return question.split("\n")[0]?.trim() || question.trim();
+}
+
+function cleanSourceText(value: string) {
+  return value
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summarizeSource(source: OnlineSource) {
+  const text = source.snippet || source.title;
+  const sentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  return limitWords(sentence.replace(/[.?!]+$/, ""), 22);
+}
+
+function limitWords(text: string, maxWords: number) {
+  const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  if (words.length <= maxWords) return words.join(" ");
+  return `${words.slice(0, maxWords).join(" ")}...`;
 }
 
 function pickProject(question: string, projects: RankedProject[]) {
@@ -330,8 +413,8 @@ function followUps(role: CopilotRole, project: RankedProject | undefined) {
   return [`Why is ${area} high priority?`, "Which scheme can fund this?", "What changed since yesterday?", "Generate a district-officer briefing."];
 }
 
-function citation(type: string, id: string, title: string, snippet: string) {
-  return { type, id, title, snippet };
+function citation(type: string, id: string, title: string, snippet: string, url?: string) {
+  return { type, id, title, snippet, url };
 }
 
 function dedupeCitations(items: ReturnType<typeof citation>[]) {
