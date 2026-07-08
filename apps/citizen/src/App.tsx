@@ -421,7 +421,7 @@ function CitizenApp({
     <div className="screen">
       <header className="appbar">
         <div className="logo">
-          <span className="logo-mark">आ</span>
+          <img src="/ApniAwaaz.png" alt="Apni Awaaz" className="logo-mark logo-mark-img" />
           <div>
             <strong>Apni Awaaz</strong>
             <small><T>Your voice reaches your MP</T></small>
@@ -964,7 +964,7 @@ function LoginPage({ onLogin }: { onLogin: (token: string, identity: CitizenIden
   return (
     <div className="screen auth-screen">
       <main className="auth-card">
-        <span className="logo-mark">आ</span>
+        <img src="/ApniAwaaz.png" alt="Apni Awaaz" className="logo-mark logo-mark-img" />
         <h1>Apni Awaaz</h1>
         <p>{t("Aadhaar access uses 12-digit format check only.")}</p>
         <form onSubmit={login}>
