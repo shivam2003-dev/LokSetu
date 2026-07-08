@@ -64,6 +64,8 @@ type RankedProject = {
   state: string;
   district: string;
   ward: string;
+  lat?: number;
+  lng?: number;
   mpId: string;
   mpName: string;
   score: number;
@@ -551,6 +553,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [mapBoundaries, setMapBoundaries] = useState<MapBoundaryResponse>(fallbackMapBoundaries);
   const [mapClusters, setMapClusters] = useState<MapClusterResponse>(fallbackMapClusters);
   const [notice, setNotice] = useState("Connecting");
+  const [refreshing, setRefreshing] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState(fallbackProject.id);
 
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
@@ -605,6 +608,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }
 
   async function refreshAll() {
+    setRefreshing(true);
     try {
       const [nextConfig, nextDemoData, nextContext, nextDashboard, nextRegions, nextCopilot, nextRagStatus, nextBoundaries, nextClusters] = await Promise.all([
         requestJson<ClientConfig>("/api/client-config"),
@@ -641,6 +645,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       setApiConnected(false);
       setConnectionError(error instanceof Error ? error.message : "API unavailable");
       setNotice("Disconnected");
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -794,8 +800,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
               <button onClick={() => updateDemoData("load")} type="button">Load local demo data</button>
               <button onClick={() => updateDemoData("disable")} type="button">Disable demo data</button>
             </div>
-            <button className="icon-button" title="Refresh" onClick={refreshAll}>
-              <RefreshCw size={18} />
+            <button className="icon-button" title="Refresh data" onClick={refreshAll} disabled={refreshing} type="button">
+              <RefreshCw className={refreshing ? "spin" : ""} size={18} />
             </button>
             <button className="logout-button" onClick={onLogout} type="button">Logout</button>
           </div>
@@ -828,7 +834,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
         {page === "signals" ? <DemandSignalsPage /> : null}
         {page === "explorer" ? <DataExplorerPage dashboard={dashboard} demoData={demoData} /> : null}
-        {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} /> : null}
+        {page === "copilot" ? <CopilotPage capabilities={copilotCapabilities} ragStatus={ragStatus} projects={dashboard.projects} maps={clientConfig.maps} hotspots={dashboard.hotspots} /> : null}
         {page === "knowledge" ? <KnowledgeBasePage /> : null}
         {page === "recommendations" ? <RecommendationsPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
         {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
@@ -1132,7 +1138,7 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-function HealthGauge({ score, signals, confidence }: { score: number; signals: number; confidence: number }) {
+function HealthGauge({ score, signals, confidence, wards }: { score: number; signals: number; confidence: number; wards: number }) {
   // Clean 270° donut gauge, filled proportional to score/100.
   const SIZE = 260;
   const cx = SIZE / 2;
@@ -1178,9 +1184,10 @@ function HealthGauge({ score, signals, confidence }: { score: number; signals: n
           <path d={fillD} fill="none" stroke={`url(#${gradId})`} strokeWidth={SW} strokeLinecap="round" />
         </svg>
         <div className="health-gauge-center">
-          <span className="health-gauge-eyebrow">Constituency Health</span>
+          <span className="health-gauge-eyebrow">Aggregate Health</span>
           <strong className="health-gauge-score">{score}<em>/100</em></strong>
           <span className={`health-gauge-badge health-gauge-badge--${band}`}>{label}</span>
+          <span className="health-gauge-scope">across {wards} {wards === 1 ? "ward" : "wards"}</span>
         </div>
       </div>
       <div className="health-gauge-meta">
@@ -1229,7 +1236,7 @@ function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardRespon
             <button onClick={() => setPage("map")} type="button">View GIS map</button>
           </div>
         </div>
-        <HealthGauge score={healthScore} signals={totalDemand} confidence={avgConfidence} />
+        <HealthGauge score={healthScore} signals={totalDemand} confidence={avgConfidence} wards={dashboard.totals.wards} />
       </section>
 
       <section className="overview-kpi-grid">
@@ -1435,7 +1442,7 @@ function IssueMap({
     { label: "Hospitals", color: "#22c55e", active: true },
     { label: "PHCs", color: "#14b8a6", active: true },
     { label: "Water Pipelines", color: "#3b82f6", active: true },
-    { label: "Citizen Complaints", color: "#7c3aed", active: true },
+    { label: "Citizen Complaints", color: "#e11d48", active: true },
     { label: "Development Projects", color: "#0f766e", active: true },
     { label: "Flood Zones", color: "#06b6d4", active: false },
     { label: "Weather", color: "#64748b", active: false },
@@ -1533,7 +1540,7 @@ function IssueMap({
           streetViewControl: false,
           fullscreenControl: true,
           clickableIcons: false,
-          gestureHandling: "cooperative",
+          gestureHandling: "greedy",
           ...(maps.mapId ? { mapId: maps.mapId } : {}),
           styles: [
             { featureType: "poi", stylers: [{ visibility: "off" }] },
@@ -1752,44 +1759,133 @@ function MapIntelligencePanel({
 }
 
 function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hotspots: Array<Hotspot & { projectId: string }>; selectedProjectId: string; selectProject: (projectId: string) => void }) {
-  const tileMap = useMemo(() => buildTileFallbackState(hotspots), [hotspots]);
+  const [zoomDelta, setZoomDelta] = useState(0);
+  // Visual drag offset (CSS translate — smooth during drag, reset to 0 on release)
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  // Committed pan in tile units (updated on drag end → triggers tile refetch)
+  const [centerOffset, setCenterOffset] = useState({ tileX: 0, tileY: 0 });
+  const dragRef = useRef<{ startX: number; startY: number; dragX: number; dragY: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const tileMap = useMemo(() => {
+    const base = buildTileFallbackState(hotspots);
+    const zoom = zoomDelta === 0 ? base.zoom : Math.max(3, Math.min(12, base.zoom + zoomDelta));
+    if (centerOffset.tileX === 0 && centerOffset.tileY === 0 && zoomDelta === 0) return base;
+    // Build new map with shifted center in tile coordinates
+    const pts = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
+    const avgLat = pts.reduce((s, h) => s + h.lat, 0) / pts.length;
+    const avgLng = pts.reduce((s, h) => s + h.lng, 0) / pts.length;
+    // Convert tile offset back to lat/lng shift
+    const tileSizeAtZoom = 256; // OSM tile pixels
+    const containerW = containerRef.current?.clientWidth ?? 600;
+    const containerH = containerRef.current?.clientHeight ?? 380;
+    const tilesVisibleX = containerW / tileSizeAtZoom;
+    const tilesVisibleY = containerH / tileSizeAtZoom;
+    const lngPerTile = 360 / (2 ** zoom);
+    const newLng = avgLng - centerOffset.tileX * lngPerTile * tilesVisibleX;
+    // Latitude shift via inverse Mercator approximation
+    const latShiftDeg = centerOffset.tileY * (180 / Math.PI) * tilesVisibleY * (Math.PI / (2 ** zoom)) * 2;
+    const newLat = Math.max(-85, Math.min(85, avgLat + latShiftDeg));
+    const anchor = { ...pts[0], lat: newLat, lng: newLng } as Hotspot & { projectId: string };
+    return buildTileFallbackState([anchor], zoom);
+  }, [hotspots, zoomDelta, centerOffset]);
+
+  function onMouseDown(e: React.MouseEvent) {
+    dragRef.current = { startX: e.clientX, startY: e.clientY, dragX: drag.x, dragY: drag.y };
+  }
+  function onMouseMove(e: React.MouseEvent) {
+    if (!dragRef.current) return;
+    setDrag({ x: dragRef.current.dragX + e.clientX - dragRef.current.startX, y: dragRef.current.dragY + e.clientY - dragRef.current.startY });
+  }
+  function commitPan(dx: number, dy: number) {
+    if (!containerRef.current) return;
+    const w = containerRef.current.clientWidth;
+    const h = containerRef.current.clientHeight;
+    // Convert pixel drag to tile-fraction offset and accumulate
+    setCenterOffset((prev) => ({ tileX: prev.tileX - dx / w, tileY: prev.tileY - dy / h }));
+    setDrag({ x: 0, y: 0 });
+    dragRef.current = null;
+  }
+  function onMouseUp(e: React.MouseEvent) {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) commitPan(drag.x, drag.y);
+    else dragRef.current = null;
+  }
+  function onTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    dragRef.current = { startX: t.clientX, startY: t.clientY, dragX: 0, dragY: 0 };
+    setDrag({ x: 0, y: 0 });
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (!dragRef.current) return;
+    const t = e.touches[0];
+    setDrag({ x: t.clientX - dragRef.current.startX, y: t.clientY - dragRef.current.startY });
+  }
+  function onTouchEnd() {
+    if (dragRef.current) commitPan(drag.x, drag.y);
+  }
+
+  const dragStyle = drag.x !== 0 || drag.y !== 0 ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined;
+
   return (
-    <div className="fallback-map osm-fallback-map" aria-label="Live tile-map fallback">
-      <div className="osm-tile-layer" aria-hidden="true">
-        {tileMap.tiles.map((tile) => (
-          <img
-            alt=""
-            decoding="async"
-            draggable={false}
-            key={`${tileMap.zoom}-${tile.x}-${tile.y}`}
-            loading="eager"
-            src={tile.url}
-            style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}
-          />
-        ))}
+    <div
+      ref={containerRef}
+      className="fallback-map osm-fallback-map"
+      aria-label="Live tile-map fallback"
+      style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={(e) => { if (dragRef.current) commitPan(drag.x, drag.y); else onMouseUp(e as React.MouseEvent); }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Single pannable layer — tiles + tint + markers all move together during drag */}
+      <div className="osm-pannable" style={dragStyle}>
+        <div className="osm-tile-layer" aria-hidden="true">
+          {tileMap.tiles.map((tile) => (
+            <img
+              alt=""
+              decoding="async"
+              draggable={false}
+              key={`${tileMap.zoom}-${tile.x}-${tile.y}`}
+              loading="eager"
+              src={tile.url}
+              style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}
+            />
+          ))}
+        </div>
+        <div className="osm-map-tint" aria-hidden="true" />
+        {hotspots.map((hotspot, index) => {
+          const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
+          return (
+            <button
+              className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
+              key={`${hotspot.projectId}-${index}`}
+              style={{
+                left: `${position.x}%`,
+                top: `${position.y}%`,
+                width: `${44 + hotspot.intensity / 4}px`,
+                height: `${44 + hotspot.intensity / 4}px`,
+                ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
+                ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
+              }}
+              onClick={(e) => { if (Math.abs(drag.x) < 5 && Math.abs(drag.y) < 5) selectProject(hotspot.projectId); e.stopPropagation(); }}
+              title={`${hotspot.category} in ${hotspot.ward}`}
+            >
+              {index + 1}
+            </button>
+          );
+        })}
+      </div>{/* end osm-pannable */}
+      {/* Zoom controls and attribution stay fixed (outside the pannable layer) */}
+      <div className="osm-zoom-controls">
+        <button type="button" onClick={() => { setZoomDelta((d) => Math.min(4, d + 1)); setDrag({ x: 0, y: 0 }); setCenterOffset({ tileX: 0, tileY: 0 }); }} aria-label="Zoom in">+</button>
+        <button type="button" onClick={() => { setZoomDelta((d) => Math.max(-3, d - 1)); setDrag({ x: 0, y: 0 }); setCenterOffset({ tileX: 0, tileY: 0 }); }} aria-label="Zoom out">−</button>
       </div>
-      <div className="osm-map-tint" aria-hidden="true" />
-      {hotspots.map((hotspot, index) => {
-        const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
-        return (
-          <button
-            className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
-            key={`${hotspot.projectId}-${index}`}
-            style={{
-              left: `${position.x}%`,
-              top: `${position.y}%`,
-              width: `${44 + hotspot.intensity / 4}px`,
-              height: `${44 + hotspot.intensity / 4}px`,
-              ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
-              ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
-            }}
-            onClick={() => selectProject(hotspot.projectId)}
-            title={`${hotspot.category} in ${hotspot.ward}`}
-          >
-            {index + 1}
-          </button>
-        );
-      })}
       <div className="osm-attribution">Map tiles © OpenStreetMap contributors</div>
     </div>
   );
@@ -1972,8 +2068,8 @@ function buildMapHotspots(dashboard: DashboardResponse): Array<Hotspot & { proje
       ward: project.ward,
       category: project.category,
       intensity: project.score,
-      lat: matchingHotspot?.lat ?? seededLatLng(index).lat,
-      lng: matchingHotspot?.lng ?? seededLatLng(index).lng,
+      lat: project.lat ?? seededLatLng(index).lat,
+      lng: project.lng ?? seededLatLng(index).lng,
       projectId: project.id
     };
   });
@@ -2000,20 +2096,22 @@ function indiaProjection(lat: number, lng: number) {
   };
 }
 
-function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>): TileFallbackState {
+function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>, zoomOverride?: number): TileFallbackState {
   const points = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
   const lats = points.map((point) => point.lat);
   const lngs = points.map((point) => point.lng);
   const latSpan = Math.max(...lats) - Math.min(...lats);
   const lngSpan = Math.max(...lngs) - Math.min(...lngs);
   const maxSpan = Math.max(latSpan, lngSpan);
-  const zoom = maxSpan > 14 ? 5 : maxSpan > 6 ? 6 : maxSpan > 2.5 ? 7 : maxSpan > 1 ? 9 : 11;
+  const autoZoom = maxSpan > 14 ? 5 : maxSpan > 6 ? 6 : maxSpan > 2.5 ? 7 : maxSpan > 1 ? 9 : 11;
+  const zoom = zoomOverride ?? autoZoom;
   const centerLat = lats.reduce((sum, value) => sum + value, 0) / points.length;
   const centerLng = lngs.reduce((sum, value) => sum + value, 0) / points.length;
   const centerX = lngToTileX(centerLng, zoom);
   const centerY = latToTileY(centerLat, zoom);
-  const cols = zoom <= 6 ? 5.6 : 4.6;
-  const rows = zoom <= 6 ? 4.2 : 3.4;
+  // Load extra tiles beyond the visible area so panning doesn't show grey
+  const cols = zoom <= 6 ? 9 : 7;
+  const rows = zoom <= 6 ? 7 : 5.5;
   const minX = centerX - cols / 2;
   const maxX = centerX + cols / 2;
   const minY = Math.max(0, centerY - rows / 2);
@@ -2143,7 +2241,7 @@ function loadMapplsMaps(key: string): Promise<void> {
   return window.__loksetuMapplsPromise;
 }
 
-function CollapsiblePanel({ title, icon: Icon, children, defaultOpen = false }: {
+function CollapsiblePanel({ title, icon: Icon, children, defaultOpen = true }: {
   title: string; icon: typeof FileText; children: React.ReactNode; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -2160,7 +2258,7 @@ function CollapsiblePanel({ title, icon: Icon, children, defaultOpen = false }: 
   );
 }
 
-function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[] }) {
+function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { capabilities: CopilotCapabilitiesResponse | null; ragStatus: RagStatusResponse | null; projects: RankedProject[]; maps: ClientConfig["maps"]; hotspots: DashboardResponse["hotspots"] }) {
   const prompts = ["Compare roads vs healthcare", "Which villages lack PHCs?", "Show delayed projects", "Summarize citizen feedback"];
   const [role, setRole] = useState<"mp" | "collector" | "citizen" | "analyst">("mp");
   const [language, setLanguage] = useState("English");
@@ -2518,10 +2616,23 @@ function CopilotPage({ capabilities, ragStatus, projects }: { capabilities: Copi
             </div>
           </CollapsiblePanel>
           <CollapsiblePanel title="Evidence Map" icon={MapPinned}>
-            <div className="rag-evidence-map">
-              {Array.from({ length: 42 }, (_, index) => <i key={index} style={{ left: `${8 + (index * 17) % 84}%`, top: `${12 + (index * 23) % 72}%` }} />)}
-              <strong>{districtFilter}</strong>
-            </div>
+            <RecommendationMap
+              maps={maps}
+              points={projects.slice(0, 20).map((project, index) => {
+                const hs = hotspots.find((h) => h.ward === project.ward && h.category === project.category) ?? hotspots[index];
+                return {
+                  projectId: project.id,
+                  lat: project.lat ?? seededLatLng(index).lat,
+                  lng: project.lng ?? seededLatLng(index).lng,
+                  ward: project.ward,
+                  category: project.category,
+                  score: project.score,
+                  band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
+                };
+              })}
+              selectedId={selectedProject?.id ?? ""}
+              onSelect={setProjectId}
+            />
           </CollapsiblePanel>
           <CollapsiblePanel title="Related Projects" icon={Briefcase}>
             <div className="rag-project-list">
@@ -3255,7 +3366,7 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
           streetViewControl: false,
           fullscreenControl: false,
           clickableIcons: false,
-          gestureHandling: "cooperative",
+          gestureHandling: "greedy",
           ...(maps.mapId ? { mapId: maps.mapId } : {}),
           styles: [
             { featureType: "poi", stylers: [{ visibility: "off" }] },
@@ -3772,7 +3883,7 @@ function ComparePage() {
         </section>
         <section className="panel compare-chart-card">
           <PanelTitle title="Budget Analysis" icon={Database} detail="utilization vs demand" />
-          <CompareBars regions={selected} metric="budget" color="#5b35f5" />
+          <CompareBars regions={selected} metric="budget" color="#1780ff" />
           <CompareBars regions={selected} metric="demand" color="#f97316" compact />
         </section>
         <section className="panel compare-chart-card">
@@ -4146,13 +4257,13 @@ function AnswerContent({ text }: { text: string }) {
 
 const categoryMeta: Record<string, { icon: typeof Home; color: string }> = {
   Roads: { icon: Construction, color: "#dc2626" },
-  Water: { icon: Droplets, color: "#2563eb" },
+  Water: { icon: Droplets, color: "#0ea5e9" },
   Health: { icon: HeartPulse, color: "#138a52" },
   Power: { icon: Zap, color: "#d97706" },
-  Education: { icon: GraduationCap, color: "#7c3aed" },
+  Education: { icon: GraduationCap, color: "#0891b2" },
   Sanitation: { icon: Trash2, color: "#0d9488" },
   "Digital Access": { icon: Wifi, color: "#db2777" },
-  Employment: { icon: Briefcase, color: "#4f46e5" }
+  Employment: { icon: Briefcase, color: "#ca8a04" }
 };
 
 const fallbackCategoryMeta = { icon: Flag, color: "#64748b" };

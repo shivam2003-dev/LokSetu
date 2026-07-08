@@ -179,6 +179,8 @@ export type RankedProject = {
   category: string;
   state: string;
   district: string;
+  lat?: number;
+  lng?: number;
   ward: string;
   mpId: string;
   mpName: string;

@@ -129,14 +129,15 @@ export function buildDashboard(submissions: Submission[], filters: DashboardFilt
     },
     projects,
     hotspots: projects.slice(0, 8).map((project, index) => {
-      const civic = civicForProject(project);
       const fallback = seededHotspot(index);
       return {
         ward: project.ward,
         category: project.category,
         intensity: project.score,
-        lat: civic?.lat ?? fallback.lat,
-        lng: civic?.lng ?? fallback.lng
+        // Prefer real GPS averaged from submissions, then civic centroid already
+        // stored on the project, then seeded city fallback.
+        lat: project.lat ?? fallback.lat,
+        lng: project.lng ?? fallback.lng
       };
     })
   };
@@ -152,6 +153,20 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
   const sources = sourceSnapshots.filter(
     (source) => source.state === state && source.district === district && source.ward === ward
   );
+  // Average GPS from submissions that have real coordinates (from citizen GPS captures).
+  // Fall back to civic dataset centroid if submissions don't carry GPS.
+  const gpsItems = items.filter((item) => typeof item.lat === "number" && typeof item.lng === "number");
+  // Civic lookup: try exact state+district+ward first, then relax to district+ward
+  // (handles submissions where state was not captured in the cluster key).
+  const civicMatch = civicDatasets.find((d) => d.state === state && d.district === district && d.ward === ward)
+    ?? civicDatasets.find((d) => d.district === district && d.ward === ward)
+    ?? civicDatasets.find((d) => d.ward === ward);
+  const lat = gpsItems.length
+    ? gpsItems.reduce((sum, item) => sum + (item.lat as number), 0) / gpsItems.length
+    : civicMatch?.lat;
+  const lng = gpsItems.length
+    ? gpsItems.reduce((sum, item) => sum + (item.lng as number), 0) / gpsItems.length
+    : civicMatch?.lng;
   const averageCitizenScore = Math.round(average(items.map((item) => item.citizenScore)));
   const averageSubmissionQuality = Math.round(average(items.map((item) => item.submissionQualityScore ?? item.citizenScore)));
   const rewardedCitizenCount = new Set(items.map((item) => item.aadhaarHash ?? item.userId)).size;
@@ -172,6 +187,7 @@ function rankCluster(key: string, items: Submission[], totalSubmissions: number)
     state,
     district,
     ward,
+    ...(lat !== undefined && lng !== undefined ? { lat, lng } : {}),
     mpId: civic?.mpId ?? items[0]?.mpId ?? dynamicRoute.id,
     mpName: civic?.mpName ?? mp?.name ?? dynamicRoute.name,
     score,
