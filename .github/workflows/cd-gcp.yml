@@ -198,10 +198,26 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          commit_message="Deploy LokSetu GCP images ${IMAGE_TAG} [skip cd]"
           git add charts/people-priority/values-gcp.yaml
-          git commit -m "Deploy LokSetu GCP images ${IMAGE_TAG} [skip cd]"
-          echo "DEPLOY_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          git push origin HEAD:main
+          git commit -m "${commit_message}"
+
+          for attempt in {1..3}; do
+            deploy_revision="$(git rev-parse HEAD)"
+            if git push origin HEAD:main; then
+              echo "DEPLOY_REVISION=${deploy_revision}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+
+            echo "Push attempt ${attempt} failed; rebasing image tag commit onto latest origin/main."
+            git fetch origin main
+            git reset --soft origin/main
+            git add charts/people-priority/values-gcp.yaml
+            git commit -m "${commit_message}"
+          done
+
+          echo "Failed to push image tag update after retries." >&2
+          exit 1
 
       - name: Configure kubectl
         run: |
@@ -238,6 +254,20 @@ jobs:
 
       - name: Public smoke checks
         run: |
-          curl -fsS https://loksetu.shivam2003.com/ >/dev/null
-          curl -fsS https://awaaz.shivam2003.com/ >/dev/null
-          curl -fsS https://loksetu.shivam2003.com/healthz >/dev/null
+          smoke_url() {
+            local url="$1"
+            for attempt in {1..12}; do
+              code="$(curl -L -sS -o /dev/null -w '%{http_code}' "$url" || true)"
+              echo "Smoke ${url}: HTTP ${code} (attempt ${attempt}/12)"
+              if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+                return 0
+              fi
+              sleep 10
+            done
+            echo "Public smoke failed for ${url}" >&2
+            return 1
+          }
+
+          smoke_url https://loksetu.shivam2003.com/
+          smoke_url https://awaaz.shivam2003.com/
+          smoke_url https://loksetu.shivam2003.com/healthz
