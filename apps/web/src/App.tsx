@@ -1760,88 +1760,131 @@ function MapIntelligencePanel({
 
 function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hotspots: Array<Hotspot & { projectId: string }>; selectedProjectId: string; selectProject: (projectId: string) => void }) {
   const [zoomDelta, setZoomDelta] = useState(0);
-  // Pan offset in pixels (CSS translate on the whole map content)
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  // Visual drag offset (CSS translate — smooth during drag, reset to 0 on release)
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  // Committed pan in tile units (updated on drag end → triggers tile refetch)
+  const [centerOffset, setCenterOffset] = useState({ tileX: 0, tileY: 0 });
+  const dragRef = useRef<{ startX: number; startY: number; dragX: number; dragY: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const tileMap = useMemo(() => {
     const base = buildTileFallbackState(hotspots);
-    if (zoomDelta === 0) return base;
-    return buildTileFallbackState(hotspots, Math.max(3, Math.min(12, base.zoom + zoomDelta)));
-  }, [hotspots, zoomDelta]);
+    const zoom = zoomDelta === 0 ? base.zoom : Math.max(3, Math.min(12, base.zoom + zoomDelta));
+    if (centerOffset.tileX === 0 && centerOffset.tileY === 0 && zoomDelta === 0) return base;
+    // Build new map with shifted center in tile coordinates
+    const pts = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
+    const avgLat = pts.reduce((s, h) => s + h.lat, 0) / pts.length;
+    const avgLng = pts.reduce((s, h) => s + h.lng, 0) / pts.length;
+    // Convert tile offset back to lat/lng shift
+    const tileSizeAtZoom = 256; // OSM tile pixels
+    const containerW = containerRef.current?.clientWidth ?? 600;
+    const containerH = containerRef.current?.clientHeight ?? 380;
+    const tilesVisibleX = containerW / tileSizeAtZoom;
+    const tilesVisibleY = containerH / tileSizeAtZoom;
+    const lngPerTile = 360 / (2 ** zoom);
+    const newLng = avgLng - centerOffset.tileX * lngPerTile * tilesVisibleX;
+    // Latitude shift via inverse Mercator approximation
+    const latShiftDeg = centerOffset.tileY * (180 / Math.PI) * tilesVisibleY * (Math.PI / (2 ** zoom)) * 2;
+    const newLat = Math.max(-85, Math.min(85, avgLat + latShiftDeg));
+    const anchor = { ...pts[0], lat: newLat, lng: newLng } as Hotspot & { projectId: string };
+    return buildTileFallbackState([anchor], zoom);
+  }, [hotspots, zoomDelta, centerOffset]);
 
   function onMouseDown(e: React.MouseEvent) {
-    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
+    dragRef.current = { startX: e.clientX, startY: e.clientY, dragX: drag.x, dragY: drag.y };
   }
   function onMouseMove(e: React.MouseEvent) {
     if (!dragRef.current) return;
-    setPan({ x: dragRef.current.panX + e.clientX - dragRef.current.startX, y: dragRef.current.panY + e.clientY - dragRef.current.startY });
+    setDrag({ x: dragRef.current.dragX + e.clientX - dragRef.current.startX, y: dragRef.current.dragY + e.clientY - dragRef.current.startY });
   }
-  function onMouseUp() { dragRef.current = null; }
+  function commitPan(dx: number, dy: number) {
+    if (!containerRef.current) return;
+    const w = containerRef.current.clientWidth;
+    const h = containerRef.current.clientHeight;
+    // Convert pixel drag to tile-fraction offset and accumulate
+    setCenterOffset((prev) => ({ tileX: prev.tileX - dx / w, tileY: prev.tileY - dy / h }));
+    setDrag({ x: 0, y: 0 });
+    dragRef.current = null;
+  }
+  function onMouseUp(e: React.MouseEvent) {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) commitPan(drag.x, drag.y);
+    else dragRef.current = null;
+  }
   function onTouchStart(e: React.TouchEvent) {
     const t = e.touches[0];
-    dragRef.current = { startX: t.clientX, startY: t.clientY, panX: pan.x, panY: pan.y };
+    dragRef.current = { startX: t.clientX, startY: t.clientY, dragX: 0, dragY: 0 };
+    setDrag({ x: 0, y: 0 });
   }
   function onTouchMove(e: React.TouchEvent) {
     if (!dragRef.current) return;
     const t = e.touches[0];
-    setPan({ x: dragRef.current.panX + t.clientX - dragRef.current.startX, y: dragRef.current.panY + t.clientY - dragRef.current.startY });
+    setDrag({ x: t.clientX - dragRef.current.startX, y: t.clientY - dragRef.current.startY });
+  }
+  function onTouchEnd() {
+    if (dragRef.current) commitPan(drag.x, drag.y);
   }
 
-  const panStyle = pan.x !== 0 || pan.y !== 0 ? { transform: `translate(${pan.x}px, ${pan.y}px)` } : undefined;
+  const dragStyle = drag.x !== 0 || drag.y !== 0 ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined;
 
   return (
     <div
+      ref={containerRef}
       className="fallback-map osm-fallback-map"
       aria-label="Live tile-map fallback"
       style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
-      onMouseLeave={onMouseUp}
+      onMouseLeave={(e) => { if (dragRef.current) commitPan(drag.x, drag.y); else onMouseUp(e as React.MouseEvent); }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
-      onTouchEnd={onMouseUp}
+      onTouchEnd={onTouchEnd}
     >
-      <div className="osm-tile-layer" aria-hidden="true" style={panStyle}>
-        {tileMap.tiles.map((tile) => (
-          <img
-            alt=""
-            decoding="async"
-            draggable={false}
-            key={`${tileMap.zoom}-${tile.x}-${tile.y}`}
-            loading="eager"
-            src={tile.url}
-            style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}
-          />
-        ))}
-      </div>
-      <div className="osm-map-tint" aria-hidden="true" style={panStyle} />
-      {hotspots.map((hotspot, index) => {
-        const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
-        return (
-          <button
-            className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
-            key={`${hotspot.projectId}-${index}`}
-            style={{
-              left: `${position.x}%`,
-              top: `${position.y}%`,
-              width: `${44 + hotspot.intensity / 4}px`,
-              height: `${44 + hotspot.intensity / 4}px`,
-              ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
-              ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`,
-              ...(panStyle ?? {})
-            }}
-            onClick={(e) => { if (Math.abs(pan.x - (dragRef.current?.panX ?? pan.x)) < 5 && Math.abs(pan.y - (dragRef.current?.panY ?? pan.y)) < 5) selectProject(hotspot.projectId); e.stopPropagation(); }}
-            title={`${hotspot.category} in ${hotspot.ward}`}
-          >
-            {index + 1}
-          </button>
-        );
-      })}
+      {/* Single pannable layer — tiles + tint + markers all move together during drag */}
+      <div className="osm-pannable" style={dragStyle}>
+        <div className="osm-tile-layer" aria-hidden="true">
+          {tileMap.tiles.map((tile) => (
+            <img
+              alt=""
+              decoding="async"
+              draggable={false}
+              key={`${tileMap.zoom}-${tile.x}-${tile.y}`}
+              loading="eager"
+              src={tile.url}
+              style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}
+            />
+          ))}
+        </div>
+        <div className="osm-map-tint" aria-hidden="true" />
+        {hotspots.map((hotspot, index) => {
+          const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
+          return (
+            <button
+              className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
+              key={`${hotspot.projectId}-${index}`}
+              style={{
+                left: `${position.x}%`,
+                top: `${position.y}%`,
+                width: `${44 + hotspot.intensity / 4}px`,
+                height: `${44 + hotspot.intensity / 4}px`,
+                ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
+                ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
+              }}
+              onClick={(e) => { if (Math.abs(drag.x) < 5 && Math.abs(drag.y) < 5) selectProject(hotspot.projectId); e.stopPropagation(); }}
+              title={`${hotspot.category} in ${hotspot.ward}`}
+            >
+              {index + 1}
+            </button>
+          );
+        })}
+      </div>{/* end osm-pannable */}
+      {/* Zoom controls and attribution stay fixed (outside the pannable layer) */}
       <div className="osm-zoom-controls">
-        <button type="button" onClick={() => setZoomDelta((d) => Math.min(4, d + 1))} aria-label="Zoom in">+</button>
-        <button type="button" onClick={() => setZoomDelta((d) => Math.max(-3, d - 1))} aria-label="Zoom out">−</button>
+        <button type="button" onClick={() => { setZoomDelta((d) => Math.min(4, d + 1)); setDrag({ x: 0, y: 0 }); setCenterOffset({ tileX: 0, tileY: 0 }); }} aria-label="Zoom in">+</button>
+        <button type="button" onClick={() => { setZoomDelta((d) => Math.max(-3, d - 1)); setDrag({ x: 0, y: 0 }); setCenterOffset({ tileX: 0, tileY: 0 }); }} aria-label="Zoom out">−</button>
       </div>
       <div className="osm-attribution">Map tiles © OpenStreetMap contributors</div>
     </div>
@@ -2066,8 +2109,9 @@ function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>
   const centerLng = lngs.reduce((sum, value) => sum + value, 0) / points.length;
   const centerX = lngToTileX(centerLng, zoom);
   const centerY = latToTileY(centerLat, zoom);
-  const cols = zoom <= 6 ? 5.6 : 4.6;
-  const rows = zoom <= 6 ? 4.2 : 3.4;
+  // Load extra tiles beyond the visible area so panning doesn't show grey
+  const cols = zoom <= 6 ? 9 : 7;
+  const rows = zoom <= 6 ? 7 : 5.5;
   const minX = centerX - cols / 2;
   const maxX = centerX + cols / 2;
   const minY = Math.max(0, centerY - rows / 2);

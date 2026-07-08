@@ -3053,6 +3053,7 @@ meter::-moz-meter-bar {
   -webkit-user-select: none;
 }
 
+.osm-pannable { position: absolute; inset: 0; will-change: transform; }
 .osm-tile-layer,
 .osm-map-tint {
   position: absolute;
