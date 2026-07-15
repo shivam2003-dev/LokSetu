@@ -3,6 +3,34 @@ import { expect, test } from "@playwright/test";
 const expectedCitizenAppUrl = process.env.VITE_CITIZEN_APP_URL ?? "http://localhost:5174";
 
 test.describe("MP/admin web functional flow", () => {
+  test("overview decision controls synchronize project context", async ({ page }) => {
+    await loginIfNeeded(page);
+    await page.goto("/#overview");
+
+    const controls = page.getByLabel("Overview analysis controls");
+    await expect(controls).toBeVisible();
+    await expect(controls.getByRole("button", { name: "AI priority" })).toHaveAttribute("aria-pressed", "true");
+    await controls.getByRole("button", { name: "Delivery risk" }).click();
+    await expect(controls.getByRole("button", { name: "Delivery risk" })).toHaveAttribute("aria-pressed", "true");
+
+    const priorities = page.locator(".overview-priority-panel > button");
+    await expect(priorities).toHaveCount(5);
+    const selectedTitle = await priorities.nth(1).locator("strong").innerText();
+    await priorities.nth(1).click();
+    await expect(page.locator(".overview-focus-copy > strong")).toHaveText(selectedTitle);
+    await expect(priorities.nth(1)).toHaveAttribute("aria-pressed", "true");
+
+    const budgetBars = page.locator(".overview-budget-chart button");
+    await expect(budgetBars).toHaveCount(6);
+    await budgetBars.nth(2).click();
+    await expect(budgetBars.nth(2)).toHaveAttribute("aria-pressed", "true");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(controls).toBeVisible();
+    const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+    expect(hasHorizontalOverflow).toBe(false);
+  });
+
   test("priority desk decision loop, pulse, map, signals, and copilot render", async ({ page }) => {
     await loginIfNeeded(page);
     await page.goto("/");
@@ -329,6 +357,10 @@ test.describe("MP/admin web functional flow", () => {
     await loginIfNeeded(page);
 
     await page.goto("/#map");
+    const issueTabs = page.getByRole("tablist", { name: "Issue type map tabs" });
+    await expect(issueTabs).toBeVisible();
+    await expect(issueTabs.getByRole("tab", { name: /Roads/ })).toBeVisible();
+    await expect(issueTabs.getByRole("tab", { name: /Health/ })).toBeVisible();
     await page.getByLabel("GIS issue filter").selectOption("Roads");
     await expect(page.locator(".hotspot-row").first()).toContainText("Roads");
     await page.getByRole("button", { name: "Demand heatmap" }).click();
@@ -367,6 +399,9 @@ test.describe("MP/admin web functional flow", () => {
     const fallbackMap = page.getByLabel("India-boundary live tile map");
     await expect(fallbackMap).toHaveAttribute("data-map-boundary", "india");
     await expect(fallbackMap.locator(".hotspot").first()).toBeVisible();
+    await expect(fallbackMap.locator(".hotspot").first()).toContainText(/[🛣️💧🏥🎓🧹⚡📶💼📍]/u);
+    const markerColors = await fallbackMap.locator(".hotspot").evaluateAll((markers) => [...new Set(markers.map((marker) => (marker as HTMLElement).style.getPropertyValue("--issue-color")))].filter(Boolean));
+    expect(markerColors.length).toBeGreaterThan(1);
   });
 
   test("maps key without Map ID uses legacy markers and no marker library", async ({ page }) => {
@@ -410,6 +445,7 @@ test.describe("MP/admin web functional flow", () => {
     await page.goto("/#explore");
     await expect(page.locator(".map-state")).toContainText("Google Maps live");
     await expect(page.locator(".google-hotspot-marker").first()).toBeVisible();
+    await expect(page.locator(".google-hotspot-marker").first()).toContainText(/[🛣️💧🏥🎓🧹⚡📶💼📍]/u);
     await page.locator(".cluster-list button").first().click();
     await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
     await expect(page.getByText("Cluster context")).toBeVisible();
