@@ -106,6 +106,7 @@ type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: "review" | "shortlist" | "approved";
+  deliveryStatus?: "proposed" | "ongoing" | "delayed" | "completed";
   averageCitizenScore?: number;
   averageSubmissionQuality?: number;
   rewardedCitizenCount?: number;
@@ -115,6 +116,7 @@ type DashboardResponse = {
   generatedAt: string;
   totals: { submissions: number; wards: number; languages: number; botRisk: "low" | "medium" | "high" };
   projects: RankedProject[];
+  projectDeliveryStatuses?: Record<string, "proposed" | "ongoing" | "delayed" | "completed">;
   hotspots: Array<{ ward: string; category: string; intensity: number; lat: number; lng: number }>;
   access?: SessionUser;
 };
@@ -124,6 +126,23 @@ type WaterCannonAlertResponse = {
   message: string;
   delivery: "gcp_monitoring" | "disabled";
   recordedAt: string;
+};
+
+type AirQualityResponse = {
+  source: { name: string; model: string; url: string; attribution: string };
+  location: { constituencyName: string; ward: string; deploymentSite: string; latitude: number; longitude: number };
+  current: { observedAt: string; aqi: number; category: string; pm25: number; pm10: number; unit: string };
+  forecast: {
+    hours: number;
+    peakAqi: number;
+    peakCategory: string;
+    peakAt: string;
+    trend: "rising" | "falling" | "steady";
+    points: Array<{ time: string; aqi: number; pm25: number | null; pm10: number | null }>;
+  };
+  decision: { threshold: number; decisionAqi: number; recommended: boolean; reason: string };
+  generatedAt: string;
+  disclaimer: string;
 };
 
 type RegionResponse = {
@@ -609,9 +628,9 @@ const fallbackClientConfig: ClientConfig = {
     enabled: Boolean(envMapplsMapSdkKey || envGoogleMapsApiKey),
     apiKey: envGoogleMapsApiKey,
     mapId: envGoogleMapsMapId,
-    provider: envMapplsMapSdkKey ? "mappls" : envGoogleMapsApiKey ? "google" : "osm",
+    provider: envGoogleMapsApiKey ? "google" : envMapplsMapSdkKey ? "mappls" : "osm",
     mapplsKey: envMapplsMapSdkKey,
-    source: envMapplsMapSdkKey ? "vite-mappls-env" : envGoogleMapsApiKey ? "vite-env" : "not-configured"
+    source: envGoogleMapsApiKey ? "vite-google-env" : envMapplsMapSdkKey ? "vite-mappls-env" : "not-configured"
   },
   waterCannonAlert: { enabled: false, aqiThreshold: 301 },
   citizenAppUrl,
@@ -995,7 +1014,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""} ${page === "map" ? "map-focus" : ""}`}>
       <aside className="sidebar" aria-label="JanVaani navigation">
         <div className="brand">
           <div className="brand-mark"><img src={janVaaniLogo} alt="JanVaani AI" /></div>
@@ -1358,7 +1377,7 @@ function mergeClientConfig(config: ClientConfig): ClientConfig {
   const apiKey = config.maps.apiKey || envGoogleMapsApiKey;
   const mapId = config.maps.mapId || envGoogleMapsMapId;
   const mapplsKey = config.maps.mapplsKey || envMapplsMapSdkKey;
-  const provider = mapplsKey ? "mappls" : apiKey ? "google" : "osm";
+  const provider = apiKey ? "google" : mapplsKey ? "mappls" : "osm";
   return {
     ...config,
     waterCannonAlert: config.waterCannonAlert ?? fallbackClientConfig.waterCannonAlert,
@@ -1369,7 +1388,7 @@ function mergeClientConfig(config: ClientConfig): ClientConfig {
       mapId,
       provider,
       mapplsKey,
-      source: config.maps.source || (mapplsKey ? "runtime-mappls-api" : apiKey ? "runtime-api" : "not-configured")
+      source: config.maps.source || (apiKey ? "runtime-google-api" : mapplsKey ? "runtime-mappls-api" : "not-configured")
     },
     citizenAppUrl: config.citizenAppUrl?.trim() || citizenAppUrl
   };
@@ -1477,6 +1496,8 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
   const [overviewLens, setOverviewLens] = useState<"priority" | "delivery" | "impact">("priority");
   const [waterCannonStatus, setWaterCannonStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [waterCannonMessage, setWaterCannonMessage] = useState("");
+  const [airQuality, setAirQuality] = useState<AirQualityResponse | null>(null);
+  const [airQualityStatus, setAirQualityStatus] = useState<"idle" | "loading" | "live" | "error">("idle");
   const rankedProjects = useMemo(() => {
     const deliveryWeight = (project: ManagedProject) => project.deliveryStatus === "delayed" ? 3 : project.deliveryStatus === "ongoing" ? 2 : project.deliveryStatus === "proposed" ? 1 : 0;
     return [...projects].sort((a, b) => {
@@ -1501,11 +1522,36 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
   ]));
   const completed = projects.filter((project) => project.deliveryStatus === "completed").length;
   const delayed = projects.filter((project) => project.deliveryStatus === "delayed").length;
-  const pollutionAqi = Math.max(318, waterCannonAlert.aqiThreshold);
+  useEffect(() => {
+    let cancelled = false;
+    if (!waterCannonAlert.enabled) {
+      setAirQuality(null);
+      setAirQualityStatus("idle");
+      return () => { cancelled = true; };
+    }
+    setAirQualityStatus("loading");
+    void requestJson<AirQualityResponse>("/api/air-quality/water-cannon")
+      .then((result) => {
+        if (cancelled) return;
+        setAirQuality(result);
+        setAirQualityStatus("live");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAirQuality(null);
+        setAirQualityStatus("error");
+      });
+    return () => { cancelled = true; };
+  }, [waterCannonAlert.enabled, waterCannonAlert.constituencyId]);
+
+  const pollutionAqi = airQuality?.decision.decisionAqi ?? waterCannonAlert.aqiThreshold;
+  const pollutionCategory = airQuality && airQuality.forecast.peakAqi > airQuality.current.aqi
+    ? airQuality.forecast.peakCategory
+    : airQuality?.current.category;
   const alertItems = [
-    ...(waterCannonAlert.enabled ? [{
-      title: `High air pollution · AQI ${pollutionAqi} (Very Poor)`,
-      detail: `Deploy at ${waterCannonAlert.deploymentSite}, ${waterCannonAlert.ward} · ${waterCannonAlert.constituencyName} constituency`,
+    ...(waterCannonAlert.enabled && airQuality?.decision.recommended ? [{
+      title: `Delhi pollution · AQI ${pollutionAqi} (${pollutionCategory})`,
+      detail: `Deploy at ${airQuality.location.deploymentSite}, ${airQuality.location.ward} · predicted ${airQuality.forecast.trend} over ${airQuality.forecast.hours}h`,
       tone: "high",
       action: "water-cannon" as const
     }] : []),
@@ -1527,6 +1573,11 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
 
   async function deployWaterCannon() {
     if (waterCannonStatus === "sending") return;
+    if (!airQuality?.decision.recommended) {
+      setWaterCannonStatus("error");
+      setWaterCannonMessage("Live pollution data does not currently meet the deployment threshold.");
+      return;
+    }
     setWaterCannonStatus("sending");
     setWaterCannonMessage("");
     try {
@@ -1628,6 +1679,29 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
 
         <section className="panel overview-alert-panel">
           <PanelTitle title="Real-Time Alerts" icon={Zap} detail="requires action" />
+          {waterCannonAlert.enabled ? (
+            <article className={`air-quality-forecast ${airQualityStatus}`} aria-label="Delhi air quality forecast">
+              <header>
+                <span><Wifi size={14} /> Delhi air forecast</span>
+                <mark>{airQualityStatus === "live" ? "Live" : airQualityStatus === "loading" ? "Loading" : "Unavailable"}</mark>
+              </header>
+              {airQuality ? (
+                <>
+                  <div className="air-quality-metrics">
+                    <div><span>Current AQI</span><strong>{airQuality.current.aqi}</strong><small>{airQuality.current.category}</small></div>
+                    <div><span>PM2.5</span><strong>{airQuality.current.pm25}</strong><small>{airQuality.current.unit}</small></div>
+                    <div><span>PM10</span><strong>{airQuality.current.pm10}</strong><small>{airQuality.current.unit}</small></div>
+                    <div><span>{airQuality.forecast.hours}h peak</span><strong>{airQuality.forecast.peakAqi}</strong><small>{airQuality.forecast.trend} · {airQuality.forecast.peakAt.slice(11, 16)}</small></div>
+                  </div>
+                  <div className="air-quality-trend" aria-label={`${airQuality.forecast.hours} hour AQI prediction`}>
+                    {airQuality.forecast.points.map((point) => <i key={point.time} title={`${point.time}: AQI ${point.aqi}`} style={{ height: `${Math.max(12, Math.min(100, point.aqi / 5))}%` }} />)}
+                  </div>
+                  <p>{airQuality.location.deploymentSite} · {airQuality.location.constituencyName} constituency</p>
+                  <footer>Forecast estimate from Open-Meteo + CAMS; verify with the local control room.</footer>
+                </>
+              ) : <p>{airQualityStatus === "loading" ? "Loading the latest pollution reading and 12-hour prediction…" : "Pollution feed is temporarily unavailable; no automatic deployment recommendation is shown."}</p>}
+            </article>
+          ) : null}
           {alertItems.map((item) => (
             <button
               className={`${item.tone}${item.action === "water-cannon" ? " water-cannon-alert" : ""}`}
@@ -1752,6 +1826,7 @@ function ExplorePage({
           setBoundaryLevel={setBoundaryLevel}
           selectedProjectId={selectedProject.id}
           selectProject={selectAndOpen}
+          exitMap={() => setPage("overview")}
         />
       </section>
       <section className="panel state-onboarding-panel">
@@ -1789,7 +1864,8 @@ function IssueMap({
   boundaryLevel,
   setBoundaryLevel,
   selectedProjectId,
-  selectProject
+  selectProject,
+  exitMap
 }: {
   dashboard: DashboardResponse;
   maps: ClientConfig["maps"];
@@ -1799,6 +1875,7 @@ function IssueMap({
   setBoundaryLevel: (level: BoundaryLevel) => void;
   selectedProjectId: string;
   selectProject: (id: string) => void;
+  exitMap: () => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [mapState, setMapState] = useState<MapLoadState>(maps.enabled ? "idle" : "fallback");
@@ -1811,16 +1888,22 @@ function IssueMap({
   const [mapOverlay, setMapOverlay] = useState<"hotspots" | "clusters" | "heatmap">("hotspots");
   const [showLayerList, setShowLayerList] = useState(false);
   const [showGisTools, setShowGisTools] = useState(false);
+  const [showMapFilters, setShowMapFilters] = useState(false);
+  const [mapSearch, setMapSearch] = useState("");
+  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const allHotspots = useMemo(() => buildMapHotspots(dashboard).filter(isWithinIndiaBounds), [dashboard]);
   const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
+    const search = mapSearch.trim().toLowerCase();
+    const searchMatches = !search || [hotspot.ward, hotspot.category, hotspot.projectId]
+      .some((value) => value.toLowerCase().includes(search));
     const issueMatches = issueFilter === "All issue types" || normalizedIssueFilter(issueFilter) === normalizedIssueFilter(hotspot.category);
     const confidenceMatches =
       confidenceFilter === "All confidence levels"
         || (confidenceFilter === "High confidence" && hotspot.confidence >= 0.75)
         || (confidenceFilter === "Needs verification" && hotspot.confidence < 0.75);
     const timelineMatches = hotspot.batchPosition <= timelineValue;
-    return issueMatches && confidenceMatches && timelineMatches && categoryLayerEnabled(hotspot.category, activeLayers);
-  }), [activeLayers, allHotspots, confidenceFilter, issueFilter, timelineValue]);
+    return searchMatches && issueMatches && confidenceMatches && timelineMatches && categoryLayerEnabled(hotspot.category, activeLayers);
+  }), [activeLayers, allHotspots, confidenceFilter, issueFilter, mapSearch, timelineValue]);
   const visibleClusters = useMemo(() => {
     const visibleProjectIds = new Set(hotspots.map((hotspot) => hotspot.projectId));
     return clusters.clusters.flatMap((cluster) => {
@@ -1930,17 +2013,13 @@ function IssueMap({
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
+          zoomControl: true,
           clickableIcons: false,
           gestureHandling: "greedy",
+          colorScheme: "DARK",
+          backgroundColor: "#0d1022",
           ...indiaMapRestriction(),
-          ...(maps.mapId
-            ? { mapId: maps.mapId }
-            : {
-              styles: [
-                { featureType: "poi", stylers: [{ visibility: "off" }] },
-                { featureType: "transit", stylers: [{ visibility: "off" }] }
-              ]
-            })
+          ...(maps.mapId ? { mapId: maps.mapId } : {})
         });
         googleMapRef.current = map;
         fitDoneRef.current = false;
@@ -2048,8 +2127,14 @@ function IssueMap({
     boundaryObjectsRef.current.push(...drawBoundaryOverlay(map, features, selectProject));
   }, [mapState, boundaries, boundaryLevel, maps.provider, selectProject]);
 
+  useEffect(() => {
+    const map = googleMapRef.current;
+    if (mapState !== "ready" || maps.provider !== "google" || !map) return;
+    map.setMapTypeId(mapType);
+  }, [mapState, mapType, maps.provider]);
+
   return (
-    <div className="map-stack gis-dashboard">
+    <div className="map-stack gis-dashboard reference-map-dashboard">
       <div className="map-toolbar">
         <div>
           <strong>Geospatial demand hotspots</strong>
@@ -2058,7 +2143,7 @@ function IssueMap({
         <small className={`map-state ${mapState}`}>{mapStatusText(mapState, maps.provider)}</small>
       </div>
       <div className="map-layout gis-layout">
-        <aside className="gis-control-panel" aria-label="GIS layer controls">
+        <aside className={`gis-control-panel ${showMapFilters ? "map-filter-open" : ""}`} aria-label="GIS layer controls">
           <section>
             <h4>Filters</h4>
             <select aria-label="GIS issue filter" value={issueFilter} onChange={(event) => {
@@ -2133,6 +2218,17 @@ function IssueMap({
           <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""} overlay-${mapOverlay}`}>
             <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
             {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
+            <div className="reference-map-search">
+              <button className="reference-map-home" onClick={exitMap} title="Back to overview" type="button"><Home size={18} /><span>LokSetu</span></button>
+              <label><Search size={18} /><input aria-label="Search constituency or issue" placeholder="Search constituency, ward or issue…" value={mapSearch} onChange={(event) => setMapSearch(event.currentTarget.value)} /></label>
+              <button className={showMapFilters ? "active" : ""} aria-expanded={showMapFilters} onClick={() => setShowMapFilters((current) => !current)} type="button"><Target size={17} /> Filter</button>
+            </div>
+            <div className="reference-map-shortcuts" aria-label="Map shortcuts">
+              <button className={mapOverlay === "hotspots" ? "active" : ""} onClick={() => setMapOverlay("hotspots")} type="button">🔥 Hotspots</button>
+              <button className={mapOverlay === "clusters" ? "active" : ""} onClick={() => setMapOverlay("clusters")} type="button">🫧 Clusters</button>
+              <button className={mapOverlay === "heatmap" ? "active" : ""} onClick={() => setMapOverlay("heatmap")} type="button">🌡️ Heatmap</button>
+              <button className={mapType === "satellite" ? "active" : ""} onClick={() => setMapType((current) => current === "roadmap" ? "satellite" : "roadmap")} type="button">🛰️ Satellite</button>
+            </div>
             <div className="gis-map-actions" aria-label="GIS map tools">
               <button className={mapOverlay === "hotspots" ? "active" : ""} aria-pressed={mapOverlay === "hotspots"} onClick={() => { setMapOverlay("hotspots"); setGisAction(`AI hotspot detection refreshed ${hotspots.length} filtered ward signals.`); }} type="button">AI hotspot detection</button>
               <button className={mapOverlay === "clusters" ? "active" : ""} aria-pressed={mapOverlay === "clusters"} onClick={() => { setMapOverlay("clusters"); setGisAction(`${visibleClusters.length} cluster markers loaded for visible map signals.`); }} type="button">Cluster markers</button>
@@ -2730,49 +2826,31 @@ function mapStatusText(state: MapLoadState, provider?: ClientConfig["maps"]["pro
   return "Live tile map";
 }
 
-function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void): MapOverlayObject {
+function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, _useAdvancedMarker: boolean, onClick: () => void): MapOverlayObject {
   const position = { lat: hotspot.lat, lng: hotspot.lng };
   const title = `${hotspot.category} in ${hotspot.ward}`;
   const markerStyle = issueMapStyle(hotspot.category);
-  const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
+  const content = document.createElement("button");
+  content.className = "google-issue-badge";
+  content.type = "button";
+  content.title = title;
+  content.setAttribute("aria-label", `${title}, priority score ${hotspot.intensity}`);
+  content.style.setProperty("--issue-color", markerStyle.color);
+  content.innerHTML = `<span>${markerStyle.emoji}</span><strong>${markerStyle.category}</strong><small>${hotspot.intensity}</small>`;
+  content.addEventListener("click", onClick);
 
-  if (useAdvancedMarker && AdvancedMarkerElement) {
-    const content = document.createElement("button");
-    content.className = "google-hotspot-marker";
-    content.type = "button";
-    content.textContent = markerStyle.emoji;
-    content.title = title;
-    content.dataset.issueCategory = markerStyle.category;
-    content.style.setProperty("--issue-color", markerStyle.color);
-    content.addEventListener("click", onClick);
-
-    const marker = new AdvancedMarkerElement({
-      map,
-      position,
-      title,
-      content
-    });
-    marker.addEventListener("gmp-click", onClick);
-    return marker;
-  }
-
-  const marker = new window.google.maps.Marker({
-    map,
-    position,
-    title,
-    label: { text: markerStyle.emoji, fontSize: "17px" },
-    icon: {
-      path: window.google.maps.SymbolPath?.CIRCLE ?? 0,
-      scale: 18,
-      fillColor: markerStyle.color,
-      fillOpacity: 1,
-      strokeColor: "#ffffff",
-      strokeWeight: 3
-    },
-    optimized: true
-  });
-  marker.addListener("click", onClick);
-  return marker;
+  const overlay = new window.google.maps.OverlayView();
+  overlay.onAdd = () => overlay.getPanes()?.overlayMouseTarget.appendChild(content);
+  overlay.draw = () => {
+    const point = overlay.getProjection()?.fromLatLngToDivPixel(new window.google.maps.LatLng(position));
+    if (!point) return;
+    content.style.left = `${point.x}px`;
+    content.style.top = `${point.y}px`;
+    content.style.setProperty("--badge-shift", `${(index % 3 - 1) * 8}px`);
+  };
+  overlay.onRemove = () => content.remove();
+  overlay.setMap(map);
+  return overlay;
 }
 
 type MapOverlayObject = { setMap?: (map: unknown) => void; map?: unknown };
@@ -3878,10 +3956,31 @@ type ManagedProject = RankedProject & {
 };
 
 function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: ClientConfig["maps"] }) {
-  const managedProjects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
+  const [deliveryOverrides, setDeliveryOverrides] = useState<Record<string, ManagedProjectStatus>>(dashboard.projectDeliveryStatuses ?? {});
+  const managedProjects = useMemo(
+    () => buildManagedProjects(dashboard.projects, { ...(dashboard.projectDeliveryStatuses ?? {}), ...deliveryOverrides }),
+    [dashboard.projectDeliveryStatuses, dashboard.projects, deliveryOverrides]
+  );
   const [selectedProjectId, setSelectedProjectId] = useState(managedProjects[0]?.id ?? fallbackProject.id);
   const [projectAction, setProjectAction] = useState("Project actions ready.");
+  const [projectSearch, setProjectSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | ManagedProjectStatus>("all");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<ManagedProjectStatus | null>(null);
+  const [savingProjectId, setSavingProjectId] = useState<string | null>(null);
   const selectedProject = managedProjects.find((project) => project.id === selectedProjectId) ?? managedProjects[0];
+  const departments = useMemo(() => [...new Set(managedProjects.map((project) => project.department))].sort(), [managedProjects]);
+  const filteredProjects = useMemo(() => {
+    const query = projectSearch.trim().toLowerCase();
+    return managedProjects.filter((project) => {
+      const matchesQuery = !query || [project.title, project.department, project.contractor, project.ward]
+        .some((value) => value.toLowerCase().includes(query));
+      const matchesStatus = statusFilter === "all" || project.deliveryStatus === statusFilter;
+      const matchesDepartment = departmentFilter === "all" || project.department === departmentFilter;
+      return matchesQuery && matchesStatus && matchesDepartment;
+    });
+  }, [departmentFilter, managedProjects, projectSearch, statusFilter]);
   const statusCounts = {
     ongoing: managedProjects.filter((project) => project.deliveryStatus === "ongoing").length,
     completed: managedProjects.filter((project) => project.deliveryStatus === "completed").length,
@@ -3896,6 +3995,37 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
     { status: "delayed", title: "Delayed" },
     { status: "completed", title: "Completed" }
   ];
+
+  useEffect(() => {
+    setDeliveryOverrides((current) => ({ ...(dashboard.projectDeliveryStatuses ?? {}), ...current }));
+  }, [dashboard.projectDeliveryStatuses]);
+
+  async function updateDeliveryStatus(projectId: string, nextStatus: ManagedProjectStatus) {
+    const project = managedProjects.find((item) => item.id === projectId);
+    if (!project || project.deliveryStatus === nextStatus || savingProjectId === projectId) return;
+    const previousStatus = project.deliveryStatus;
+    setDeliveryOverrides((current) => ({ ...current, [projectId]: nextStatus }));
+    setSavingProjectId(projectId);
+    setProjectAction(`Saving ${project.title} as ${nextStatus}…`);
+    try {
+      const response = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/delivery-status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus })
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error ?? "Project status update failed");
+      }
+      setProjectAction(`${project.title} moved to ${nextStatus}. The delivery status is saved.`);
+    } catch (error) {
+      setDeliveryOverrides((current) => ({ ...current, [projectId]: previousStatus }));
+      setProjectAction(error instanceof Error ? `${error.message}. Status restored.` : "Project status update failed. Status restored.");
+    } finally {
+      setSavingProjectId(null);
+      setDraggedProjectId(null);
+      setDropTarget(null);
+    }
+  }
 
   return (
     <section className="projects-page">
@@ -3914,25 +4044,22 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
       </section>
 
       <section className="panel pm-toolbar">
-        <label className="pm-search"><Search size={17} /><input placeholder="Search projects, departments, contractors, wards..." /></label>
-        <select aria-label="Project status filter" defaultValue="All statuses">
-          <option>All statuses</option>
-          <option>Ongoing</option>
-          <option>Completed</option>
-          <option>Delayed</option>
-          <option>Proposed</option>
+        <label className="pm-search"><Search size={17} /><input placeholder="Search projects, departments, contractors, wards..." value={projectSearch} onChange={(event) => setProjectSearch(event.currentTarget.value)} /></label>
+        <select aria-label="Project status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value as "all" | ManagedProjectStatus)}>
+          <option value="all">All statuses</option>
+          <option value="ongoing">Ongoing</option>
+          <option value="completed">Completed</option>
+          <option value="delayed">Delayed</option>
+          <option value="proposed">Proposed</option>
         </select>
-        <select aria-label="Project department filter" defaultValue="All departments">
-          <option>All departments</option>
-          <option>Public Works</option>
-          <option>Health</option>
-          <option>Education</option>
-          <option>Water Board</option>
+        <select aria-label="Project department filter" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.currentTarget.value)}>
+          <option value="all">All departments</option>
+          {departments.map((department) => <option key={department} value={department}>{department}</option>)}
         </select>
       </section>
 
       <section className="pm-card-grid">
-        {managedProjects.slice(0, 8).map((project) => (
+        {filteredProjects.slice(0, 8).map((project) => (
           <button className={`panel pm-project-card ${project.id === selectedProject?.id ? "active" : ""}`} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
             <div className="pm-card-head">
               <span className={`pm-status ${project.deliveryStatus}`}>{project.deliveryStatus}</span>
@@ -3950,24 +4077,66 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
             </dl>
           </button>
         ))}
+        {!filteredProjects.length ? <p className="empty-state panel">No projects match the current filters.</p> : null}
       </section>
 
       <section className="pm-workgrid">
         <section className="panel pm-kanban">
           <PanelTitle title="Kanban Board" icon={Briefcase} detail="Linear/Jira delivery flow" />
+          <p className="pm-kanban-help">Drag a project into another column, or use its status menu for keyboard and touch access.</p>
           <div className="pm-kanban-grid">
             {kanbanColumns.map((column) => (
-              <article key={column.status}>
-                <h4>{column.title}</h4>
-                {managedProjects.filter((project) => project.deliveryStatus === column.status).slice(0, 4).map((project) => (
-                  <button className={project.id === selectedProject?.id ? "active" : ""} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
-                    <strong>{project.title}</strong>
-                    <span>{project.department} · {project.progress}%</span>
-                  </button>
+              <article
+                className={dropTarget === column.status ? "drop-target" : ""}
+                key={column.status}
+                onDragEnter={() => setDropTarget(column.status)}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const projectId = event.dataTransfer.getData("text/plain") || draggedProjectId;
+                  if (projectId) void updateDeliveryStatus(projectId, column.status);
+                }}
+              >
+                <h4><span>{column.title}</span><b>{filteredProjects.filter((project) => project.deliveryStatus === column.status).length}</b></h4>
+                {filteredProjects.filter((project) => project.deliveryStatus === column.status).map((project) => (
+                  <div
+                    className={`pm-kanban-card ${project.id === selectedProject?.id ? "active" : ""} ${draggedProjectId === project.id ? "dragging" : ""}`}
+                    draggable={savingProjectId !== project.id}
+                    key={project.id}
+                    onDragEnd={() => { setDraggedProjectId(null); setDropTarget(null); }}
+                    onDragStart={(event) => {
+                      setDraggedProjectId(project.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", project.id);
+                    }}
+                  >
+                    <button className="pm-kanban-select-project" onClick={() => setSelectedProjectId(project.id)} type="button">
+                      <strong>{project.title}</strong>
+                      <span>{project.department} · {project.progress}%</span>
+                    </button>
+                    <label>
+                      <span>Move to</span>
+                      <select
+                        aria-label={`Move ${project.title} to another status`}
+                        disabled={savingProjectId === project.id}
+                        value={project.deliveryStatus}
+                        onChange={(event) => void updateDeliveryStatus(project.id, event.currentTarget.value as ManagedProjectStatus)}
+                      >
+                        {kanbanColumns.map((option) => <option key={option.status} value={option.status}>{option.title}</option>)}
+                      </select>
+                    </label>
+                  </div>
                 ))}
               </article>
             ))}
           </div>
+          <p className="action-status pm-kanban-status" role="status" aria-live="polite">{projectAction}</p>
         </section>
 
         <section className="panel pm-gantt">
@@ -4017,6 +4186,25 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
       </section>
 
       {selectedProject ? (
+        <>
+        <section className="panel pm-selected-project">
+          <div>
+            <span>Selected project</span>
+            <strong>{selectedProject.title}</strong>
+            <small>{selectedProject.ward} · {selectedProject.department}</small>
+          </div>
+          <label>
+            Delivery status
+            <select
+              aria-label={`Delivery status for ${selectedProject.title}`}
+              disabled={savingProjectId === selectedProject.id}
+              value={selectedProject.deliveryStatus}
+              onChange={(event) => void updateDeliveryStatus(selectedProject.id, event.currentTarget.value as ManagedProjectStatus)}
+            >
+              {kanbanColumns.map((option) => <option key={option.status} value={option.status}>{option.title}</option>)}
+            </select>
+          </label>
+        </section>
         <section className="pm-detail-grid">
           <section className="panel pm-milestones">
             <PanelTitle title="Milestone Tracker" icon={CheckCircle2} detail={selectedProject.title} />
@@ -4057,12 +4245,13 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
             </ul>
           </section>
         </section>
+        </>
       ) : null}
     </section>
   );
 }
 
-function buildManagedProjects(projects: RankedProject[]): ManagedProject[] {
+function buildManagedProjects(projects: RankedProject[], deliveryStatuses: Record<string, ManagedProjectStatus> = {}): ManagedProject[] {
   const departments: Record<string, string> = {
     Roads: "Public Works",
     Water: "Water Board",
@@ -4111,7 +4300,7 @@ function buildManagedProjects(projects: RankedProject[]): ManagedProject[] {
       };
     });
   return portfolio.map((project, index) => {
-    const deliveryStatus = statuses[index % statuses.length];
+    const deliveryStatus = deliveryStatuses[project.id] ?? project.deliveryStatus ?? statuses[index % statuses.length];
     const progress = deliveryStatus === "completed" ? 100 : deliveryStatus === "delayed" ? 42 + (index % 4) * 7 : deliveryStatus === "proposed" ? 12 + (index % 3) * 9 : 58 + (index % 5) * 6;
     const budgetCr = Number((1.8 + (project.score / 100) * 5.8 + (index % 4) * 0.7).toFixed(1));
     const spentCr = Number((budgetCr * Math.min(0.96, Math.max(0.12, progress / 100 + (deliveryStatus === "delayed" ? 0.16 : -0.04)))).toFixed(1));

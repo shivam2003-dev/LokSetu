@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { seedSubmissions } from "./data.js";
-import { AuthUser, BatchRun, DashboardPermission, RawIntakePayload, RawIntakeRecord, Submission, UserRole } from "./types.js";
+import { AuthUser, BatchRun, DashboardPermission, ProjectDeliveryStatus, RawIntakePayload, RawIntakeRecord, Submission, UserRole } from "./types.js";
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
@@ -67,9 +67,54 @@ export async function initDatabase(): Promise<void> {
   await pool.query("alter table app_users add column if not exists district text");
   await pool.query("alter table app_users add column if not exists constituency_id text");
 
+  await pool.query(`
+    create table if not exists project_delivery_status (
+      project_id text primary key,
+      status text not null check (status in ('proposed', 'ongoing', 'delayed', 'completed')),
+      actor text not null,
+      updated_at timestamptz not null
+    )
+  `);
+
   for (const submission of seedSubmissions) {
     await insertSubmission(submission);
   }
+}
+
+export type ProjectDeliveryStatusRecord = {
+  projectId: string;
+  status: ProjectDeliveryStatus;
+  actor: string;
+  updatedAt: string;
+};
+
+export async function listProjectDeliveryStatuses(): Promise<ProjectDeliveryStatusRecord[]> {
+  if (!pool) return [];
+  const result = await pool.query<{
+    project_id: string;
+    status: ProjectDeliveryStatus;
+    actor: string;
+    updated_at: Date;
+  }>("select project_id, status, actor, updated_at from project_delivery_status order by updated_at desc");
+  return result.rows.map((row) => ({
+    projectId: row.project_id,
+    status: row.status,
+    actor: row.actor,
+    updatedAt: row.updated_at.toISOString()
+  }));
+}
+
+export async function upsertProjectDeliveryStatus(record: ProjectDeliveryStatusRecord): Promise<void> {
+  if (!pool) return;
+  await pool.query(
+    `insert into project_delivery_status (project_id, status, actor, updated_at)
+     values ($1, $2, $3, $4)
+     on conflict (project_id) do update set
+       status = excluded.status,
+       actor = excluded.actor,
+       updated_at = excluded.updated_at`,
+    [record.projectId, record.status, record.actor, record.updatedAt]
+  );
 }
 
 export async function listSubmissions(): Promise<Submission[]> {

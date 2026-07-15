@@ -20,14 +20,16 @@ import {
   isDatabaseEnabled,
   listRecentBatchRuns,
   listRecentRawIntakes,
+  listProjectDeliveryStatuses,
   listSubmissions,
+  upsertProjectDeliveryStatus,
   verifyPassword
 } from "./db.js";
 import { runBatch } from "./batch.js";
 import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayload } from "./intake.js";
 import { buildDiscardedIntakeDecision, isDiscardedPayload, MINIMUM_STORED_CITIZEN_SCORE } from "./noisePolicy.js";
 import { buildDashboard } from "./pipeline.js";
-import { AadhaarIdentity, AuthUser, DashboardFilters, DashboardPermission, ProjectStatus, RankedProject, UserProfile, UserRole } from "./types.js";
+import { AadhaarIdentity, AuthUser, DashboardFilters, DashboardPermission, ProjectDeliveryStatus, ProjectStatus, RankedProject, UserProfile, UserRole } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
 import { indicRuntimeMode, translateUiStrings } from "./indicLanguage.js";
 import { seedUiTranslations, seedWebUiTranslations } from "./uiTranslations.js";
@@ -37,6 +39,7 @@ import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from
 import { buildEnterpriseSituation } from "./enterprise.js";
 import { BoundaryLevel, buildBoundaryFeatures, buildHotspotClusters } from "./mapIntelligence.js";
 import { recordWaterCannonDeployment, waterCannonAlertsEnabled, waterCannonAqiThreshold, waterCannonTarget } from "./waterCannonAlerts.js";
+import { fetchAirQualityForecast } from "./airQuality.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -64,6 +67,7 @@ const memoryAuditEvents: Array<{
   constituencyId?: string;
 }> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
+const memoryProjectDeliveryStatus = new Map<string, { status: ProjectDeliveryStatus; updatedAt: string; actor: string }>();
 const memoryProjectRatings = new Map<string, Array<{ rating: number; createdAt: string }>>();
 const apiRateLimit = rateLimit({
   windowMs: 60_000,
@@ -116,6 +120,10 @@ const mappingUpdateSchema = z.object({
 const projectStatusSchema = z.object({
   actorId: z.string().default("mp-user-delhi-central"),
   status: z.enum(["review", "shortlist", "approved"])
+});
+
+const projectDeliveryStatusSchema = z.object({
+  status: z.enum(["proposed", "ongoing", "delayed", "completed"])
 });
 
 const copilotQuerySchema = z.object({
@@ -468,9 +476,9 @@ app.get("/api/client-config", (request, response) => {
       enabled: Boolean(mapplsMapSdkKey || browserMapsKey),
       apiKey: browserMapsKey,
       mapId: process.env.GOOGLE_MAPS_MAP_ID ?? process.env.VITE_GOOGLE_MAPS_MAP_ID ?? "",
-      provider: mapplsMapSdkKey ? "mappls" : browserMapsKey ? "google" : "osm",
+      provider: browserMapsKey ? "google" : mapplsMapSdkKey ? "mappls" : "osm",
       mapplsKey: mapplsMapSdkKey,
-      source: mapplsMapSdkKey ? "runtime-mappls-api" : browserMapsKey ? "runtime-api" : "not-configured"
+      source: browserMapsKey ? "runtime-google-api" : mapplsMapSdkKey ? "runtime-mappls-api" : "not-configured"
     },
     waterCannonAlert: {
       enabled: alertVisible,
@@ -480,6 +488,25 @@ app.get("/api/client-config", (request, response) => {
     citizenAppUrl: process.env.CITIZEN_APP_URL ?? "",
     generatedAt: new Date().toISOString()
   });
+});
+
+app.get("/api/air-quality/water-cannon", async (request, response) => {
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("dashboard:view") && principal.role !== "state_admin") {
+    response.status(403).json({ error: "Dashboard permission required to view air quality" });
+    return;
+  }
+  const target = waterCannonTarget();
+  if (!geographyWithinPrincipal(principal, target.state, target.district, target.constituencyId)) {
+    response.status(403).json({ error: "Delhi air-quality forecast is outside this user's configured geography" });
+    return;
+  }
+  try {
+    response.json(await fetchAirQualityForecast(target, waterCannonAqiThreshold()));
+  } catch (error) {
+    logger.warn({ error, target }, "air-quality forecast unavailable");
+    response.status(503).json({ error: "Delhi air-quality forecast is temporarily unavailable" });
+  }
 });
 
 app.get("/api/context", (request, response) => {
@@ -1396,6 +1423,45 @@ app.patch("/api/projects/:projectId/status", async (request, response) => {
   response.json({ project: updatedProject, updatedAt });
 });
 
+app.patch("/api/projects/:projectId/delivery-status", async (request, response) => {
+  const parsed = projectDeliveryStatusSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid project delivery status", details: parsed.error.flatten() });
+    return;
+  }
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("projects:update")) {
+    response.status(403).json({ error: "Project update permission required" });
+    return;
+  }
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, { scope: "global" }));
+  const projectId = request.params.projectId;
+  const sourceProjectId = projectId.replace(/-portfolio-\d+$/, "");
+  const project = dashboard.projects.find((item) => item.id === projectId || item.id === sourceProjectId);
+  if (!project) {
+    response.status(404).json({ error: "Project not found in the authorized dashboard scope" });
+    return;
+  }
+  const record = {
+    status: parsed.data.status,
+    updatedAt: new Date().toISOString(),
+    actor: principal.displayName
+  };
+  memoryProjectDeliveryStatus.set(projectId, record);
+  await upsertProjectDeliveryStatus({ projectId, ...record });
+  memoryAuditEvents.unshift({
+    at: record.updatedAt,
+    actor: principal.displayName,
+    action: "updated_project_delivery_status",
+    object: `${project.title} -> ${record.status}`,
+    privacyMode: false,
+    state: project.state,
+    district: project.district,
+    constituencyId: project.mpId
+  });
+  response.json({ projectId, deliveryStatus: record.status, updatedAt: record.updatedAt, actor: record.actor });
+});
+
 app.post("/api/projects/:projectId/ratings", async (request, response) => {
   const parsed = z.object({ rating: z.coerce.number().min(1).max(5) }).safeParse(request.body);
   if (!parsed.success) {
@@ -1480,7 +1546,13 @@ app.post("/api/whatsapp/simulate", async (request, response) => {
 });
 
 initDatabase()
-  .then(() => {
+  .then(async () => {
+    const deliveryStatuses = await listProjectDeliveryStatuses();
+    deliveryStatuses.forEach((record) => memoryProjectDeliveryStatus.set(record.projectId, {
+      status: record.status,
+      updatedAt: record.updatedAt,
+      actor: record.actor
+    }));
     if (!defaultAdminUsername || !defaultAdminPassword) return;
     return ensureAuthUser({
       id: `admin-user-${defaultAdminUsername.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
@@ -1564,13 +1636,20 @@ async function buildDashboardWithOverrides(filters: DashboardFilters = {}) {
   return applyProjectOverrides(buildDashboard(await getSubmissions(), filters));
 }
 
-function applyProjectOverrides<T extends { projects: RankedProject[] }>(dashboard: T): T {
+function applyProjectOverrides<T extends { projects: RankedProject[] }>(dashboard: T): T & { projectDeliveryStatuses: Record<string, ProjectDeliveryStatus> } {
+  const visibleProjectIds = new Set(dashboard.projects.map((project) => project.id));
   return {
     ...dashboard,
+    projectDeliveryStatuses: Object.fromEntries(
+      [...memoryProjectDeliveryStatus.entries()]
+        .filter(([projectId]) => visibleProjectIds.has(projectId.replace(/-portfolio-\d+$/, "")))
+        .map(([projectId, record]) => [projectId, record.status])
+    ),
     projects: dashboard.projects.map((project) => {
       const statusOverride = memoryProjectStatus.get(project.id);
+      const deliveryStatusOverride = memoryProjectDeliveryStatus.get(project.id);
       const ratings = memoryProjectRatings.get(project.id) ?? [];
-      if (!statusOverride && ratings.length === 0) return project;
+      if (!statusOverride && !deliveryStatusOverride && ratings.length === 0) return project;
       const ratingValues = [project.averageRating, ...ratings.map((item) => item.rating)];
       const averageRating = ratings.length
         ? Number((ratingValues.reduce((sum, value) => sum + value, 0) / ratingValues.length).toFixed(2))
@@ -1578,6 +1657,7 @@ function applyProjectOverrides<T extends { projects: RankedProject[] }>(dashboar
       return {
         ...project,
         status: statusOverride?.status ?? project.status,
+        deliveryStatus: deliveryStatusOverride?.status ?? project.deliveryStatus,
         averageRating,
         ratings: project.ratings + ratings.length,
         evidence: statusOverride ? [`MP status updated to ${statusOverride.status} by ${statusOverride.actor}`, ...project.evidence] : project.evidence

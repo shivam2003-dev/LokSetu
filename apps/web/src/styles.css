@@ -3109,6 +3109,37 @@ meter::-moz-meter-bar {
   transform: scale(1.12);
 }
 
+.google-issue-badge {
+  position: absolute;
+  transform: translate(calc(-50% + var(--badge-shift, 0px)), -50%);
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 7px;
+  min-width: 92px;
+  border: 1px solid color-mix(in srgb, var(--issue-color) 52%, #8892b8);
+  border-radius: 12px;
+  background: rgba(17, 20, 42, 0.94);
+  color: #f8fafc;
+  padding: 7px 10px 7px 8px;
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42), inset 3px 0 0 var(--issue-color);
+  backdrop-filter: blur(9px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.google-issue-badge > span {
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 19px;
+}
+
+.google-issue-badge strong { font-size: 11px; line-height: 1.1; }
+.google-issue-badge small { color: #aeb7d4; font-size: 9px; font-weight: 800; }
+.google-issue-badge:hover,
+.google-issue-badge:focus-visible { z-index: 3; border-color: var(--issue-color); transform: translate(calc(-50% + var(--badge-shift, 0px)), -50%) scale(1.08); outline: 0; }
+
 .fallback-map {
   position: absolute;
   inset: 0;
@@ -9486,6 +9517,20 @@ button.problem-row.selected {
 .overview-alert-panel strong { color: var(--ink); font-size: 13px; }
 .overview-alert-panel span { color: var(--ink-2); font-size: 12px; line-height: 1.45; }
 .overview-alert-panel em { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: #c2410c; font-size: 10px; font-style: normal; font-weight: 900; text-transform: uppercase; }
+.air-quality-forecast { display: grid; gap: 9px; border: 1px solid #bfdbfe; border-radius: 12px; background: linear-gradient(145deg, #eff6ff, #f8fafc); padding: 11px; box-shadow: inset 3px 0 #2563eb; }
+.air-quality-forecast header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.air-quality-forecast header span { display: flex; align-items: center; gap: 6px; color: #1e3a8a; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.air-quality-forecast mark { border-radius: 999px; background: #dbeafe; color: #1d4ed8; padding: 4px 7px; font-size: 9px; font-weight: 900; text-transform: uppercase; }
+.air-quality-forecast.error mark { background: #fee2e2; color: #b91c1c; }
+.air-quality-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.air-quality-metrics > div { display: grid; gap: 2px; min-width: 0; border-radius: 8px; background: rgba(255,255,255,.82); padding: 7px; }
+.air-quality-metrics span { color: #64748b; font-size: 8.5px; font-weight: 900; text-transform: uppercase; }
+.air-quality-metrics strong { color: #0f172a; font-family: var(--font-display); font-size: 18px; line-height: 1; }
+.air-quality-metrics small { overflow: hidden; color: #64748b; font-size: 8px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.air-quality-trend { display: flex; align-items: end; gap: 3px; height: 34px; border-bottom: 1px solid #93c5fd; padding: 0 3px; }
+.air-quality-trend i { flex: 1; min-width: 2px; max-height: 100%; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, #ef4444, #f97316); }
+.air-quality-forecast > p { margin: 0; color: #334155; font-size: 10px; font-weight: 800; }
+.air-quality-forecast footer { color: #64748b; font-size: 8.5px; line-height: 1.35; }
 .water-cannon-status { margin: 0; border-radius: 9px; padding: 9px 10px; font-size: 11px; line-height: 1.4; }
 .water-cannon-status.sent { background: #ecfdf5; color: #047857; }
 .water-cannon-status.error { background: #fef2f2; color: #b91c1c; }
@@ -9770,13 +9815,29 @@ button.problem-row.selected {
 .pm-workgrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.85fr); gap: 16px; align-items: start; }
 .pm-kanban, .pm-gantt, .pm-map-card, .pm-spend, .pm-milestones, .pm-alerts, .pm-docs, .pm-recommendations { display: grid; gap: 14px; align-content: start; padding: 16px; }
 .pm-kanban { grid-column: span 2; }
+.pm-kanban-help { margin: -6px 0 0; color: var(--muted); font-size: 11.5px; }
 .pm-kanban-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.pm-kanban-grid article { display: grid; align-content: start; gap: 9px; min-height: 168px; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; padding: 11px; }
-.pm-kanban-grid h4 { margin: 0; color: var(--ink); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.7px; }
-.pm-kanban-grid button { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 10px; text-align: left; }
-.pm-kanban-grid button.active, .pm-kanban-grid button:hover { border-color: #1780ff; box-shadow: var(--shadow-sm); }
+.pm-kanban-grid article { display: grid; align-content: start; gap: 9px; min-height: 210px; max-height: 560px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; padding: 11px; scrollbar-width: thin; transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease; }
+.pm-kanban-grid article.drop-target { border-color: #1780ff; background: #eff6ff; box-shadow: inset 0 0 0 2px rgba(23, 128, 255, 0.12); }
+.pm-kanban-grid h4 { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.7px; }
+.pm-kanban-grid h4 b { display: grid; place-items: center; min-width: 22px; height: 22px; border-radius: 999px; background: #e2e8f0; font-family: var(--font-mono); font-size: 10px; }
+.pm-kanban-card { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 9px; text-align: left; cursor: grab; transition: border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease, transform 140ms ease; }
+.pm-kanban-card.active, .pm-kanban-card:hover { border-color: #1780ff; box-shadow: var(--shadow-sm); }
+.pm-kanban-card.dragging { opacity: 0.5; transform: rotate(1deg) scale(0.98); cursor: grabbing; }
+.pm-kanban-select-project { display: grid; gap: 4px; width: 100%; border: 0; background: transparent; padding: 0; text-align: left; }
+.pm-kanban-card label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: center; border-top: 1px solid #eef2f7; padding-top: 7px; }
+.pm-kanban-card label > span { font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; }
+.pm-kanban-card select { min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 7px; background: #f8fafc; color: var(--ink); padding: 0 6px; font-size: 10.5px; font-weight: 800; }
 .pm-kanban-grid strong { color: var(--ink); font-size: 12px; line-height: 1.3; }
 .pm-kanban-grid span { color: var(--muted); font-size: 11px; font-weight: 750; }
+.pm-kanban-status { margin: -3px 0 0; }
+.pm-selected-project { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding: 16px; }
+.pm-selected-project > div { display: grid; gap: 3px; }
+.pm-selected-project span, .pm-selected-project label { color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: 0.6px; text-transform: uppercase; }
+.pm-selected-project strong { color: var(--ink); font-size: 15px; }
+.pm-selected-project small { color: var(--muted); font-size: 11.5px; font-weight: 700; }
+.pm-selected-project label { display: grid; gap: 5px; min-width: 180px; }
+.pm-selected-project select { height: 38px; border: 1px solid var(--line); border-radius: 9px; background: #f8fafc; color: var(--ink); padding: 0 10px; font-size: 12px; font-weight: 850; text-transform: capitalize; }
 .pm-gantt-chart { display: grid; gap: 10px; }
 .pm-gantt-chart article { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: center; }
 .pm-gantt-chart span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; font-weight: 850; }
@@ -10262,3 +10323,211 @@ button.problem-row.selected {
 .web-lang-menu button span { font-size: 13px; font-weight: 800; color: var(--ink); }
 .web-lang-menu button.active span { color: var(--primary); }
 .web-lang-menu button small { font-size: 10px; color: var(--muted); font-weight: 600; }
+
+/* --- focused Google issue map, inspired by the dense Bengaluru map UI --- */
+.app-shell.map-focus {
+  display: block;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #0b0d1d;
+}
+
+.map-focus > .sidebar,
+.map-focus > .mobile-nav-backdrop,
+.map-focus .topbar,
+.map-focus .dashboard-access-banner,
+.map-focus .restricted-control-strip,
+.map-focus .connection-banner,
+.map-focus .state-onboarding-panel,
+.map-focus .gis-surface-panel > .panel-title,
+.map-focus .map-toolbar,
+.map-focus .gis-insight-panel,
+.map-focus .hotspot-list,
+.map-focus .map-intel-grid,
+.map-focus .map-note,
+.map-focus .gis-map-actions {
+  display: none !important;
+}
+
+.map-focus .workspace,
+.map-focus .explore-workspace,
+.map-focus .gis-surface-panel,
+.map-focus .reference-map-dashboard,
+.map-focus .gis-layout,
+.map-focus .gis-map-panel,
+.map-focus .map-canvas {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.map-focus .workspace,
+.map-focus .explore-workspace,
+.map-focus .gis-layout,
+.map-focus .gis-map-panel {
+  display: block;
+}
+
+.map-focus .gis-surface-panel {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #0b0d1d;
+  box-shadow: none;
+}
+
+.map-focus .gis-map-panel { position: relative; }
+.map-focus .map-canvas { box-shadow: none; background: #0d1022; }
+.map-focus .google-map { background: #0d1022; }
+
+.reference-map-search {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(760px, calc(100% - 32px));
+  transform: translateX(-50%);
+  border: 1px solid rgba(135, 146, 190, 0.35);
+  border-radius: 18px;
+  background: rgba(20, 22, 46, 0.9);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
+  padding: 9px;
+  backdrop-filter: blur(16px);
+}
+
+.reference-map-search label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: #aeb7d4;
+}
+
+.reference-map-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.reference-map-search input::placeholder { color: #7e88aa; }
+.reference-map-search > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  border: 1px solid rgba(135, 146, 190, 0.3);
+  border-radius: 12px;
+  background: rgba(48, 52, 86, 0.72);
+  color: #e9edff;
+  padding: 0 13px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.reference-map-search > button:hover,
+.reference-map-search > button.active { border-color: #8b7cff; background: rgba(91, 76, 190, 0.72); }
+.reference-map-home span { font-size: 12px; }
+
+.reference-map-shortcuts {
+  position: absolute;
+  top: 92px;
+  left: 50%;
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.reference-map-shortcuts button {
+  min-width: max-content;
+  border: 1px solid rgba(135, 146, 190, 0.32);
+  border-radius: 999px;
+  background: rgba(20, 22, 46, 0.9);
+  color: #d7def5;
+  padding: 8px 13px;
+  font-size: 11px;
+  font-weight: 850;
+  box-shadow: 0 7px 20px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(12px);
+}
+
+.reference-map-shortcuts button.active,
+.reference-map-shortcuts button:hover { border-color: #8b7cff; background: #373064; color: #fff; }
+
+.map-focus .gis-control-panel {
+  display: none;
+  position: fixed;
+  top: 142px;
+  left: 24px;
+  z-index: 20;
+  width: min(300px, calc(100% - 48px));
+  max-height: calc(100dvh - 230px);
+  overflow-y: auto;
+  border-color: rgba(135, 146, 190, 0.35);
+  background: rgba(20, 22, 46, 0.94);
+  color: #d7def5;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.44);
+  backdrop-filter: blur(16px);
+}
+
+.map-focus .gis-control-panel.map-filter-open { display: grid; }
+.map-focus .gis-control-panel h4,
+.map-focus .gis-control-panel .gis-section-toggle h4 { color: #f8fafc; }
+.map-focus .gis-control-panel select,
+.map-focus .gis-tool-grid button { border-color: rgba(135, 146, 190, 0.3); background: #242744; color: #e9edff; }
+.map-focus .gis-layer-list label,
+.map-focus .gis-section-toggle span,
+.map-focus .gis-time-row { color: #aeb7d4; }
+
+.map-focus .issue-map-tabs {
+  position: absolute;
+  right: 18px;
+  bottom: 22px;
+  left: 18px;
+  z-index: 9;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid rgba(135, 146, 190, 0.25);
+  border-radius: 18px;
+  background: rgba(20, 22, 46, 0.9);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(16px);
+}
+
+.map-focus .issue-map-tabs button {
+  border-color: rgba(135, 146, 190, 0.22);
+  background: rgba(45, 48, 78, 0.75);
+  color: #d7def5;
+}
+
+.map-focus .issue-map-tabs button:hover,
+.map-focus .issue-map-tabs button.active { background: #f8fafc; }
+.map-focus .gis-scale { right: 26px; bottom: 112px; border-color: #f8fafc; color: #f8fafc; text-shadow: 0 1px 4px #000; }
+
+@media (max-width: 720px) {
+  .reference-map-search { top: 12px; width: calc(100% - 20px); }
+  .reference-map-search .reference-map-home span { display: none; }
+  .reference-map-search > button { padding: 0 10px; }
+  .reference-map-shortcuts { top: 76px; max-width: calc(100% - 20px); }
+  .map-focus .issue-map-tabs { right: 10px; bottom: 10px; left: 10px; justify-content: flex-start; }
+  .map-focus .issue-map-tabs button { padding: 7px 9px; }
+  .map-focus .gis-control-panel { top: 124px; left: 10px; width: calc(100% - 20px); }
+}

@@ -1,5 +1,6 @@
 export type Channel = "text" | "voice" | "photo" | "video" | "whatsapp";
 export type ProjectStatus = "review" | "shortlist" | "approved";
+export type ProjectDeliveryStatus = "proposed" | "ongoing" | "delayed" | "completed";
 export type UserRole = "citizen" | "mp" | "ward_staff" | "district_admin" | "state_admin";
 export type DashboardPermission = "dashboard:view" | "issues:view" | "projects:update" | "users:manage";
 
@@ -204,6 +205,7 @@ export type RankedProject = {
   evidence: string[];
   safeguards: string[];
   status: ProjectStatus;
+  deliveryStatus?: ProjectDeliveryStatus;
   averageCitizenScore?: number;
   averageSubmissionQuality?: number;
   rewardedCitizenCount?: number;
