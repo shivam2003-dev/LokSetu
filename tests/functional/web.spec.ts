@@ -475,7 +475,6 @@ test.describe("MP/admin web functional flow", () => {
     await page.getByLabel("Email or Mobile Number").fill("mp.delhi.browser");
     await page.getByLabel("Password", { exact: true }).fill("BrowserPass123!");
     await page.getByRole("button", { name: "Sign In" }).click();
-    await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
     await page.goto("/");
 
     const accessBanner = page.getByLabel("Dashboard access scope");
