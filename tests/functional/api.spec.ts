@@ -1,6 +1,6 @@
 import { expect, request, test } from "@playwright/test";
 
-const apiUrl = "http://127.0.0.1:18080";
+const apiUrl = "http://127.0.0.1:28080";
 
 async function newApiContext() {
   const password = process.env.TEST_APP_ACCESS_PASSWORD;
@@ -347,6 +347,19 @@ test.describe("API functional flow", () => {
       constituencyId: "mp-up-lucknow",
       constituencyName: "MP Lucknow"
     });
+    const duplicate = await admin.post("/api/admin/users", {
+      data: {
+        username,
+        password: "ReplacementPass123!",
+        displayName: "Duplicate Account",
+        role: "mp",
+        state: "Uttar Pradesh",
+        district: "Lucknow",
+        constituencyId: "mp-up-lucknow",
+        permissions: ["dashboard:view", "issues:view"]
+      }
+    });
+    expect(duplicate.status()).toBe(409);
     await admin.dispose();
 
     const loginContext = await request.newContext({ baseURL: apiUrl });
@@ -404,5 +417,86 @@ test.describe("API functional flow", () => {
     });
     expect(deniedUserCreate.status()).toBe(403);
     await scoped.dispose();
+  });
+
+  test("district managers can drill down safely without escalating roles or permissions", async () => {
+    const admin = await newApiContext();
+    const username = "district.lucknow.manager";
+    const password = "DistrictPass123!";
+    const create = await admin.post("/api/admin/users", {
+      data: {
+        username,
+        password,
+        displayName: "Lucknow District Manager",
+        role: "district_admin",
+        state: "Uttar Pradesh",
+        district: "Lucknow",
+        permissions: ["dashboard:view", "issues:view", "users:manage"]
+      }
+    });
+    expect(create.status()).toBe(201);
+    await admin.dispose();
+
+    const loginContext = await request.newContext({ baseURL: apiUrl });
+    const login = await loginContext.post("/api/auth/login", { data: { username, password } });
+    await expect(login).toBeOK();
+    const loginPayload = await login.json();
+    await loginContext.dispose();
+
+    const manager = await request.newContext({
+      baseURL: apiUrl,
+      extraHTTPHeaders: { Authorization: `Bearer ${loginPayload.token}` }
+    });
+    const wardView = await manager.get("/api/priorities?scope=local&state=Delhi&district=Central%20Delhi&ward=Aminabad%20Basti");
+    await expect(wardView).toBeOK();
+    const wardPayload = await wardView.json();
+    expect(wardPayload.projects.length).toBeGreaterThan(0);
+    expect(wardPayload.projects.every((project: { state: string; district: string; ward: string }) =>
+      project.state === "Uttar Pradesh" && project.district === "Lucknow" && project.ward === "Aminabad Basti"
+    )).toBe(true);
+
+    const outsideWard = await manager.get("/api/priorities?scope=local&ward=Kalindi%20Nagar");
+    await expect(outsideWard).toBeOK();
+    expect((await outsideWard.json()).projects).toHaveLength(0);
+
+    const permissionEscalation = await manager.post("/api/admin/users", {
+      data: {
+        username: "district.escalated.permission",
+        password: "EscalatedPass123!",
+        displayName: "Escalated Permission",
+        role: "district_admin",
+        state: "Uttar Pradesh",
+        district: "Lucknow",
+        permissions: ["dashboard:view", "issues:view", "projects:update"]
+      }
+    });
+    expect(permissionEscalation.status()).toBe(403);
+    expect((await permissionEscalation.json()).error).toContain("permissions you do not possess");
+
+    const roleEscalation = await manager.post("/api/admin/users", {
+      data: {
+        username: "district.escalated.role",
+        password: "EscalatedPass123!",
+        displayName: "Escalated Role",
+        role: "state_admin",
+        state: "Uttar Pradesh",
+        district: "Lucknow",
+        permissions: ["dashboard:view", "issues:view", "users:manage"]
+      }
+    });
+    expect(roleEscalation.status()).toBe(403);
+    expect((await roleEscalation.json()).error).toContain("role above your own");
+    await manager.dispose();
+  });
+
+  test("shared-password login does not accept an unknown username", async () => {
+    const sharedPassword = process.env.TEST_APP_ACCESS_PASSWORD;
+    test.skip(!sharedPassword, "Shared-password mode is not enabled for this run");
+    const api = await request.newContext({ baseURL: apiUrl });
+    const response = await api.post("/api/auth/login", {
+      data: { username: "unknown.dashboard.user", password: sharedPassword }
+    });
+    expect(response.status()).toBe(401);
+    await api.dispose();
   });
 });

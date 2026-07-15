@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const apiUrl = "http://127.0.0.1:18080";
+const apiUrl = "http://127.0.0.1:28080";
 const webUrl = "http://127.0.0.1:15173";
 const citizenUrl = "http://127.0.0.1:15174";
 
@@ -11,6 +11,7 @@ export default defineConfig({
     timeout: 10_000
   },
   fullyParallel: false,
+  workers: 1,
   reporter: [["list"]],
   use: {
     trace: "retain-on-failure"
@@ -33,7 +34,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "PORT=18080 VERTEX_AI_DISABLED=true npm run dev -w services/api",
+      command: `PORT=28080 VERTEX_AI_DISABLED=true APP_ACCESS_PASSWORD=${process.env.TEST_APP_ACCESS_PASSWORD ?? ""} npm run dev -w services/api`,
       url: `${apiUrl}/healthz`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000
