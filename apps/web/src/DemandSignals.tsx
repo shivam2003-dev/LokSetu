@@ -614,6 +614,7 @@ export function DemandSignalsPage() {
         </section>
       ) : null}
 
+      <div className="dsi-insights-document" role="group" aria-label="Demand signals intelligence analysis">
       <div className="dsi-row dsi-row-1">
         <section className="panel dsi-time" aria-label="Evidence window">
           <h4>Evidence Window</h4>
@@ -657,7 +658,7 @@ export function DemandSignalsPage() {
         </section>
       </div>
 
-      <div className="dsi-row dsi-row-2">
+      <div className="dsi-row dsi-row-2" role="group" aria-label="Demand evidence, heatmap, and escalation analysis">
         <section className="panel dsi-timeline" aria-label="Current evidence by issue">
           <h4>Evidence Timeline <em>current API batch</em></h4>
           <div className="dsi-legend">
@@ -831,6 +832,7 @@ export function DemandSignalsPage() {
           </div>
           <button className="dsi-link" onClick={() => setDetail(detail === "trends" ? null : "trends")} type="button">View All Trends <ArrowRight size={14} /></button>
         </section>
+      </div>
       </div>
 
       <footer className="dsi-footer">

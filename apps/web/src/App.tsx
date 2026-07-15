@@ -1681,7 +1681,7 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
         <small><Sparkles size={14} /> Select any card, chart bar, or map marker to synchronize the project focus.</small>
       </section>
 
-      <section className="overview-kpi-grid">
+      <section className="overview-kpi-grid document-grid">
         <button className="panel" onClick={() => setPage("recommendations")} type="button"><span>Citizen Priorities</span><strong>{dashboard.projects.length}</strong><small>{formatCount(totalDemand)} processed demand signals</small><em>Explore ranked needs <ArrowRight size={14} /></em></button>
         <button className="panel" onClick={() => setPage("projects")} type="button"><span>Development Progress</span><strong>{completed}/{projects.length}</strong><small>{delayed} delayed works need attention</small><em>Open delivery board <ArrowRight size={14} /></em></button>
         <button className="panel" onClick={() => setPage("map")} type="button"><span>Active Wards</span><strong>{dashboard.totals.wards}</strong><small>{dashboard.totals.languages} languages normalized</small><em>Inspect ward map <ArrowRight size={14} /></em></button>
@@ -1709,7 +1709,7 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
         </section>
       ) : null}
 
-      <section className="overview-main-grid">
+      <section className="overview-main-grid document-grid">
         <section className="panel overview-priority-panel">
           <PanelTitle title="Top Citizen Priorities" icon={Scale} detail={overviewLens === "priority" ? "AI-ranked demand" : overviewLens === "delivery" ? "delivery risk first" : "highest citizen impact"} />
           {topPriorities.map((project, index) => (
@@ -1794,7 +1794,7 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
         </section>
       </section>
 
-      <section className="overview-bottom-grid">
+      <section className="overview-bottom-grid document-grid">
         <section className="panel overview-progress-panel">
           <PanelTitle title="Development Progress" icon={Briefcase} detail="portfolio execution" />
           {rankedProjects.slice(0, 4).map((project) => (
@@ -3313,7 +3313,7 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
       ) : null}
       <p className="action-status" role="status">{actionNotice}</p>
 
-      <div className="copilot-layout">
+      <div className="copilot-layout document-split">
 
         {/* ── LEFT — chat thread + composer ── */}
         <main className="copilot-chat-col">
@@ -3665,7 +3665,7 @@ function KnowledgeBasePage() {
         </select>
       </section>
 
-      <section className="kb-main-grid">
+      <section className="kb-main-grid document-grid">
         <section className="panel kb-upload-card">
           <PanelTitle title="Upload and Ingest" icon={FileText} detail="drag-and-drop intake" />
           <div className="kb-dropzone">
@@ -3719,7 +3719,7 @@ function KnowledgeBasePage() {
         </section>
       </section>
 
-      <section className="kb-lower-grid">
+      <section className="kb-lower-grid document-grid">
         <section className="panel kb-ai-summary">
           <PanelTitle title="AI Summary and Citations" icon={Bot} detail="grounded answer context" />
           <p>{selectedDoc.summary}</p>
@@ -3864,7 +3864,7 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
         </div>
       </section>
 
-      <section className="explorer-source-grid">
+      <section className="explorer-source-grid document-grid">
         {sourceCards.map((source) => (
           <article className="panel explorer-source-card" key={source.name}>
             <span>{source.health}</span>
@@ -3945,7 +3945,7 @@ function DataExplorerPage({ dashboard, demoData }: { dashboard: DashboardRespons
         </div>
       </section>
 
-      <section className="explorer-main-grid">
+      <section className="explorer-main-grid document-grid">
         <section className="panel explorer-query-card">
           <PanelTitle title="Query Builder" icon={Database} detail="reviewed source query" />
           <div className="explorer-query-box">
@@ -4174,7 +4174,7 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
         </select>
       </section>
 
-      <section className="pm-card-grid">
+      <section className="pm-card-grid document-grid">
         {filteredProjects.slice(0, 8).map((project) => (
           <button className={`panel pm-project-card ${project.id === selectedProject?.id ? "active" : ""}`} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
             <div className="pm-card-head">
@@ -4196,7 +4196,7 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
         {!filteredProjects.length ? <p className="empty-state panel">No projects match the current filters.</p> : null}
       </section>
 
-      <section className="pm-workgrid">
+      <section className="pm-workgrid document-grid">
         <section className="panel pm-kanban">
           <PanelTitle title="Kanban Board" icon={Briefcase} detail="Linear/Jira delivery flow" />
           <p className="pm-kanban-help">Drag a project into another column, or use its status menu for keyboard and touch access.</p>
@@ -4321,7 +4321,7 @@ function ProjectsManagementPage({ dashboard, maps }: { dashboard: DashboardRespo
             </select>
           </label>
         </section>
-        <section className="pm-detail-grid">
+        <section className="pm-detail-grid document-grid">
           <section className="panel pm-milestones">
             <PanelTitle title="Milestone Tracker" icon={CheckCircle2} detail={selectedProject.title} />
             {["DPR approved", "Tender issued", "Work order released", "Site execution", "Citizen inspection"].map((item, index) => (
@@ -4609,7 +4609,7 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
         </div>
       </section>
 
-      <section className="rec-layout">
+      <section className="rec-layout document-grid">
         <section className="panel rec-ranked-list">
           <PanelTitle title="AI-Ranked Recommendations" icon={Scale} detail={`${filtered.length} projects scored`} />
           <div className="rec-card-list rec-card-list--scroll">
@@ -4693,7 +4693,7 @@ function RecommendationsPage({ dashboard, maps }: { dashboard: DashboardResponse
         </section>
       </section>
 
-      <section className="rec-analytics-grid" id="rec-analytics">
+      <section className="rec-analytics-grid document-grid" id="rec-analytics">
         <section className="panel rec-cost">
           <PanelTitle title="Cost-Benefit Analysis" icon={Database} detail="beneficiaries per budget unit" />
           {filtered.slice(0, 5).map((project) => (
@@ -4877,7 +4877,7 @@ function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: 
       </section>
       <p className="action-status" role="status">{reportAction}</p>
 
-      <section className="reports-template-grid">
+      <section className="reports-template-grid document-grid">
         {templates.map((template, index) => (
           <button className={`panel report-template-card ${selectedTemplate === template ? "active" : ""}`} key={template} onClick={() => { setSelectedTemplate(template); setReportAction(`${template} template loaded into preview.`); }} type="button">
             <span>{String(index + 1).padStart(2, "0")}</span>
@@ -4887,7 +4887,7 @@ function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: 
         ))}
       </section>
 
-      <section className="reports-main-grid">
+      <section className="reports-main-grid document-grid">
         <section className="panel report-preview-card">
           <PanelTitle title="Report Preview" icon={FileText} detail="official presentation layout" />
           <div className="report-cover">
@@ -4916,7 +4916,7 @@ function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: 
         </section>
       </section>
 
-      <section className="reports-analytics-grid">
+      <section className="reports-analytics-grid document-grid">
         <section className="panel report-chart-card">
           <PanelTitle title="Demand Chart" icon={TrendingUp} detail="citizen priorities" />
           {topCategories.map(([category, demand]) => (
@@ -4951,6 +4951,7 @@ function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: 
         </section>
       </section>
 
+      <section className="reports-footer-grid document-grid">
       <section className="panel reports-table-card">
         <PanelTitle title="Report Data Table" icon={Database} detail="ready for Excel export" />
         <div className="reports-table">
@@ -4976,6 +4977,7 @@ function ReportsPage({ dashboard, maps }: { dashboard: DashboardResponse; maps: 
           <button onClick={() => setReportAction(`Cabinet note prepared from ${selectedTemplate}.`)} type="button">Prepare cabinet note</button>
           <button onClick={() => setReportAction("JanVaani AI branding applied to report package.")} type="button">Apply JanVaani AI branding</button>
         </div>
+      </section>
       </section>
     </section>
   );
@@ -5087,7 +5089,7 @@ function ComparePage() {
         ))}
       </section>
 
-      <section className="compare-kpi-matrix">
+      <section className="compare-kpi-matrix document-grid">
         {compareMetrics.map((metric) => (
           <section className="panel compare-metric-card" key={String(metric.key)}>
             <h4>{metric.label}</h4>
@@ -5103,7 +5105,7 @@ function ComparePage() {
         ))}
       </section>
 
-      <section className="compare-chart-grid">
+      <section className="compare-chart-grid document-grid">
         <section className="panel compare-chart-card">
           <PanelTitle title="Radar Comparison" icon={TrendingUp} detail="normalized strengths" />
           <div className="compare-radar-grid">{selected.map((region) => <RadarMini key={region.id} region={region} />)}</div>
@@ -5123,7 +5125,7 @@ function ComparePage() {
         </section>
       </section>
 
-      <section className="compare-analysis-grid">
+      <section className="compare-analysis-grid document-grid">
         <section className="panel compare-chart-card">
           <PanelTitle title="Demographic Comparison" icon={Users} />
           <CompareBars regions={selected} metric="population" color="#0ea5e9" />
@@ -5376,7 +5378,7 @@ function SettingsPage({ clientConfig, ragStatus, demoData, context, session }: {
 
       <DashboardUserManagement context={context} />
 
-      <section className="settings-grid">
+      <section className="settings-grid document-grid">
         <section className="panel settings-card">
           <PanelTitle title="Profile" icon={Users} />
           <label>Name<input value={session.user.displayName} readOnly /></label>
@@ -5432,7 +5434,7 @@ function SettingsPage({ clientConfig, ragStatus, demoData, context, session }: {
         </div>
       </section>
 
-      <section className="settings-two-col">
+      <section className="settings-two-col document-grid">
         <section className="panel settings-wide">
           <PanelTitle title="Data Sources" icon={Database} />
           <div className="settings-check-grid">
@@ -5447,7 +5449,7 @@ function SettingsPage({ clientConfig, ragStatus, demoData, context, session }: {
         </section>
       </section>
 
-      <section className="settings-grid compact">
+      <section className="settings-grid compact document-grid">
         <section className="panel settings-card">
           <PanelTitle title="Security" icon={Lock} />
           <label><input type="checkbox" defaultChecked /> Require admin login</label>
