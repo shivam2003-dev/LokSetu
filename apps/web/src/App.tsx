@@ -318,6 +318,37 @@ type TileFallbackState = {
   maxY: number;
   tiles: Array<{ x: number; y: number; url: string; left: number; top: number; width: number; height: number }>;
 };
+
+const INDIA_BOUNDS = {
+  north: 37.2,
+  south: 6.5,
+  east: 97.5,
+  west: 68
+} as const;
+const INDIA_CENTER = { lat: 22.9, lng: 79.2 } as const;
+
+function isWithinIndiaBounds(point: { lat: number; lng: number }) {
+  return point.lat >= INDIA_BOUNDS.south && point.lat <= INDIA_BOUNDS.north
+    && point.lng >= INDIA_BOUNDS.west && point.lng <= INDIA_BOUNDS.east;
+}
+
+function clampToIndiaBounds(point: { lat: number; lng: number }) {
+  return {
+    lat: Math.max(INDIA_BOUNDS.south, Math.min(INDIA_BOUNDS.north, point.lat)),
+    lng: Math.max(INDIA_BOUNDS.west, Math.min(INDIA_BOUNDS.east, point.lng))
+  };
+}
+
+function indiaMapRestriction() {
+  return {
+    restriction: {
+      latLngBounds: INDIA_BOUNDS,
+      strictBounds: true
+    },
+    minZoom: 4,
+    maxZoom: 18
+  };
+}
 declare global {
   interface Window {
     google?: any;
@@ -726,6 +757,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState(fallbackProject.id);
   const [session, setSession] = useState<SessionResponse>(fallbackSession);
+  const sessionSynchronizedRef = useRef(false);
+  const skipFilterRefreshRef = useRef(false);
 
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
@@ -745,6 +778,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }, [context]);
 
   useEffect(() => {
+    if (!sessionSynchronizedRef.current) return;
+    if (skipFilterRefreshRef.current) {
+      skipFilterRefreshRef.current = false;
+      return;
+    }
     const timer = window.setTimeout(() => {
       applyFilters();
     }, 250);
@@ -798,6 +836,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         getJson<MapBoundaryResponse>("/api/maps/boundaries", fallbackMapBoundaries),
         getJson<MapClusterResponse>("/api/maps/clusters?zoom=5", fallbackMapClusters)
       ]);
+      const sessionChangesFilters = nextSession.defaultScope !== scope
+        || Boolean(nextSession.area.state && nextSession.area.state !== state)
+        || Boolean(nextSession.area.district && nextSession.area.district !== district)
+        || Boolean(nextSession.area.constituencyId && nextSession.area.constituencyId !== mpId);
+      skipFilterRefreshRef.current = sessionChangesFilters;
+      sessionSynchronizedRef.current = true;
       setSession(nextSession);
       if (nextSession.defaultScope !== scope) setScope(nextSession.defaultScope);
       if (nextSession.area.state && nextSession.area.state !== state) setState(nextSession.area.state);
@@ -1010,7 +1054,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
-        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} /> : null}
+        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} session={session} /> : null}
         {page === "priorities" ? <PriorityDeskPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} setPage={setPage} /> : null}
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
@@ -1430,7 +1474,7 @@ function HealthGauge({ score, signals, confidence, wards }: { score: number; sig
   );
 }
 
-function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"] }) {
+function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"]; session: SessionResponse }) {
   const projects = buildManagedProjects(dashboard.projects);
   const [selectedHotspotId, setSelectedHotspotId] = useState("");
   const topPriorities = projects.slice(0, 5);
@@ -1454,6 +1498,8 @@ function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardRespon
     "Education and PHC projects show the strongest citizen satisfaction upside per crore.",
     "Water and sanitation requests overlap in dense wards; bundle execution to reduce disruption."
   ];
+  const constituency = session.area.constituencyName ?? (session.restricted ? "Configured constituency" : "All India");
+  const constituencyArea = [session.area.district, session.area.state].filter(Boolean).join(" · ");
 
   return (
     <section className="overview-page">
@@ -1461,6 +1507,12 @@ function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardRespon
         <div>
           <p className="eyebrow">JanVaani AI Executive Overview</p>
           <h3>Constituency intelligence command center</h3>
+          <div className="overview-constituency" aria-label="Dashboard constituency">
+            <MapPinned size={18} />
+            <span>Dashboard constituency</span>
+            <strong>{constituency}</strong>
+            {constituencyArea ? <small>{constituencyArea}</small> : null}
+          </div>
           <p>A 360 degree view of citizen priorities, AI-ranked risks, development progress, and live alerts for Members of Parliament.</p>
           <div className="overview-actions">
             <button onClick={() => setPage("recommendations")} type="button">Open AI recommendations</button>
@@ -1671,7 +1723,7 @@ function IssueMap({
   const [confidenceFilter, setConfidenceFilter] = useState("High confidence");
   const [timelineValue, setTimelineValue] = useState(72);
   const [mapOverlay, setMapOverlay] = useState<"hotspots" | "clusters" | "heatmap">("hotspots");
-  const allHotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
+  const allHotspots = useMemo(() => buildMapHotspots(dashboard).filter(isWithinIndiaBounds), [dashboard]);
   const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
     const issueMatches = issueFilter === "All issue types" || normalizedIssueFilter(issueFilter) === normalizedIssueFilter(hotspot.category);
     const confidenceMatches =
@@ -1709,6 +1761,10 @@ function IssueMap({
           const map = new window.mappls.Map(mapRef.current.id, {
             center: [center.lat, center.lng],
             zoom: hotspots.length > 1 ? 5 : 12,
+            minZoom: 4,
+            maxZoom: 18,
+            maxBounds: [[INDIA_BOUNDS.south, INDIA_BOUNDS.west], [INDIA_BOUNDS.north, INDIA_BOUNDS.east]],
+            draggable: false,
             geolocation: false,
             clickableIcons: false
           });
@@ -1773,6 +1829,7 @@ function IssueMap({
           fullscreenControl: true,
           clickableIcons: false,
           gestureHandling: "greedy",
+          ...indiaMapRestriction(),
           ...(maps.mapId ? { mapId: maps.mapId } : {}),
           styles: [
             { featureType: "poi", stylers: [{ visibility: "off" }] },
@@ -1807,7 +1864,7 @@ function IssueMap({
       <div className="map-toolbar">
         <div>
           <strong>Geospatial demand hotspots</strong>
-          <span>Premium GIS control room · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {clusters.clusters.length} AI clusters</span>
+          <span>India boundary enforced · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {clusters.clusters.length} AI clusters</span>
         </div>
         <small className={`map-state ${mapState}`}>{mapStatusText(mapState, maps.provider)}</small>
       </div>
@@ -2019,13 +2076,14 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
   const [centerOffset, setCenterOffset] = useState({ tileX: 0, tileY: 0 });
   const dragRef = useRef<{ startX: number; startY: number; dragX: number; dragY: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const indiaHotspots = useMemo(() => hotspots.filter(isWithinIndiaBounds), [hotspots]);
 
   const tileMap = useMemo(() => {
-    const base = buildTileFallbackState(hotspots);
-    const zoom = zoomDelta === 0 ? base.zoom : Math.max(3, Math.min(12, base.zoom + zoomDelta));
+    const base = buildTileFallbackState(indiaHotspots);
+    const zoom = zoomDelta === 0 ? base.zoom : Math.max(4, Math.min(12, base.zoom + zoomDelta));
     if (centerOffset.tileX === 0 && centerOffset.tileY === 0 && zoomDelta === 0) return base;
     // Build new map with shifted center in tile coordinates
-    const pts = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
+    const pts = indiaHotspots.length ? indiaHotspots : [INDIA_CENTER];
     const avgLat = pts.reduce((s, h) => s + h.lat, 0) / pts.length;
     const avgLng = pts.reduce((s, h) => s + h.lng, 0) / pts.length;
     // Convert tile offset back to lat/lng shift
@@ -2038,10 +2096,10 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
     const newLng = avgLng - centerOffset.tileX * lngPerTile * tilesVisibleX;
     // Latitude shift via inverse Mercator approximation
     const latShiftDeg = centerOffset.tileY * (180 / Math.PI) * tilesVisibleY * (Math.PI / (2 ** zoom)) * 2;
-    const newLat = Math.max(-85, Math.min(85, avgLat + latShiftDeg));
-    const anchor = { ...pts[0], lat: newLat, lng: newLng } as Hotspot & { projectId: string };
+    const boundedCenter = clampToIndiaBounds({ lat: avgLat + latShiftDeg, lng: newLng });
+    const anchor = { ...pts[0], ...boundedCenter } as Hotspot & { projectId: string };
     return buildTileFallbackState([anchor], zoom);
-  }, [hotspots, zoomDelta, centerOffset]);
+  }, [indiaHotspots, zoomDelta, centerOffset]);
 
   function onMouseDown(e: React.MouseEvent) {
     dragRef.current = { startX: e.clientX, startY: e.clientY, dragX: drag.x, dragY: drag.y };
@@ -2086,7 +2144,8 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
     <div
       ref={containerRef}
       className="fallback-map osm-fallback-map"
-      aria-label="Live tile-map fallback"
+      aria-label="India-boundary live tile map"
+      data-map-boundary="india"
       style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
@@ -2112,7 +2171,7 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
           ))}
         </div>
         <div className="osm-map-tint" aria-hidden="true" />
-        {hotspots.map((hotspot, index) => {
+        {indiaHotspots.map((hotspot, index) => {
           const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
           return (
             <button
@@ -2356,51 +2415,61 @@ function timelineLabel(value: number) {
 }
 
 function indiaProjection(lat: number, lng: number) {
-  const minLat = 6.5;
-  const maxLat = 35.6;
-  const minLng = 68.0;
-  const maxLng = 97.5;
   return {
-    x: Math.min(92, Math.max(8, ((lng - minLng) / (maxLng - minLng)) * 100)),
-    y: Math.min(88, Math.max(12, (1 - (lat - minLat) / (maxLat - minLat)) * 100))
+    x: Math.min(92, Math.max(8, ((lng - INDIA_BOUNDS.west) / (INDIA_BOUNDS.east - INDIA_BOUNDS.west)) * 100)),
+    y: Math.min(88, Math.max(12, (1 - (lat - INDIA_BOUNDS.south) / (INDIA_BOUNDS.north - INDIA_BOUNDS.south)) * 100))
   };
 }
 
 function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>, zoomOverride?: number): TileFallbackState {
-  const points = hotspots.length ? hotspots : [{ lat: 22.9, lng: 79.2 }];
-  const lats = points.map((point) => point.lat);
-  const lngs = points.map((point) => point.lng);
+  const points = hotspots.filter(isWithinIndiaBounds);
+  const boundedPoints = points.length ? points : [INDIA_CENTER];
+  const lats = boundedPoints.map((point) => point.lat);
+  const lngs = boundedPoints.map((point) => point.lng);
   const latSpan = Math.max(...lats) - Math.min(...lats);
   const lngSpan = Math.max(...lngs) - Math.min(...lngs);
   const maxSpan = Math.max(latSpan, lngSpan);
   const autoZoom = maxSpan > 14 ? 5 : maxSpan > 6 ? 6 : maxSpan > 2.5 ? 7 : maxSpan > 1 ? 9 : 11;
-  const zoom = zoomOverride ?? autoZoom;
-  const centerLat = lats.reduce((sum, value) => sum + value, 0) / points.length;
-  const centerLng = lngs.reduce((sum, value) => sum + value, 0) / points.length;
+  const zoom = Math.max(4, zoomOverride ?? autoZoom);
+  const center = clampToIndiaBounds({
+    lat: lats.reduce((sum, value) => sum + value, 0) / boundedPoints.length,
+    lng: lngs.reduce((sum, value) => sum + value, 0) / boundedPoints.length
+  });
+  const centerLat = center.lat;
+  const centerLng = center.lng;
   const centerX = lngToTileX(centerLng, zoom);
   const centerY = latToTileY(centerLat, zoom);
   // Load extra tiles beyond the visible area so panning doesn't show grey
   const cols = zoom <= 6 ? 9 : 7;
   const rows = zoom <= 6 ? 7 : 5.5;
-  const minX = centerX - cols / 2;
-  const maxX = centerX + cols / 2;
-  const minY = Math.max(0, centerY - rows / 2);
-  const maxY = centerY + rows / 2;
+  const xWindow = boundedTileWindow(
+    centerX,
+    cols,
+    lngToTileX(INDIA_BOUNDS.west, zoom),
+    lngToTileX(INDIA_BOUNDS.east, zoom)
+  );
+  const yWindow = boundedTileWindow(
+    centerY,
+    rows,
+    latToTileY(INDIA_BOUNDS.north, zoom),
+    latToTileY(INDIA_BOUNDS.south, zoom)
+  );
+  const minX = xWindow.min;
+  const maxX = xWindow.max;
+  const minY = yWindow.min;
+  const maxY = yWindow.max;
   const tileMinX = Math.floor(minX);
   const tileMaxX = Math.ceil(maxX);
   const tileMinY = Math.floor(minY);
   const tileMaxY = Math.ceil(maxY);
-  const worldTiles = 2 ** zoom;
   const tiles: TileFallbackState["tiles"] = [];
 
   for (let x = tileMinX; x < tileMaxX; x += 1) {
     for (let y = tileMinY; y < tileMaxY; y += 1) {
-      if (y < 0 || y >= worldTiles) continue;
-      const wrappedX = ((x % worldTiles) + worldTiles) % worldTiles;
       tiles.push({
         x,
         y,
-        url: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        url: `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`,
         left: ((x - minX) / (maxX - minX)) * 100,
         top: ((y - minY) / (maxY - minY)) * 100,
         width: (1 / (maxX - minX)) * 100,
@@ -2410,6 +2479,12 @@ function buildTileFallbackState(hotspots: Array<Hotspot & { projectId: string }>
   }
 
   return { zoom, minX, maxX, minY, maxY, tiles };
+}
+
+function boundedTileWindow(center: number, requestedSpan: number, boundaryMin: number, boundaryMax: number) {
+  const span = Math.min(requestedSpan, boundaryMax - boundaryMin);
+  const min = Math.max(boundaryMin, Math.min(center - span / 2, boundaryMax - span));
+  return { min, max: min + span };
 }
 
 function tileProjection(lat: number, lng: number, tileMap: TileFallbackState) {
@@ -3742,10 +3817,11 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
+  const indiaPoints = useMemo(() => points.filter(isWithinIndiaBounds), [points]);
   const bandColor = (band: string) => (band === "High" ? "#ef4444" : band === "Medium" ? "#f59e0b" : "#22c55e");
 
   useEffect(() => {
-    if (!maps.enabled || !maps.apiKey || points.length === 0 || !mapRef.current) {
+    if (!maps.enabled || !maps.apiKey || indiaPoints.length === 0 || !mapRef.current) {
       setReady(false);
       return;
     }
@@ -3754,22 +3830,23 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
       .then(() => {
         if (cancelled || !mapRef.current || !window.google?.maps) return;
         const bounds = new window.google.maps.LatLngBounds();
-        points.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+        indiaPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
         const map = new window.google.maps.Map(mapRef.current, {
-          center: points[0],
-          zoom: points.length > 1 ? 5 : 11,
+          center: indiaPoints[0],
+          zoom: indiaPoints.length > 1 ? 5 : 11,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
           clickableIcons: false,
           gestureHandling: "greedy",
+          ...indiaMapRestriction(),
           ...(maps.mapId ? { mapId: maps.mapId } : {}),
           styles: [
             { featureType: "poi", stylers: [{ visibility: "off" }] },
             { featureType: "transit", stylers: [{ visibility: "off" }] }
           ]
         });
-        points.forEach((p) => {
+        indiaPoints.forEach((p) => {
           const marker = new window.google!.maps!.Marker!({
             map,
             position: { lat: p.lat, lng: p.lng },
@@ -3786,16 +3863,16 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
           }) as { addListener: (ev: string, cb: () => void) => void };
           marker.addListener("click", () => onSelect(p.projectId));
         });
-        if (points.length > 1) map.fitBounds(bounds, 48);
+        if (indiaPoints.length > 1) map.fitBounds(bounds, 48);
         setReady(true);
       })
       .catch(() => setReady(false));
     return () => { cancelled = true; };
-  }, [maps.enabled, maps.apiKey, maps.mapId, points, selectedId, onSelect]);
+  }, [maps.enabled, maps.apiKey, maps.mapId, indiaPoints, selectedId, onSelect]);
 
   // When Google isn't configured/ready, fall back to the same live OpenStreetMap
   // tile map the main GIS page uses — real geography, no key required.
-  const fallbackHotspots = points.map((p) => ({
+  const fallbackHotspots = indiaPoints.map((p) => ({
     ward: p.ward,
     category: p.category,
     intensity: p.score,
@@ -4656,9 +4733,9 @@ function DashboardUserManagement({ context }: { context: ContextResponse }) {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [state, setState] = useState(context.states[0] ?? "Delhi");
+  const [state, setState] = useState(context.states.includes("Delhi") ? "Delhi" : context.states[0] ?? "Delhi");
   const districts = context.districtsByState[state] ?? [];
-  const [district, setDistrict] = useState(districts[0] ?? "");
+  const [district, setDistrict] = useState(districts.includes("Central Delhi") ? "Central Delhi" : districts[0] ?? "");
   const constituencies = context.mps.filter((mp) => mp.state === state && mp.district === district);
   const [constituencyId, setConstituencyId] = useState(constituencies[0]?.id ?? "");
   const [permissions, setPermissions] = useState<DashboardPermission[]>(defaultPermissionsForDashboardRole("mp"));
