@@ -3111,7 +3111,8 @@ meter::-moz-meter-bar {
 
 .google-issue-badge {
   position: absolute;
-  transform: translate(calc(-50% + var(--badge-shift, 0px)), -50%);
+  transform: translate(calc(-50% + var(--badge-shift, 0px)), calc(-100% - 8px));
+  transform-origin: 50% 100%;
   display: grid;
   grid-template-columns: auto auto;
   grid-template-rows: auto auto;
@@ -3129,6 +3130,31 @@ meter::-moz-meter-bar {
   white-space: nowrap;
 }
 
+.google-issue-badge::before,
+.google-issue-badge::after {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-right: 8px solid transparent;
+  border-left: 8px solid transparent;
+  content: "";
+  pointer-events: none;
+}
+
+.google-issue-badge::before {
+  bottom: -9px;
+  border-top: 9px solid color-mix(in srgb, var(--issue-color) 52%, #8892b8);
+}
+
+.google-issue-badge::after {
+  bottom: -7px;
+  border-right-width: 7px;
+  border-left-width: 7px;
+  border-top: 8px solid rgba(17, 20, 42, 0.96);
+}
+
 .google-issue-badge > span {
   grid-row: 1 / span 2;
   align-self: center;
@@ -3138,7 +3164,7 @@ meter::-moz-meter-bar {
 .google-issue-badge strong { font-size: 11px; line-height: 1.1; }
 .google-issue-badge small { color: #aeb7d4; font-size: 9px; font-weight: 800; }
 .google-issue-badge:hover,
-.google-issue-badge:focus-visible { z-index: 3; border-color: var(--issue-color); transform: translate(calc(-50% + var(--badge-shift, 0px)), -50%) scale(1.08); outline: 0; }
+.google-issue-badge:focus-visible { z-index: 3; border-color: var(--issue-color); transform: translate(calc(-50% + var(--badge-shift, 0px)), calc(-100% - 8px)) scale(1.08); outline: 0; }
 
 .fallback-map {
   position: absolute;
@@ -10326,16 +10352,14 @@ button.problem-row.selected {
 
 /* --- focused Google issue map, inspired by the dense Bengaluru map UI --- */
 .app-shell.map-focus {
-  display: block;
+  display: grid;
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
-  background: #0b0d1d;
+  background: #f6f8fc;
 }
 
-.map-focus > .sidebar,
 .map-focus > .mobile-nav-backdrop,
-.map-focus .topbar,
 .map-focus .dashboard-access-banner,
 .map-focus .restricted-control-strip,
 .map-focus .connection-banner,
@@ -10350,7 +10374,21 @@ button.problem-row.selected {
   display: none !important;
 }
 
-.map-focus .workspace,
+.map-focus .workspace {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  gap: 12px;
+  padding: 16px;
+}
+
+.map-focus .topbar {
+  min-height: 46px;
+  align-items: center;
+}
+
 .map-focus .explore-workspace,
 .map-focus .gis-surface-panel,
 .map-focus .reference-map-dashboard,
@@ -10358,7 +10396,7 @@ button.problem-row.selected {
 .map-focus .gis-map-panel,
 .map-focus .map-canvas {
   width: 100%;
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
   max-width: none;
   margin: 0;
@@ -10367,7 +10405,6 @@ button.problem-row.selected {
   border-radius: 0;
 }
 
-.map-focus .workspace,
 .map-focus .explore-workspace,
 .map-focus .gis-layout,
 .map-focus .gis-map-panel {
@@ -10375,8 +10412,7 @@ button.problem-row.selected {
 }
 
 .map-focus .gis-surface-panel {
-  position: fixed;
-  inset: 0;
+  position: relative;
   overflow: hidden;
   background: #0b0d1d;
   box-shadow: none;
@@ -10474,9 +10510,10 @@ button.problem-row.selected {
 
 .map-focus .gis-control-panel {
   display: none;
-  position: fixed;
+  position: absolute;
   top: 142px;
-  left: 24px;
+  right: 24px;
+  left: auto;
   z-index: 20;
   width: min(300px, calc(100% - 48px));
   max-height: calc(100dvh - 230px);
@@ -10529,5 +10566,5 @@ button.problem-row.selected {
   .reference-map-shortcuts { top: 76px; max-width: calc(100% - 20px); }
   .map-focus .issue-map-tabs { right: 10px; bottom: 10px; left: 10px; justify-content: flex-start; }
   .map-focus .issue-map-tabs button { padding: 7px 9px; }
-  .map-focus .gis-control-panel { top: 124px; left: 10px; width: calc(100% - 20px); }
+  .map-focus .gis-control-panel { top: 124px; right: 10px; left: auto; width: calc(100% - 20px); }
 }
