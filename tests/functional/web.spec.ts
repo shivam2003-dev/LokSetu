@@ -452,6 +452,7 @@ test.describe("MP/admin web functional flow", () => {
     const accessBanner = page.getByLabel("Dashboard access scope");
     await expect(accessBanner).toContainText("Central Delhi MP Dashboard");
     await expect(accessBanner).toContainText("Dashboard locked to MP Central Delhi · Central Delhi · Delhi");
+    await expect(page.getByRole("heading", { name: "Central Delhi intelligence command center" })).toBeVisible();
     await expect(page.getByLabel("Dashboard constituency")).toContainText("MP Central Delhi");
     await expect(page.getByLabel("Demo data controls")).toHaveCount(0);
     await expect(page.getByLabel("JanVaani navigation").getByRole("button", { name: "Settings" })).toHaveCount(0);
