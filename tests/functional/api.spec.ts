@@ -154,6 +154,35 @@ test.describe("API functional flow", () => {
     expect(auditPayload.events.map((event: { action: string }) => event.action)).toContain("updated_area_mapping");
     expect(auditPayload.events.map((event: { action: string }) => event.action)).toContain("updated_project_status");
 
+    const lowPollutionAlert = await api.post("/api/alerts/water-cannon", {
+      data: {
+        aqi: 220,
+        area: "Kalindi Nagar",
+        state: "Delhi",
+        district: "Central Delhi",
+        constituencyId: "mp-delhi-central"
+      }
+    });
+    expect(lowPollutionAlert.status()).toBe(422);
+
+    const severePollutionAlert = await api.post("/api/alerts/water-cannon", {
+      data: {
+        aqi: 318,
+        area: "Kalindi Nagar",
+        state: "Delhi",
+        district: "Central Delhi",
+        constituencyId: "mp-delhi-central"
+      }
+    });
+    expect(severePollutionAlert.status()).toBe(202);
+    expect(await severePollutionAlert.json()).toMatchObject({
+      ok: true,
+      delivery: "disabled",
+      aqi: 318,
+      threshold: 301,
+      area: "Kalindi Nagar"
+    });
+
     const deniedQueue = await api.get("/api/mp/queue?actorId=mp-user-delhi-central&mpId=mp-up-lucknow");
     expect(deniedQueue.status()).toBe(403);
     const allowedQueue = await api.get("/api/mp/queue?actorId=mp-user-delhi-central&mpId=mp-delhi-central");

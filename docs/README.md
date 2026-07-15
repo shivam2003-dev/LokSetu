@@ -16,6 +16,7 @@ Architecture and operating notes for LokSetu.
 - `rag/deployment-guide.md`: local Argo and production GKE deployment.
 - `rag/testing-guide.md`: RAG validation and no-unrelated-document regression tests.
 - `rag/monitoring-runbook.md`: metrics, alerts, and operational troubleshooting.
+- `water-cannon-email-alerts.md`: GCP-native email notification for severe-pollution water-cannon deployments.
 - `maps-boundaries.md`: Google Maps runtime behavior, official boundary procurement path, and hotspot clustering.
 - `whatsapp-setup.md`: WhatsApp simulator and webhook setup.
 

@@ -36,6 +36,7 @@ import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
 import { buildEnterpriseSituation } from "./enterprise.js";
 import { BoundaryLevel, buildBoundaryFeatures, buildHotspotClusters } from "./mapIntelligence.js";
+import { recordWaterCannonDeployment, waterCannonAlertsEnabled, waterCannonAqiThreshold } from "./waterCannonAlerts.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -76,6 +77,13 @@ const loginRateLimit = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "Too many sign-in attempts. Try again later." }
+});
+const waterCannonAlertRateLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 5,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many water-cannon deployment alerts. Try again later." }
 });
 
 const dashboardQuerySchema = z.object({
@@ -146,6 +154,14 @@ const mapBoundaryQuerySchema = z.object({
 
 const mapClusterQuerySchema = z.object({
   zoom: z.coerce.number().int().min(1).max(18).default(5)
+});
+
+const waterCannonAlertSchema = z.object({
+  aqi: z.coerce.number().int().min(0).max(1_000),
+  area: z.string().trim().min(2).max(120),
+  state: z.string().trim().min(2).max(96),
+  district: z.string().trim().min(2).max(96),
+  constituencyId: z.string().trim().min(2).max(120).optional()
 });
 
 const simulationScenarios = [
@@ -249,7 +265,8 @@ app.get("/healthz", (_request, response) => {
     ok: true,
     service: "people-priority-api",
     database: isDatabaseEnabled() ? "postgres" : "memory",
-    processing: "batch"
+    processing: "batch",
+    waterCannonAlerts: waterCannonAlertsEnabled() ? "gcp-monitoring" : "disabled"
   });
 });
 
@@ -1271,6 +1288,58 @@ app.post("/api/simulation/submit", async (request, response) => {
     response,
     { friendly: true }
   );
+});
+
+app.post("/api/alerts/water-cannon", waterCannonAlertRateLimit, async (request, response) => {
+  const parsed = waterCannonAlertSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Valid AQI and deployment area are required", details: parsed.error.flatten() });
+    return;
+  }
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("projects:update")) {
+    response.status(403).json({ error: "Project update permission required to deploy a water cannon" });
+    return;
+  }
+  if (!geographyWithinPrincipal(principal, parsed.data.state, parsed.data.district, parsed.data.constituencyId)) {
+    response.status(403).json({ error: "Water-cannon deployment is outside this user's configured geography" });
+    return;
+  }
+  const threshold = waterCannonAqiThreshold();
+  if (parsed.data.aqi < threshold) {
+    response.status(422).json({
+      error: `AQI ${parsed.data.aqi} is below the severe-pollution deployment threshold of ${threshold}`,
+      threshold
+    });
+    return;
+  }
+
+  try {
+    const result = await recordWaterCannonDeployment({ ...parsed.data, actor: principal.displayName });
+    memoryAuditEvents.unshift({
+      at: result.recordedAt,
+      actor: principal.displayName,
+      action: "requested_water_cannon_deployment",
+      object: `${parsed.data.area} / AQI ${parsed.data.aqi}`,
+      privacyMode: false,
+      state: parsed.data.state,
+      district: parsed.data.district,
+      constituencyId: parsed.data.constituencyId
+    });
+    response.status(202).json({
+      ok: true,
+      message: result.delivery === "gcp_monitoring"
+        ? "Water-cannon deployment recorded. Google Cloud Monitoring is sending the email alert."
+        : "Water-cannon deployment validated. Email alerting is disabled in this environment.",
+      aqi: parsed.data.aqi,
+      threshold,
+      area: parsed.data.area,
+      ...result
+    });
+  } catch (error) {
+    logger.error({ error, area: parsed.data.area, aqi: parsed.data.aqi }, "water-cannon email alert failed");
+    response.status(503).json({ error: "Google Cloud could not send the water-cannon email alert. Try again." });
+  }
 });
 
 app.patch("/api/projects/:projectId/status", async (request, response) => {

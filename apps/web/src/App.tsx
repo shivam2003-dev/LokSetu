@@ -119,6 +119,13 @@ type DashboardResponse = {
   access?: SessionUser;
 };
 
+type WaterCannonAlertResponse = {
+  ok: boolean;
+  message: string;
+  delivery: "gcp_monitoring" | "disabled";
+  recordedAt: string;
+};
+
 type RegionResponse = {
   coverage: {
     statesReady: number;
@@ -1502,6 +1509,8 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   const projects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [overviewLens, setOverviewLens] = useState<"priority" | "delivery" | "impact">("priority");
+  const [waterCannonStatus, setWaterCannonStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [waterCannonMessage, setWaterCannonMessage] = useState("");
   const rankedProjects = useMemo(() => [...projects].sort((a, b) => {
     if (overviewLens === "delivery") {
       const deliveryWeight = (project: ManagedProject) => project.deliveryStatus === "delayed" ? 3 : project.deliveryStatus === "ongoing" ? 2 : project.deliveryStatus === "proposed" ? 1 : 0;
@@ -1522,10 +1531,16 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   ]));
   const completed = projects.filter((project) => project.deliveryStatus === "completed").length;
   const delayed = projects.filter((project) => project.deliveryStatus === "delayed").length;
+  const pollutionAqi = 318;
+  const pollutionArea = session.area.constituencyName ?? selectedProject?.ward ?? session.area.district ?? "selected area";
+  const pollutionState = session.area.state ?? selectedProject?.state ?? "Delhi";
+  const pollutionDistrict = session.area.district ?? selectedProject?.district ?? "Central Delhi";
+  const pollutionConstituencyId = session.area.constituencyId ?? selectedProject?.mpId;
   const alertItems = [
-    { title: "Road complaints rising", detail: "Clustered citizen demand needs 48-hour review", tone: "high" },
-    { title: "PHC staffing risk", detail: "Health requests exceed district baseline by 22%", tone: "medium" },
-    { title: "Budget release pending", detail: `${delayed} delayed works require officer follow-up`, tone: "medium" }
+    { title: `Severe air pollution · AQI ${pollutionAqi}`, detail: `Deploy a water cannon in ${pollutionArea} and email the response alert`, tone: "high", action: "water-cannon" as const },
+    { title: "Road complaints rising", detail: "Clustered citizen demand needs 48-hour review", tone: "high", action: "navigate" as const },
+    { title: "PHC staffing risk", detail: "Health requests exceed district baseline by 22%", tone: "medium", action: "navigate" as const },
+    { title: "Budget release pending", detail: `${delayed} delayed works require officer follow-up`, tone: "medium", action: "navigate" as const }
   ];
   const insightCards = [
     "AI recommends funding high-demand road and drainage works before monsoon acceleration.",
@@ -1538,6 +1553,29 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   const commandCenterTitle = session.restricted && configuredAreaName
     ? `${configuredAreaName.replace(/^MP\s+/i, "")} intelligence command center`
     : "Constituency intelligence command center";
+
+  async function deployWaterCannon() {
+    if (waterCannonStatus === "sending") return;
+    setWaterCannonStatus("sending");
+    setWaterCannonMessage("");
+    try {
+      const result = await requestJson<WaterCannonAlertResponse>("/api/alerts/water-cannon", {
+        method: "POST",
+        body: JSON.stringify({
+          aqi: pollutionAqi,
+          area: pollutionArea,
+          state: pollutionState,
+          district: pollutionDistrict,
+          constituencyId: pollutionConstituencyId
+        })
+      });
+      setWaterCannonStatus("sent");
+      setWaterCannonMessage(result.message);
+    } catch {
+      setWaterCannonStatus("error");
+      setWaterCannonMessage("Email alert could not be sent. Please retry.");
+    }
+  }
 
   return (
     <section className="overview-page">
@@ -1626,12 +1664,19 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
         <section className="panel overview-alert-panel">
           <PanelTitle title="Real-Time Alerts" icon={Zap} detail="requires action" />
           {alertItems.map((item) => (
-            <button className={item.tone} key={item.title} onClick={() => setPage(item.tone === "high" ? "signals" : "projects")} type="button">
+            <button
+              className={`${item.tone}${item.action === "water-cannon" ? " water-cannon-alert" : ""}`}
+              disabled={item.action === "water-cannon" && waterCannonStatus === "sending"}
+              key={item.title}
+              onClick={() => item.action === "water-cannon" ? void deployWaterCannon() : setPage(item.tone === "high" ? "signals" : "projects")}
+              type="button"
+            >
               <strong>{item.title}</strong>
               <span>{item.detail}</span>
-              <em>Review now <ArrowRight size={13} /></em>
+              <em>{item.action === "water-cannon" ? waterCannonStatus === "sending" ? "Sending email…" : waterCannonStatus === "sent" ? "Deployment email sent" : "Deploy + send email" : "Review now"} <ArrowRight size={13} /></em>
             </button>
           ))}
+          {waterCannonMessage ? <p className={`water-cannon-status ${waterCannonStatus}`} role="status">{waterCannonMessage}</p> : null}
         </section>
 
         <section className="panel overview-map-panel">
