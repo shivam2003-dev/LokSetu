@@ -156,6 +156,19 @@ type ClientConfig = {
     mapplsKey?: string;
     source: string;
   };
+  waterCannonAlert: {
+    enabled: boolean;
+    aqiThreshold: number;
+    state?: string;
+    district?: string;
+    constituencyId?: string;
+    constituencyName?: string;
+    ward?: string;
+    deploymentSite?: string;
+    latitude?: number;
+    longitude?: number;
+    responseWindow?: string;
+  };
   citizenAppUrl?: string;
   generatedAt: string;
 };
@@ -600,6 +613,7 @@ const fallbackClientConfig: ClientConfig = {
     mapplsKey: envMapplsMapSdkKey,
     source: envMapplsMapSdkKey ? "vite-mappls-env" : envGoogleMapsApiKey ? "vite-env" : "not-configured"
   },
+  waterCannonAlert: { enabled: false, aqiThreshold: 301 },
   citizenAppUrl,
   generatedAt: new Date().toISOString()
 };
@@ -1085,7 +1099,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
-        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} session={session} /> : null}
+        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} waterCannonAlert={clientConfig.waterCannonAlert} session={session} /> : null}
         {page === "priorities" ? <PriorityDeskPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} setPage={setPage} /> : null}
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
@@ -1411,6 +1425,7 @@ function mergeClientConfig(config: ClientConfig): ClientConfig {
   const provider = mapplsKey ? "mappls" : apiKey ? "google" : "osm";
   return {
     ...config,
+    waterCannonAlert: config.waterCannonAlert ?? fallbackClientConfig.waterCannonAlert,
     maps: {
       ...config.maps,
       enabled: Boolean(mapplsKey || apiKey),
@@ -1505,7 +1520,7 @@ function HealthGauge({ score, signals, confidence, wards }: { score: number; sig
   );
 }
 
-function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"]; session: SessionResponse }) {
+function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"]; waterCannonAlert: ClientConfig["waterCannonAlert"]; session: SessionResponse }) {
   const projects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [overviewLens, setOverviewLens] = useState<"priority" | "delivery" | "impact">("priority");
@@ -1531,13 +1546,14 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   ]));
   const completed = projects.filter((project) => project.deliveryStatus === "completed").length;
   const delayed = projects.filter((project) => project.deliveryStatus === "delayed").length;
-  const pollutionAqi = 318;
-  const pollutionArea = session.area.constituencyName ?? selectedProject?.ward ?? session.area.district ?? "selected area";
-  const pollutionState = session.area.state ?? selectedProject?.state ?? "Delhi";
-  const pollutionDistrict = session.area.district ?? selectedProject?.district ?? "Central Delhi";
-  const pollutionConstituencyId = session.area.constituencyId ?? selectedProject?.mpId;
+  const pollutionAqi = Math.max(318, waterCannonAlert.aqiThreshold);
   const alertItems = [
-    { title: `Severe air pollution · AQI ${pollutionAqi}`, detail: `Deploy a water cannon in ${pollutionArea} and email the response alert`, tone: "high", action: "water-cannon" as const },
+    ...(waterCannonAlert.enabled ? [{
+      title: `High air pollution · AQI ${pollutionAqi} (Very Poor)`,
+      detail: `Deploy at ${waterCannonAlert.deploymentSite}, ${waterCannonAlert.ward} · ${waterCannonAlert.constituencyName} constituency`,
+      tone: "high",
+      action: "water-cannon" as const
+    }] : []),
     { title: "Road complaints rising", detail: "Clustered citizen demand needs 48-hour review", tone: "high", action: "navigate" as const },
     { title: "PHC staffing risk", detail: "Health requests exceed district baseline by 22%", tone: "medium", action: "navigate" as const },
     { title: "Budget release pending", detail: `${delayed} delayed works require officer follow-up`, tone: "medium", action: "navigate" as const }
@@ -1561,13 +1577,7 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
     try {
       const result = await requestJson<WaterCannonAlertResponse>("/api/alerts/water-cannon", {
         method: "POST",
-        body: JSON.stringify({
-          aqi: pollutionAqi,
-          area: pollutionArea,
-          state: pollutionState,
-          district: pollutionDistrict,
-          constituencyId: pollutionConstituencyId
-        })
+        body: JSON.stringify({ aqi: pollutionAqi })
       });
       setWaterCannonStatus("sent");
       setWaterCannonMessage(result.message);

@@ -1,13 +1,22 @@
-const METRIC_TYPE = "custom.googleapis.com/loksetu/water_cannon_deployment";
+const METRIC_TYPE = "custom.googleapis.com/loksetu/water_cannon_deployment_action";
 const DEFAULT_AQI_THRESHOLD = 301;
 
 export type WaterCannonAlert = {
   aqi: number;
-  area: string;
+  actor: string;
+  target: WaterCannonTarget;
+};
+
+export type WaterCannonTarget = {
   state: string;
   district: string;
-  constituencyId?: string;
-  actor: string;
+  constituencyId: string;
+  constituencyName: string;
+  ward: string;
+  deploymentSite: string;
+  latitude: number;
+  longitude: number;
+  responseWindow: string;
 };
 
 export type WaterCannonAlertDelivery = {
@@ -25,6 +34,20 @@ export function waterCannonAlertsEnabled(): boolean {
   return process.env.WATER_CANNON_ALERTS_ENABLED === "true";
 }
 
+export function waterCannonTarget(): WaterCannonTarget {
+  return {
+    state: process.env.WATER_CANNON_ALERT_STATE ?? "Delhi",
+    district: process.env.WATER_CANNON_ALERT_DISTRICT ?? "Central Delhi",
+    constituencyId: process.env.WATER_CANNON_ALERT_CONSTITUENCY_ID ?? "mp-delhi-central",
+    constituencyName: process.env.WATER_CANNON_ALERT_CONSTITUENCY_NAME ?? "Central Delhi",
+    ward: process.env.WATER_CANNON_ALERT_WARD ?? "Kalindi Nagar",
+    deploymentSite: process.env.WATER_CANNON_ALERT_DEPLOYMENT_SITE ?? "Kalindi Nagar pollution hotspot",
+    latitude: configuredCoordinate("WATER_CANNON_ALERT_LATITUDE", 28.618),
+    longitude: configuredCoordinate("WATER_CANNON_ALERT_LONGITUDE", 77.245),
+    responseWindow: process.env.WATER_CANNON_ALERT_RESPONSE_WINDOW ?? "30 minutes"
+  };
+}
+
 export async function recordWaterCannonDeployment(alert: WaterCannonAlert): Promise<WaterCannonAlertDelivery> {
   const recordedAt = new Date().toISOString();
   if (!waterCannonAlertsEnabled()) {
@@ -35,6 +58,7 @@ export async function recordWaterCannonDeployment(alert: WaterCannonAlert): Prom
   if (!projectId) throw new Error("GOOGLE_CLOUD_PROJECT is required for water-cannon alerts");
 
   const accessToken = await workloadIdentityAccessToken();
+  const severity = alert.aqi >= 401 ? "Severe" : "Very Poor";
   const endpoint = `https://monitoring.googleapis.com/v3/projects/${encodeURIComponent(projectId)}/timeSeries`;
   const response = await fetch(endpoint, {
     method: "POST",
@@ -48,10 +72,16 @@ export async function recordWaterCannonDeployment(alert: WaterCannonAlert): Prom
           type: METRIC_TYPE,
           labels: {
             aqi: String(alert.aqi),
-            area: metricLabel(alert.area),
-            state: metricLabel(alert.state),
-            district: metricLabel(alert.district),
-            constituency_id: metricLabel(alert.constituencyId ?? "unassigned"),
+            severity,
+            state: metricLabel(alert.target.state),
+            district: metricLabel(alert.target.district),
+            constituency_id: metricLabel(alert.target.constituencyId),
+            constituency_name: metricLabel(alert.target.constituencyName),
+            ward: metricLabel(alert.target.ward),
+            deployment_site: metricLabel(alert.target.deploymentSite),
+            latitude: String(alert.target.latitude),
+            longitude: String(alert.target.longitude),
+            response_window: metricLabel(alert.target.responseWindow),
             actor: metricLabel(alert.actor)
           }
         },
@@ -89,4 +119,9 @@ async function workloadIdentityAccessToken(): Promise<string> {
 
 function metricLabel(value: string): string {
   return value.trim().replace(/[\r\n\t]+/g, " ").slice(0, 100) || "unknown";
+}
+
+function configuredCoordinate(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? value : fallback;
 }

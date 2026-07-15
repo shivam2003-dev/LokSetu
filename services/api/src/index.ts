@@ -36,7 +36,7 @@ import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
 import { buildEnterpriseSituation } from "./enterprise.js";
 import { BoundaryLevel, buildBoundaryFeatures, buildHotspotClusters } from "./mapIntelligence.js";
-import { recordWaterCannonDeployment, waterCannonAlertsEnabled, waterCannonAqiThreshold } from "./waterCannonAlerts.js";
+import { recordWaterCannonDeployment, waterCannonAlertsEnabled, waterCannonAqiThreshold, waterCannonTarget } from "./waterCannonAlerts.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -157,11 +157,7 @@ const mapClusterQuerySchema = z.object({
 });
 
 const waterCannonAlertSchema = z.object({
-  aqi: z.coerce.number().int().min(0).max(1_000),
-  area: z.string().trim().min(2).max(120),
-  state: z.string().trim().min(2).max(96),
-  district: z.string().trim().min(2).max(96),
-  constituencyId: z.string().trim().min(2).max(120).optional()
+  aqi: z.coerce.number().int().min(0).max(1_000)
 });
 
 const simulationScenarios = [
@@ -450,7 +446,7 @@ app.use("/api", (request, response, next) => {
   next();
 });
 
-app.get("/api/client-config", (_request, response) => {
+app.get("/api/client-config", (request, response) => {
   const mapplsMapSdkKey = process.env.PUBLIC_MAPPLS_MAP_SDK_KEY ?? process.env.MAPPLS_MAP_SDK_KEY ?? "";
   const browserMapsKey =
     process.env.PUBLIC_GOOGLE_MAPS_API_KEY ??
@@ -458,6 +454,14 @@ app.get("/api/client-config", (_request, response) => {
     process.env.VITE_GOOGLE_MAPS_API_KEY ??
     process.env.GOOGLE_MAPS_API_KEY ??
     "";
+  const principal = requestPrincipal(request, response);
+  const alertTarget = waterCannonTarget();
+  const alertVisible = waterCannonAlertsEnabled() && geographyWithinPrincipal(
+    principal,
+    alertTarget.state,
+    alertTarget.district,
+    alertTarget.constituencyId
+  );
   response.json({
     dataMode: isDatabaseEnabled() ? "postgres" : "memory",
     maps: {
@@ -467,6 +471,11 @@ app.get("/api/client-config", (_request, response) => {
       provider: mapplsMapSdkKey ? "mappls" : browserMapsKey ? "google" : "osm",
       mapplsKey: mapplsMapSdkKey,
       source: mapplsMapSdkKey ? "runtime-mappls-api" : browserMapsKey ? "runtime-api" : "not-configured"
+    },
+    waterCannonAlert: {
+      enabled: alertVisible,
+      aqiThreshold: waterCannonAqiThreshold(),
+      ...(alertVisible ? alertTarget : {})
     },
     citizenAppUrl: process.env.CITIZEN_APP_URL ?? "",
     generatedAt: new Date().toISOString()
@@ -1293,7 +1302,7 @@ app.post("/api/simulation/submit", async (request, response) => {
 app.post("/api/alerts/water-cannon", waterCannonAlertRateLimit, async (request, response) => {
   const parsed = waterCannonAlertSchema.safeParse(request.body);
   if (!parsed.success) {
-    response.status(400).json({ error: "Valid AQI and deployment area are required", details: parsed.error.flatten() });
+    response.status(400).json({ error: "A valid AQI reading is required", details: parsed.error.flatten() });
     return;
   }
   const principal = requestPrincipal(request, response);
@@ -1301,7 +1310,8 @@ app.post("/api/alerts/water-cannon", waterCannonAlertRateLimit, async (request, 
     response.status(403).json({ error: "Project update permission required to deploy a water cannon" });
     return;
   }
-  if (!geographyWithinPrincipal(principal, parsed.data.state, parsed.data.district, parsed.data.constituencyId)) {
+  const target = waterCannonTarget();
+  if (!geographyWithinPrincipal(principal, target.state, target.district, target.constituencyId)) {
     response.status(403).json({ error: "Water-cannon deployment is outside this user's configured geography" });
     return;
   }
@@ -1315,16 +1325,16 @@ app.post("/api/alerts/water-cannon", waterCannonAlertRateLimit, async (request, 
   }
 
   try {
-    const result = await recordWaterCannonDeployment({ ...parsed.data, actor: principal.displayName });
+    const result = await recordWaterCannonDeployment({ aqi: parsed.data.aqi, actor: principal.displayName, target });
     memoryAuditEvents.unshift({
       at: result.recordedAt,
       actor: principal.displayName,
       action: "requested_water_cannon_deployment",
-      object: `${parsed.data.area} / AQI ${parsed.data.aqi}`,
+      object: `${target.constituencyName} / ${target.ward} / AQI ${parsed.data.aqi}`,
       privacyMode: false,
-      state: parsed.data.state,
-      district: parsed.data.district,
-      constituencyId: parsed.data.constituencyId
+      state: target.state,
+      district: target.district,
+      constituencyId: target.constituencyId
     });
     response.status(202).json({
       ok: true,
@@ -1333,11 +1343,22 @@ app.post("/api/alerts/water-cannon", waterCannonAlertRateLimit, async (request, 
         : "Water-cannon deployment validated. Email alerting is disabled in this environment.",
       aqi: parsed.data.aqi,
       threshold,
-      area: parsed.data.area,
+      severity: parsed.data.aqi >= 401 ? "Severe" : "Very Poor",
+      actionPlan: {
+        constituency: target.constituencyName,
+        constituencyId: target.constituencyId,
+        ward: target.ward,
+        deploymentSite: target.deploymentSite,
+        district: target.district,
+        state: target.state,
+        coordinates: { latitude: target.latitude, longitude: target.longitude },
+        mapUrl: `https://www.google.com/maps?q=${target.latitude},${target.longitude}`,
+        responseWindow: target.responseWindow
+      },
       ...result
     });
   } catch (error) {
-    logger.error({ error, area: parsed.data.area, aqi: parsed.data.aqi }, "water-cannon email alert failed");
+    logger.error({ error, target, aqi: parsed.data.aqi }, "water-cannon email alert failed");
     response.status(503).json({ error: "Google Cloud could not send the water-cannon email alert. Try again." });
   }
 });

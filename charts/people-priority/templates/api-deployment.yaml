@@ -162,6 +162,24 @@ spec:
               value: {{ .Values.api.env.WATER_CANNON_ALERTS_ENABLED | quote }}
             - name: WATER_CANNON_AQI_THRESHOLD
               value: {{ .Values.api.env.WATER_CANNON_AQI_THRESHOLD | quote }}
+            - name: WATER_CANNON_ALERT_STATE
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_STATE | quote }}
+            - name: WATER_CANNON_ALERT_DISTRICT
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_DISTRICT | quote }}
+            - name: WATER_CANNON_ALERT_CONSTITUENCY_ID
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_CONSTITUENCY_ID | quote }}
+            - name: WATER_CANNON_ALERT_CONSTITUENCY_NAME
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_CONSTITUENCY_NAME | quote }}
+            - name: WATER_CANNON_ALERT_WARD
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_WARD | quote }}
+            - name: WATER_CANNON_ALERT_DEPLOYMENT_SITE
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_DEPLOYMENT_SITE | quote }}
+            - name: WATER_CANNON_ALERT_LATITUDE
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_LATITUDE | quote }}
+            - name: WATER_CANNON_ALERT_LONGITUDE
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_LONGITUDE | quote }}
+            - name: WATER_CANNON_ALERT_RESPONSE_WINDOW
+              value: {{ .Values.api.env.WATER_CANNON_ALERT_RESPONSE_WINDOW | quote }}
             {{- with .Values.api.env.APP_DEMO_ACCESS_ENABLED }}
             - name: APP_DEMO_ACCESS_ENABLED
               value: {{ . | quote }}
