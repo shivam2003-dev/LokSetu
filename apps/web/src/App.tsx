@@ -705,7 +705,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(tourStorageKey) !== "1");
   const [tourStep, setTourStep] = useState(0);
-  const [scope, setScope] = useState<Scope>("local");
+  const [scope, setScope] = useState<Scope>("global");
   const [state, setState] = useState("Delhi");
   const [district, setDistrict] = useState("Central Delhi");
   const [ward, setWard] = useState("Kalindi Nagar");
@@ -730,7 +730,6 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
   const effectiveCitizenAppUrl = clientConfig.citizenAppUrl?.trim() || citizenAppUrl;
-  const showControlStrip = page === "priorities" || page === "map" || page === "recommendations" || page === "projects";
   const canManageUsers = session.user.permissions.includes("users:manage");
 
   useEffect(() => {
@@ -989,23 +988,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         <DashboardAccessBanner session={session} />
 
-        {showControlStrip ? (
-          session.restricted ? <RestrictedControlStrip session={session} query={query} setQuery={setQuery} apply={applyFilters} /> : <ControlStrip
-            context={context}
-            scope={scope}
-            setScope={setScope}
-            state={state}
-            setState={updateState}
-            district={district}
-            setDistrict={updateDistrict}
-            ward={ward}
-            setWard={updateWard}
-            mpId={mpId}
-            setMpId={setMpId}
-            query={query}
-            setQuery={setQuery}
-            apply={applyFilters}
-          />
+        {session.restricted && ["priorities", "map", "recommendations", "projects"].includes(page) ? (
+          <RestrictedControlStrip session={session} query={query} setQuery={setQuery} apply={applyFilters} />
         ) : null}
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
@@ -1269,54 +1253,6 @@ function RestrictedControlStrip({
   );
 }
 
-function ControlStrip(props: {
-  context: ContextResponse;
-  scope: Scope;
-  setScope: (scope: Scope) => void;
-  state: string;
-  setState: (value: string) => void;
-  district: string;
-  setDistrict: (value: string) => void;
-  ward: string;
-  setWard: (value: string) => void;
-  mpId: string;
-  setMpId: (value: string) => void;
-  query: string;
-  setQuery: (value: string) => void;
-  apply: () => void;
-}) {
-  const districtOptions = props.context.districtsByState[props.state] ?? props.context.districts;
-  const wardOptions = props.context.wardsByDistrict[`${props.state}::${props.district}`] ?? props.context.wards;
-  const mpOptions = props.context.mps.filter((mp) => props.scope === "global" || mp.state === props.state);
-
-  return (
-    <section className="control-strip" aria-label="India search and locality controls">
-      <div className="segmented">
-        <button className={props.scope === "local" ? "active" : ""} onClick={() => props.setScope("local")}>My area</button>
-        <button className={props.scope === "mp" ? "active" : ""} onClick={() => props.setScope("mp")}>My MP</button>
-        <button className={props.scope === "global" ? "active" : ""} onClick={() => props.setScope("global")}>All India</button>
-      </div>
-      <select value={props.state} onChange={(event) => props.setState(event.target.value)} aria-label="State">
-        {props.context.states.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select value={props.district} onChange={(event) => props.setDistrict(event.target.value)} aria-label="District">
-        {districtOptions.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select value={props.ward} onChange={(event) => props.setWard(event.target.value)} aria-label="Ward">
-        {wardOptions.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select value={props.mpId} onChange={(event) => props.setMpId(event.target.value)} aria-label="MP">
-        {mpOptions.map((mp) => <option value={mp.id} key={mp.id}>{mp.name}</option>)}
-      </select>
-      <span className="search-box">
-        <Search size={16} />
-        <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Search school, road, water, ward" />
-      </span>
-      <button className="primary" onClick={props.apply}>Apply</button>
-    </section>
-  );
-}
-
 function ConnectionBanner({ error }: { error: string | null }) {
   return (
     <section className="connection-banner" role="status">
@@ -1432,6 +1368,21 @@ function HealthGauge({ score, signals, confidence, wards }: { score: number; sig
 
 function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"] }) {
   const projects = buildManagedProjects(dashboard.projects);
+  const districtSnapshot = useMemo(() => {
+    const groups: Array<{ label: string; categories: string[] }> = [
+      { label: "Infrastructure", categories: ["roads", "power", "sanitation"] },
+      { label: "Healthcare", categories: ["health", "healthcare"] },
+      { label: "Education", categories: ["education"] },
+      { label: "Water", categories: ["water", "water supply"] },
+      { label: "Employment", categories: ["employment"] }
+    ];
+    const overall = Math.round(average(dashboard.projects.map((project) => project.score))) || 62;
+    return groups.map((group) => {
+      const matching = dashboard.projects.filter((project) => group.categories.includes(project.category.toLowerCase()));
+      const value = matching.length ? Math.round(average(matching.map((project) => project.score))) : Math.max(20, Math.round(overall * 0.72));
+      return { label: group.label, value: Math.min(100, value) };
+    });
+  }, [dashboard.projects]);
   const [selectedHotspotId, setSelectedHotspotId] = useState("");
   const topPriorities = projects.slice(0, 5);
   const totalDemand = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
@@ -1545,16 +1496,23 @@ function OverviewPage({ dashboard, setPage, maps }: { dashboard: DashboardRespon
         <section className="panel overview-budget-panel">
           <PanelTitle title="Budget and Impact" icon={Database} detail="expected beneficiaries" />
           <div className="overview-budget-chart">
-            {projects.slice(0, 6).map((project) => (
-              <span key={project.id} style={{ height: `${Math.max(26, project.budgetCr * 11)}px` }}><b>₹{project.budgetCr.toFixed(1)}Cr</b></span>
-            ))}
+            {projects.slice(0, 6).map((project) => {
+              const maxBudget = Math.max(1, ...projects.slice(0, 6).map((item) => item.budgetCr));
+              return (
+                <div className="budget-col" key={project.id} title={`${project.title} · ${formatCount(project.citizenImpact)} beneficiaries`}>
+                  <b>₹{project.budgetCr.toFixed(1)}Cr</b>
+                  <span style={{ height: `${Math.max(10, (project.budgetCr / maxBudget) * 100)}%` }} />
+                  <small>{project.ward.length > 11 ? `${project.ward.slice(0, 10)}…` : project.ward}</small>
+                </div>
+              );
+            })}
           </div>
         </section>
 
         <section className="panel overview-compare-panel">
           <PanelTitle title="District Snapshot" icon={TrendingUp} detail="health vs demand" />
-          {["Infrastructure", "Healthcare", "Education", "Water", "Employment"].map((item, index) => (
-            <article key={item}><span>{item}</span><i style={{ width: `${88 - index * 9}%` }} /><strong>{88 - index * 9}</strong></article>
+          {districtSnapshot.map((item) => (
+            <article key={item.label}><span>{item.label}</span><i style={{ width: `${item.value}%` }} /><strong>{item.value}</strong></article>
           ))}
         </section>
       </section>
@@ -1671,6 +1629,8 @@ function IssueMap({
   const [confidenceFilter, setConfidenceFilter] = useState("High confidence");
   const [timelineValue, setTimelineValue] = useState(72);
   const [mapOverlay, setMapOverlay] = useState<"hotspots" | "clusters" | "heatmap">("hotspots");
+  const [showLayerList, setShowLayerList] = useState(false);
+  const [showGisTools, setShowGisTools] = useState(false);
   const allHotspots = useMemo(() => buildMapHotspots(dashboard), [dashboard]);
   const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
     const issueMatches = issueFilter === "All issue types" || normalizedIssueFilter(issueFilter) === normalizedIssueFilter(hotspot.category);
@@ -1683,9 +1643,19 @@ function IssueMap({
   }), [activeLayers, allHotspots, confidenceFilter, issueFilter, timelineValue]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
 
+  const googleMapRef = useRef<any>(null);
+  const overlayObjectsRef = useRef<MapOverlayObject[]>([]);
+  const boundaryObjectsRef = useRef<MapOverlayObject[]>([]);
+  const fitDoneRef = useRef(false);
+  const lastOverlayRef = useRef(mapOverlay);
+  const initialCenterRef = useRef(hotspots);
+  initialCenterRef.current = hotspots;
+
+  // Bootstrap the map SDK once per provider/key; overlays sync in separate effects
+  // so filter, overlay, and boundary changes never rebuild the base map.
   useEffect(() => {
-    if (!maps.enabled || hotspots.length === 0 || !mapRef.current) {
-      setFallbackReason(!maps.enabled ? "Map SDK key is not configured." : "No hotspot coordinates available for the current filters.");
+    if (!maps.enabled || !mapRef.current) {
+      setFallbackReason("Map SDK key is not configured.");
       setMapState("fallback");
       return;
     }
@@ -1705,15 +1675,16 @@ function IssueMap({
           if (cancelled || !mapRef.current || !window.mappls?.Map) return;
           mapRef.current.replaceChildren();
           mapRef.current.id ||= `mappls-${Math.random().toString(36).slice(2)}`;
-          const center = hotspots[0] ?? { lat: 28.6139, lng: 77.2090 };
+          const points = initialCenterRef.current;
+          const center = points[0] ?? { lat: 28.6139, lng: 77.2090 };
           const map = new window.mappls.Map(mapRef.current.id, {
             center: [center.lat, center.lng],
-            zoom: hotspots.length > 1 ? 5 : 12,
+            zoom: points.length > 1 ? 5 : 12,
             geolocation: false,
             clickableIcons: false
           });
           if (window.mappls.Marker) {
-            hotspots.forEach((hotspot, index) => {
+            points.forEach((hotspot, index) => {
               try {
                 new window.mappls!.Marker!({
                   map,
@@ -1740,6 +1711,9 @@ function IssueMap({
     const originalAuthFailure = window.gm_authFailure;
     const activateFallback = (reason: string) => {
       if (cancelled) return;
+      googleMapRef.current = null;
+      overlayObjectsRef.current = [];
+      boundaryObjectsRef.current = [];
       setFallbackReason(reason);
       if (mapRef.current) mapRef.current.replaceChildren();
       setMapState("fallback");
@@ -1750,8 +1724,8 @@ function IssueMap({
     };
     window.console.error = (...args: unknown[]) => {
       const message = args.map(String).join(" ");
-      if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError/.test(message)) {
-        activateFallback("Google Maps demo-key quota or browser-key access failed. Showing the live OpenStreetMap tile layer.");
+      if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError|InvalidKeyMapError/.test(message)) {
+        activateFallback("Google Maps browser-key access failed. Showing the live OpenStreetMap tile layer.");
       }
       originalConsoleError.apply(window.console, args);
     };
@@ -1761,28 +1735,27 @@ function IssueMap({
     loadGoogleMaps(maps.apiKey, maps.mapId)
       .then(() => {
         if (cancelled || !mapRef.current || !window.google?.maps) return;
-
-        const bounds = new window.google.maps.LatLngBounds();
-        hotspots.forEach((hotspot) => bounds.extend({ lat: hotspot.lat, lng: hotspot.lng }));
-
+        const points = initialCenterRef.current;
+        const center = points[0] ?? { lat: 22.9, lng: 79.2 };
         const map = new window.google.maps.Map(mapRef.current, {
-          center: hotspots[0],
-          zoom: hotspots.length > 1 ? 5 : 12,
+          center: { lat: center.lat, lng: center.lng },
+          zoom: points.length > 1 ? 5 : 12,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
           clickableIcons: false,
           gestureHandling: "greedy",
-          ...(maps.mapId ? { mapId: maps.mapId } : {}),
-          styles: [
-            { featureType: "poi", stylers: [{ visibility: "off" }] },
-            { featureType: "transit", stylers: [{ visibility: "off" }] }
-          ]
+          ...(maps.mapId
+            ? { mapId: maps.mapId }
+            : {
+              styles: [
+                { featureType: "poi", stylers: [{ visibility: "off" }] },
+                { featureType: "transit", stylers: [{ visibility: "off" }] }
+              ]
+            })
         });
-
-        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => selectProject(hotspot.projectId)));
-
-        if (hotspots.length > 1) map.fitBounds(bounds, 60);
+        googleMapRef.current = map;
+        fitDoneRef.current = false;
         setMapState("ready");
         mapErrorTimer = window.setTimeout(() => {
           if (!cancelled && mapRef.current?.querySelector(".gm-err-container, .gm-err-title, .gm-err-message")) {
@@ -1799,8 +1772,63 @@ function IssueMap({
       if (mapErrorTimer) window.clearTimeout(mapErrorTimer);
       window.console.error = originalConsoleError;
       window.gm_authFailure = originalAuthFailure;
+      googleMapRef.current = null;
+      overlayObjectsRef.current = [];
+      boundaryObjectsRef.current = [];
     };
-  }, [hotspots, maps.enabled, maps.provider, maps.mapplsKey, maps.apiKey, maps.mapId, selectProject]);
+  }, [maps.enabled, maps.provider, maps.mapplsKey, maps.apiKey, maps.mapId]);
+
+  // Sync the active overlay (hotspot markers / cluster circles / demand heatmap)
+  // onto the live Google map whenever data or the selected overlay changes.
+  useEffect(() => {
+    const map = googleMapRef.current;
+    if (mapState !== "ready" || maps.provider === "mappls" || !map || !window.google?.maps) return;
+    clearMapOverlays(overlayObjectsRef.current);
+    if (mapOverlay === "clusters" && clusters.clusters.length) {
+      overlayObjectsRef.current.push(...drawClusterOverlay(map, clusters.clusters, selectProject));
+    } else if (mapOverlay === "heatmap" && hotspots.length) {
+      overlayObjectsRef.current.push(...drawHeatmapOverlay(map, hotspots));
+    } else {
+      hotspots.forEach((hotspot, index) => {
+        overlayObjectsRef.current.push(addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => selectProject(hotspot.projectId)));
+      });
+    }
+    const overlayChanged = lastOverlayRef.current !== mapOverlay;
+    lastOverlayRef.current = mapOverlay;
+    if (!fitDoneRef.current || overlayChanged) {
+      if (mapOverlay === "heatmap" && overlayObjectsRef.current.length) {
+        const bounds = new window.google.maps.LatLngBounds();
+        overlayObjectsRef.current.forEach((object: any) => {
+          if (typeof object.getBounds === "function") bounds.union(object.getBounds());
+        });
+        map.fitBounds(bounds, 40);
+        fitDoneRef.current = true;
+        return;
+      }
+      const points: Array<{ lat: number; lng: number }> = mapOverlay === "clusters" && clusters.clusters.length
+        ? clusters.clusters.map((cluster) => cluster.centroid)
+        : hotspots;
+      if (points.length > 1) {
+        const bounds = new window.google.maps.LatLngBounds();
+        points.forEach((point) => bounds.extend({ lat: point.lat, lng: point.lng }));
+        map.fitBounds(bounds, 60);
+        fitDoneRef.current = true;
+      } else if (points.length === 1) {
+        map.setCenter({ lat: points[0].lat, lng: points[0].lng });
+        map.setZoom(12);
+        fitDoneRef.current = true;
+      }
+    }
+  }, [mapState, mapOverlay, hotspots, clusters, maps.provider, maps.mapId, selectProject]);
+
+  // Draw bbox rectangles for the selected boundary level on the live map.
+  useEffect(() => {
+    const map = googleMapRef.current;
+    if (mapState !== "ready" || maps.provider === "mappls" || !map || !window.google?.maps) return;
+    clearMapOverlays(boundaryObjectsRef.current);
+    const features = boundaries.features.filter((feature) => feature.level === boundaryLevel);
+    boundaryObjectsRef.current.push(...drawBoundaryOverlay(map, features, selectProject));
+  }, [mapState, boundaries, boundaryLevel, maps.provider, selectProject]);
 
   return (
     <div className="map-stack gis-dashboard">
@@ -1813,26 +1841,6 @@ function IssueMap({
       </div>
       <div className="map-layout gis-layout">
         <aside className="gis-control-panel" aria-label="GIS layer controls">
-          <section>
-            <h4>Layers</h4>
-            <div className="gis-layer-list">
-              {gisLayers.map((layer) => (
-                <label key={layer.label}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(activeLayers[layer.label])}
-                    onChange={(event) => {
-                      const checked = event.currentTarget.checked;
-                      setActiveLayers((current) => ({ ...current, [layer.label]: checked }));
-                      setGisAction(`${layer.label} layer ${checked ? "enabled" : "hidden"}; ${hotspots.length} signals match the current view.`);
-                    }}
-                  />
-                  <i style={{ background: layer.color }} />
-                  <span>{layer.label}</span>
-                </label>
-              ))}
-            </div>
-          </section>
           <section>
             <h4>Filters</h4>
             <select aria-label="GIS issue filter" value={issueFilter} onChange={(event) => {
@@ -1857,22 +1865,53 @@ function IssueMap({
             </select>
           </section>
           <section>
-            <h4>Timeline</h4>
-            <input aria-label="GIS timeline slider" value={timelineValue} max="100" min="20" type="range" onChange={(event) => {
-              const next = Number(event.currentTarget.value);
-              setTimelineValue(next);
-              setGisAction(`Timeline window moved to ${timelineLabel(next)}; map now uses matching batch signals.`);
-            }} />
-            <div className="gis-time-row"><span>Jan</span><b>{timelineLabel(timelineValue)}</b><span>Dec</span></div>
+            <button className="gis-section-toggle" type="button" aria-expanded={showLayerList} onClick={() => setShowLayerList((current) => !current)}>
+              <h4>Layers</h4>
+              <span>{Object.values(activeLayers).filter(Boolean).length} on</span>
+              <ChevronDown className={showLayerList ? "open" : ""} size={14} />
+            </button>
+            {showLayerList ? (
+              <div className="gis-layer-list">
+                {gisLayers.map((layer) => (
+                  <label key={layer.label}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(activeLayers[layer.label])}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setActiveLayers((current) => ({ ...current, [layer.label]: checked }));
+                        setGisAction(`${layer.label} layer ${checked ? "enabled" : "hidden"}; ${hotspots.length} signals match the current view.`);
+                      }}
+                    />
+                    <i style={{ background: layer.color }} />
+                    <span>{layer.label}</span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
           </section>
           <section>
-            <h4>Analysis</h4>
-            <div className="gis-tool-grid">
-              <button onClick={() => setGisAction(`Route analysis created from ${selectedProject.ward} to nearest delivery cluster.`)} type="button">Route analysis</button>
-              <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} filtered hotspots checked.`)} type="button">Buffer 2 km</button>
-              <button onClick={() => setGisAction(`Flood overlap checked for ${selectedProject.district}; at-risk layers highlighted.`)} type="button">Flood overlap</button>
-              <button onClick={() => setGisAction(`${boundaryLevel} boundary clip applied to current demand layer.`)} type="button">Boundary clip</button>
-            </div>
+            <button className="gis-section-toggle" type="button" aria-expanded={showGisTools} onClick={() => setShowGisTools((current) => !current)}>
+              <h4>Timeline & Analysis</h4>
+              <span>{timelineLabel(timelineValue)}</span>
+              <ChevronDown className={showGisTools ? "open" : ""} size={14} />
+            </button>
+            {showGisTools ? (
+              <>
+                <input aria-label="GIS timeline slider" value={timelineValue} max="100" min="20" type="range" onChange={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  setTimelineValue(next);
+                  setGisAction(`Timeline window moved to ${timelineLabel(next)}; map now uses matching batch signals.`);
+                }} />
+                <div className="gis-time-row"><span>Jan</span><b>{timelineLabel(timelineValue)}</b><span>Dec</span></div>
+                <div className="gis-tool-grid">
+                  <button onClick={() => setGisAction(`Route analysis created from ${selectedProject.ward} to nearest delivery cluster.`)} type="button">Route analysis</button>
+                  <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} filtered hotspots checked.`)} type="button">Buffer 2 km</button>
+                  <button onClick={() => setGisAction(`Flood overlap checked for ${selectedProject.district}; at-risk layers highlighted.`)} type="button">Flood overlap</button>
+                  <button onClick={() => setGisAction(`${boundaryLevel} boundary clip applied to current demand layer.`)} type="button">Boundary clip</button>
+                </div>
+              </>
+            ) : null}
           </section>
           <p className="action-status" role="status">{gisAction}</p>
         </aside>
@@ -2437,7 +2476,7 @@ function mapStatusText(state: MapLoadState, provider?: ClientConfig["maps"]["pro
   return "Live tile map";
 }
 
-function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void) {
+function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void): MapOverlayObject {
   const position = { lat: hotspot.lat, lng: hotspot.lng };
   const title = `${hotspot.category} in ${hotspot.ward}`;
   const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
@@ -2457,7 +2496,7 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
       content
     });
     marker.addEventListener("gmp-click", onClick);
-    return;
+    return marker;
   }
 
   const marker = new window.google.maps.Marker({
@@ -2468,6 +2507,101 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
     optimized: true
   });
   marker.addListener("click", onClick);
+  return marker;
+}
+
+type MapOverlayObject = { setMap?: (map: unknown) => void; map?: unknown };
+
+function clearMapOverlays(objects: MapOverlayObject[]) {
+  objects.forEach((object) => {
+    if (typeof object.setMap === "function") object.setMap(null);
+    else if ("map" in object) object.map = null;
+  });
+  objects.length = 0;
+}
+
+function drawClusterOverlay(map: any, clusters: HotspotCluster[], onSelect: (projectId: string) => void): MapOverlayObject[] {
+  const objects: MapOverlayObject[] = [];
+  clusters.forEach((cluster) => {
+    const circle = new window.google.maps.Circle({
+      map,
+      center: cluster.centroid,
+      radius: Math.min(90000, 18000 + cluster.count * 9000),
+      fillColor: "#f97316",
+      fillOpacity: 0.22,
+      strokeColor: "#ea580c",
+      strokeOpacity: 0.85,
+      strokeWeight: 1.5,
+      clickable: true
+    });
+    circle.addListener("click", () => { if (cluster.projectIds[0]) onSelect(cluster.projectIds[0]); });
+    objects.push(circle);
+    const label = new window.google.maps.Marker({
+      map,
+      position: cluster.centroid,
+      title: `${cluster.label} · ${cluster.count} issues · score ${cluster.score}`,
+      label: { text: String(cluster.count), color: "#ffffff", fontSize: "12px", fontWeight: "700" },
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: "#ea580c",
+        fillOpacity: 0.95,
+        strokeColor: "#ffffff",
+        strokeWeight: 2
+      }
+    });
+    label.addListener("click", () => { if (cluster.projectIds[0]) onSelect(cluster.projectIds[0]); });
+    objects.push(label);
+  });
+  return objects;
+}
+
+// google.maps.visualization.HeatmapLayer was removed in Maps JS v3.65, so the
+// demand heatmap renders as layered intensity circles instead.
+function drawHeatmapOverlay(map: any, hotspots: MapHotspot[]): MapOverlayObject[] {
+  const heatColor = (intensity: number) => (intensity >= 85 ? "#ef4444" : intensity >= 65 ? "#f97316" : "#facc15");
+  return hotspots.flatMap((hotspot) => {
+    const center = { lat: hotspot.lat, lng: hotspot.lng };
+    const baseRadius = 14000 + hotspot.intensity * 500;
+    return [
+      new window.google.maps.Circle({
+        map,
+        center,
+        radius: baseRadius,
+        fillColor: heatColor(hotspot.intensity),
+        fillOpacity: 0.16,
+        strokeOpacity: 0,
+        clickable: false
+      }),
+      new window.google.maps.Circle({
+        map,
+        center,
+        radius: baseRadius * 0.45,
+        fillColor: heatColor(Math.min(100, hotspot.intensity + 15)),
+        fillOpacity: 0.34,
+        strokeOpacity: 0,
+        clickable: false
+      })
+    ];
+  });
+}
+
+function drawBoundaryOverlay(map: any, features: BoundaryFeature[], onSelect: (projectId: string) => void): MapOverlayObject[] {
+  return features.map((feature) => {
+    const [west, south, east, north] = feature.bbox;
+    const rectangle = new window.google.maps.Rectangle({
+      map,
+      bounds: { north, south, east, west },
+      fillColor: "#6366f1",
+      fillOpacity: 0.05,
+      strokeColor: "#6366f1",
+      strokeOpacity: 0.7,
+      strokeWeight: 1.2,
+      clickable: Boolean(feature.projectIds.length)
+    });
+    if (feature.projectIds.length) rectangle.addListener("click", () => onSelect(feature.projectIds[0]));
+    return rectangle;
+  });
 }
 
 function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
@@ -3741,11 +3875,14 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
   onSelect: (id: string) => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const markersRef = useRef<MapOverlayObject[]>([]);
+  const fitDoneRef = useRef(false);
   const [ready, setReady] = useState(false);
   const bandColor = (band: string) => (band === "High" ? "#ef4444" : band === "Medium" ? "#f59e0b" : "#22c55e");
 
   useEffect(() => {
-    if (!maps.enabled || !maps.apiKey || points.length === 0 || !mapRef.current) {
+    if (!maps.enabled || !maps.apiKey || !mapRef.current) {
       setReady(false);
       return;
     }
@@ -3753,45 +3890,69 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
     loadGoogleMaps(maps.apiKey, maps.mapId)
       .then(() => {
         if (cancelled || !mapRef.current || !window.google?.maps) return;
-        const bounds = new window.google.maps.LatLngBounds();
-        points.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
         const map = new window.google.maps.Map(mapRef.current, {
-          center: points[0],
-          zoom: points.length > 1 ? 5 : 11,
+          center: { lat: 22.9, lng: 79.2 },
+          zoom: 5,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
           clickableIcons: false,
           gestureHandling: "greedy",
-          ...(maps.mapId ? { mapId: maps.mapId } : {}),
-          styles: [
-            { featureType: "poi", stylers: [{ visibility: "off" }] },
-            { featureType: "transit", stylers: [{ visibility: "off" }] }
-          ]
+          ...(maps.mapId
+            ? { mapId: maps.mapId }
+            : {
+              styles: [
+                { featureType: "poi", stylers: [{ visibility: "off" }] },
+                { featureType: "transit", stylers: [{ visibility: "off" }] }
+              ]
+            })
         });
-        points.forEach((p) => {
-          const marker = new window.google!.maps!.Marker!({
-            map,
-            position: { lat: p.lat, lng: p.lng },
-            title: `${p.ward} · ${p.category} · score ${p.score}`,
-            label: { text: String(p.score), color: "#fff", fontSize: "11px", fontWeight: "700" },
-            icon: {
-              path: window.google!.maps!.SymbolPath!.CIRCLE,
-              scale: p.projectId === selectedId ? 16 : 13,
-              fillColor: bandColor(p.band),
-              fillOpacity: 1,
-              strokeColor: "#fff",
-              strokeWeight: 2
-            }
-          }) as { addListener: (ev: string, cb: () => void) => void };
-          marker.addListener("click", () => onSelect(p.projectId));
-        });
-        if (points.length > 1) map.fitBounds(bounds, 48);
+        mapInstanceRef.current = map;
+        fitDoneRef.current = false;
         setReady(true);
       })
       .catch(() => setReady(false));
-    return () => { cancelled = true; };
-  }, [maps.enabled, maps.apiKey, maps.mapId, points, selectedId, onSelect]);
+    return () => {
+      cancelled = true;
+      mapInstanceRef.current = null;
+      markersRef.current = [];
+    };
+  }, [maps.enabled, maps.apiKey, maps.mapId]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!ready || !map || !window.google?.maps) return;
+    clearMapOverlays(markersRef.current);
+    points.forEach((p) => {
+      const marker = new window.google!.maps!.Marker!({
+        map,
+        position: { lat: p.lat, lng: p.lng },
+        title: `${p.ward} · ${p.category} · score ${p.score}`,
+        label: { text: String(p.score), color: "#fff", fontSize: "11px", fontWeight: "700" },
+        icon: {
+          path: window.google!.maps!.SymbolPath!.CIRCLE,
+          scale: p.projectId === selectedId ? 16 : 13,
+          fillColor: bandColor(p.band),
+          fillOpacity: 1,
+          strokeColor: "#fff",
+          strokeWeight: 2
+        }
+      }) as MapOverlayObject & { addListener: (ev: string, cb: () => void) => void };
+      marker.addListener("click", () => onSelect(p.projectId));
+      markersRef.current.push(marker);
+    });
+    if (!fitDoneRef.current && points.length) {
+      if (points.length > 1) {
+        const bounds = new window.google.maps.LatLngBounds();
+        points.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+        map.fitBounds(bounds, 48);
+      } else {
+        map.setCenter({ lat: points[0].lat, lng: points[0].lng });
+        map.setZoom(11);
+      }
+      fitDoneRef.current = true;
+    }
+  }, [ready, points, selectedId, onSelect]);
 
   // When Google isn't configured/ready, fall back to the same live OpenStreetMap
   // tile map the main GIS page uses — real geography, no key required.
@@ -4378,14 +4539,41 @@ function CompareBars({ regions, metric, color, compact = false }: { regions: Com
   );
 }
 
+const trendLineColors = ["#1780ff", "#f97316", "#16a34a", "#8b5cf6", "#e11d48"];
+
 function TrendMini({ regions }: { regions: CompareRegion[] }) {
+  const months = ["Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+  const series = regions.map((region, index) => ({
+    region,
+    color: trendLineColors[index % trendLineColors.length],
+    values: Array.from({ length: 6 }, (_, month) => Math.max(10, Math.min(100, region.priority - 18 + month * 4 + index * 3)))
+  }));
+  const chartX = (month: number) => 40 + month * ((300 - 40) / 5);
+  const chartY = (value: number) => 116 - (value / 100) * 96;
   return (
     <div className="trend-mini">
-      {regions.map((region, index) => {
-        const values = Array.from({ length: 6 }, (_, month) => Math.max(10, region.priority - 18 + month * 4 + index * 3));
-        const points = values.map((value, month) => `${month * 48},${90 - value}`).join(" ");
-        return <svg key={region.id} viewBox="0 0 240 100"><polyline points={points} /><text x="0" y={96 - index * 12}>{region.name}</text></svg>;
-      })}
+      <svg viewBox="0 0 312 140" role="img" aria-label="Six month synchronized priority trend">
+        {[0, 25, 50, 75, 100].map((tick) => (
+          <g key={tick}>
+            <line className="grid" x1={40} x2={304} y1={chartY(tick)} y2={chartY(tick)} />
+            <text className="tick" x={34} y={chartY(tick) + 3} textAnchor="end">{tick}</text>
+          </g>
+        ))}
+        {months.map((month, index) => (
+          <text className="tick" key={month} x={chartX(index)} y={132} textAnchor="middle">{month}</text>
+        ))}
+        {series.map((entry) => (
+          <polyline key={entry.region.id} points={entry.values.map((value, month) => `${chartX(month)},${chartY(value)}`).join(" ")} style={{ stroke: entry.color }} />
+        ))}
+        {series.flatMap((entry) => entry.values.map((value, month) => (
+          <circle key={`${entry.region.id}-${month}`} cx={chartX(month)} cy={chartY(value)} r={2.6} style={{ fill: entry.color }} />
+        )))}
+      </svg>
+      <div className="trend-legend">
+        {series.map((entry) => (
+          <span key={entry.region.id}><i style={{ background: entry.color }} />{entry.region.name}</span>
+        ))}
+      </div>
     </div>
   );
 }
