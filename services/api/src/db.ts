@@ -20,10 +20,6 @@ export async function initDatabase(): Promise<void> {
       created_at timestamptz not null
     )
   `);
-  await pool.query("alter table app_users add column if not exists permissions jsonb not null default '[]'::jsonb");
-  await pool.query("alter table app_users add column if not exists state text");
-  await pool.query("alter table app_users add column if not exists district text");
-  await pool.query("alter table app_users add column if not exists constituency_id text");
 
   await pool.query(`
     create table if not exists raw_intake (
@@ -59,9 +55,17 @@ export async function initDatabase(): Promise<void> {
       password_hash text not null,
       role text not null,
       display_name text not null,
+      permissions jsonb not null default '[]'::jsonb,
+      state text,
+      district text,
+      constituency_id text,
       created_at timestamptz not null
     )
   `);
+  await pool.query("alter table app_users add column if not exists permissions jsonb not null default '[]'::jsonb");
+  await pool.query("alter table app_users add column if not exists state text");
+  await pool.query("alter table app_users add column if not exists district text");
+  await pool.query("alter table app_users add column if not exists constituency_id text");
 
   for (const submission of seedSubmissions) {
     await insertSubmission(submission);
@@ -335,7 +339,7 @@ export async function ensureAuthUser(input: {
   );
 }
 
-export async function upsertAuthUser(input: {
+export async function createAuthUser(input: {
   username: string;
   password: string;
   role: UserRole;
@@ -359,6 +363,7 @@ export async function upsertAuthUser(input: {
     createdAt: now
   };
   if (!pool) {
+    if (memoryAuthUsers.has(record.username.toLowerCase())) return null;
     memoryAuthUsers.set(record.username.toLowerCase(), record);
     return record;
   }
@@ -376,14 +381,7 @@ export async function upsertAuthUser(input: {
   }>(
     `insert into app_users (id, username, password_hash, role, display_name, permissions, state, district, constituency_id, created_at)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     on conflict (username) do update set
-       password_hash = excluded.password_hash,
-       role = excluded.role,
-       display_name = excluded.display_name,
-       permissions = excluded.permissions,
-       state = excluded.state,
-       district = excluded.district,
-       constituency_id = excluded.constituency_id
+     on conflict (username) do nothing
      returning id, username, password_hash, role, display_name, permissions, state, district, constituency_id, created_at`,
     [
       record.id,

@@ -9365,6 +9365,10 @@ button.problem-row.selected {
 .overview-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: center; min-height: 280px; padding: 28px; border: 1px solid #e6e8f0; background: #fff; box-shadow: none; }
 .overview-hero h3 { margin: 0; color: #0b1028; font-family: var(--font-display); font-size: clamp(20px, 2.8vw, 36px); font-weight: 900; letter-spacing: -0.8px; line-height: 1.02; }
 .overview-hero p { max-width: 760px; margin: 12px 0 0; color: #475569; font-size: 15px; line-height: 1.65; }
+.overview-constituency { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 8px; margin-top: 16px; padding: 9px 12px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; color: #1d4ed8; }
+.overview-constituency span { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .55px; text-transform: uppercase; }
+.overview-constituency strong { color: #0f172a; font-size: 14px; }
+.overview-constituency small { padding-left: 8px; border-left: 1px solid #bfdbfe; color: #475569; font-size: 12px; }
 .overview-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
 .overview-actions button { border: 1px solid rgba(23, 128, 255,0.22); border-radius: 999px; background: rgba(255,255,255,0.78); color: #0a5fd0; padding: 10px 14px; font-weight: 900; box-shadow: none; transition: transform 0.16s ease, box-shadow 0.16s ease; }
 .overview-actions button:first-child { background: #1780ff; border-color: #1780ff; color: #fff; }

@@ -10,6 +10,7 @@ import { areaMappings, demoSubmissions, mpProfiles, seedUsers, sourceSnapshots }
 import {
   countRawIntakesByAadhaarHash,
   countRawIntakesByStatus,
+  createAuthUser,
   ensureAuthUser,
   findAuthUserByUsername,
   findRawIntakesByReceiptPrefix,
@@ -20,7 +21,6 @@ import {
   listRecentBatchRuns,
   listRecentRawIntakes,
   listSubmissions,
-  upsertAuthUser,
   verifyPassword
 } from "./db.js";
 import { runBatch } from "./batch.js";
@@ -52,7 +52,16 @@ const demoSubmissionIds = new Set(demoSubmissions.map((submission) => submission
 const memoryRawQueue: Array<{ id: string; payload: unknown; createdAt: string; processedAt?: string }> = [];
 const memoryDiscardedIntakes: Array<{ id: string; payload: ReturnType<typeof toRawIntakePayload>; createdAt: string; processedAt: string; error: string }> = [];
 const memoryAreaMappings = [...areaMappings];
-const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
+const memoryAuditEvents: Array<{
+  at: string;
+  actor: string;
+  action: string;
+  object: string;
+  privacyMode: boolean;
+  state?: string;
+  district?: string;
+  constituencyId?: string;
+}> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
 const memoryProjectRatings = new Map<string, Array<{ rating: number; createdAt: string }>>();
 const apiRateLimit = rateLimit({
@@ -279,7 +288,7 @@ app.post("/api/auth/login", loginRateLimit, async (request, response) => {
     return;
   }
   const passwordMatchesUser = authUser ? verifyPassword(parsed.data.password, authUser.passwordHash) : false;
-  const passwordOnlyFallback = !authUser && constantTimeEqual(parsed.data.password, accessPassword);
+  const passwordOnlyFallback = !loginUsername && constantTimeEqual(parsed.data.password, accessPassword);
   if (!passwordMatchesUser && !passwordOnlyFallback) {
     response.status(401).json({ error: "Invalid password" });
     return;
@@ -542,6 +551,14 @@ app.post("/api/admin/users", async (request, response) => {
     response.status(403).json({ error: "User management permission required" });
     return;
   }
+  if (!parsed.data.permissions.every((permission) => principal.permissions.includes(permission))) {
+    response.status(403).json({ error: "Cannot grant permissions you do not possess" });
+    return;
+  }
+  if (dashboardRoleRank(parsed.data.role) > dashboardRoleRank(principal.role)) {
+    response.status(403).json({ error: "Cannot create a role above your own" });
+    return;
+  }
   if (!parsed.data.permissions.includes("dashboard:view") || !parsed.data.permissions.includes("issues:view")) {
     response.status(400).json({ error: "Dashboard users require dashboard:view and issues:view permissions" });
     return;
@@ -557,7 +574,7 @@ app.post("/api/admin/users", async (request, response) => {
     response.status(403).json({ error: "Cannot create a user outside your configured geography" });
     return;
   }
-  const user = await upsertAuthUser({
+  const user = await createAuthUser({
     username: parsed.data.username,
     password: parsed.data.password,
     role: parsed.data.role,
@@ -567,25 +584,22 @@ app.post("/api/admin/users", async (request, response) => {
     district: parsed.data.district,
     constituencyId: parsed.data.constituencyId
   });
+  if (!user) {
+    response.status(409).json({ error: "Username already exists" });
+    return;
+  }
   memoryAuditEvents.unshift({
     at: new Date().toISOString(),
     actor: principal.displayName,
     action: "created_dashboard_user",
     object: `${parsed.data.username} / ${parsed.data.constituencyId ?? parsed.data.district}`,
-    privacyMode: false
+    privacyMode: false,
+    state: parsed.data.state,
+    district: parsed.data.district,
+    constituencyId: parsed.data.constituencyId
   });
   response.status(201).json({
-    user: user
-      ? publicAuthPrincipal(principalFromAuthUser(user))
-      : {
-          username: parsed.data.username,
-          role: parsed.data.role,
-          displayName: parsed.data.displayName,
-          permissions: parsed.data.permissions,
-          state: parsed.data.state,
-          district: parsed.data.district,
-          constituencyId: parsed.data.constituencyId
-        }
+    user: publicAuthPrincipal(principalFromAuthUser(user))
   });
 });
 
@@ -904,7 +918,10 @@ app.post("/api/admin/area-mappings", (request, response) => {
     actor: principal.displayName,
     action: "updated_area_mapping",
     object: `${mapping.ward} -> ${mapping.mpId}`,
-    privacyMode: false
+    privacyMode: false,
+    state: mapping.state,
+    district: mapping.district,
+    constituencyId: mapping.mpId
   });
   response.json({ mapping });
 });
@@ -1173,7 +1190,10 @@ app.get("/api/audit", async (request, response) => {
   const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
   response.json({
     events: [
-      ...memoryAuditEvents.filter((event) => !principalHasGeography(principal) || event.object.includes(principal.district ?? principal.state ?? "")),
+      ...memoryAuditEvents.filter((event) =>
+        !principalHasGeography(principal) ||
+        Boolean(event.state && event.district && geographyWithinPrincipal(principal, event.state, event.district, event.constituencyId))
+      ),
       ...submissions.slice(-10).reverse().map((submission) => ({
         at: submission.createdAt,
         actor: submission.displayName,
@@ -1277,7 +1297,10 @@ app.patch("/api/projects/:projectId/status", async (request, response) => {
     actor: principal.displayName,
     action: "updated_project_status",
     object: `${project.title} -> ${parsed.data.status}`,
-    privacyMode: false
+    privacyMode: false,
+    state: project.state,
+    district: project.district,
+    constituencyId: project.mpId
   });
   const updatedProject = { ...project, status: parsed.data.status };
   response.json({ project: updatedProject, updatedAt });
@@ -1783,6 +1806,10 @@ function principalHasGeography(principal: AccessPrincipal): boolean {
   return Boolean(principal.state || principal.district || principal.constituencyId);
 }
 
+function dashboardRoleRank(role: UserRole): number {
+  return { citizen: 0, ward_staff: 1, mp: 2, district_admin: 3, state_admin: 4 }[role];
+}
+
 function dashboardFiltersForRequest(
   request: express.Request,
   response: express.Response,
@@ -1793,11 +1820,14 @@ function dashboardFiltersForRequest(
   if (principal.constituencyId) {
     return { ...requested, scope: "mp", mpId: principal.constituencyId, state: undefined, district: undefined, ward: undefined };
   }
-  if (principal.district) {
-    return { ...requested, scope: "local", state: principal.state, district: principal.district, ward: undefined, mpId: undefined };
-  }
   if (principal.state) {
-    return { ...requested, scope: "local", state: principal.state, district: undefined, ward: undefined, mpId: undefined };
+    return {
+      ...requested,
+      scope: "local",
+      state: principal.state,
+      district: principal.district ?? requested.district,
+      mpId: undefined
+    };
   }
   return requested;
 }

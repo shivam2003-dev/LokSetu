@@ -364,7 +364,9 @@ test.describe("MP/admin web functional flow", () => {
     await loginIfNeeded(page);
     await page.goto("/#explore");
     await expect(page.locator(".map-state")).toContainText(/Local map fallback|Live tile map/);
-    await expect(page.locator(".fallback-map .hotspot").first()).toBeVisible();
+    const fallbackMap = page.getByLabel("India-boundary live tile map");
+    await expect(fallbackMap).toHaveAttribute("data-map-boundary", "india");
+    await expect(fallbackMap.locator(".hotspot").first()).toBeVisible();
   });
 
   test("maps key without Map ID uses legacy markers and no marker library", async ({ page }) => {
@@ -387,6 +389,8 @@ test.describe("MP/admin web functional flow", () => {
     expect(markerStats.legacyMarkers).toBeGreaterThan(0);
     expect(markerStats.advancedMarkers).toBe(0);
     expect(markerStats.scripts[0]).not.toContain("libraries=marker");
+    expect(markerStats.mapOptions.every((options: any) => options.restriction?.strictBounds === true)).toBe(true);
+    expect(markerStats.mapOptions.every((options: any) => options.minZoom === 4)).toBe(true);
   });
 
   test("Map ID enables advanced markers and cluster click detail", async ({ page }) => {
@@ -413,46 +417,50 @@ test.describe("MP/admin web functional flow", () => {
     expect(markerStats.advancedMarkers).toBeGreaterThan(0);
     expect(markerStats.legacyMarkers).toBe(0);
     expect(markerStats.scripts[0]).toContain("libraries=marker");
+    expect(markerStats.mapOptions.every((options: any) => options.restriction?.strictBounds === true)).toBe(true);
   });
 
   test("admin creates an MP user whose homepage is locked to the configured constituency", async ({ page }) => {
     await loginIfNeeded(page);
     await page.goto("/#settings");
     await expect(page.getByLabel("Dashboard user management")).toBeVisible();
-    await page.getByLabel("Dashboard user full name").fill("Lucknow MP Dashboard");
-    await page.getByLabel("Dashboard user username").fill("mp.lucknow.browser");
+    await page.getByLabel("Dashboard user full name").fill("Central Delhi MP Dashboard");
+    await page.getByLabel("Dashboard user username").fill("mp.delhi.browser");
     await page.getByLabel("Dashboard user temporary password").fill("BrowserPass123!");
     await page.getByLabel("Dashboard user role").selectOption("mp");
-    await page.getByLabel("Dashboard user state").selectOption("Uttar Pradesh");
-    await page.getByLabel("Dashboard user district").selectOption("Lucknow");
-    await page.getByLabel("Dashboard user constituency").selectOption("mp-up-lucknow");
+    await page.getByLabel("Dashboard user state").selectOption("Delhi");
+    await page.getByLabel("Dashboard user district").selectOption("Central Delhi");
+    await page.getByLabel("Dashboard user constituency").selectOption("mp-delhi-central");
     await page.getByRole("checkbox", { name: /Update projects/ }).uncheck();
     await page.getByRole("button", { name: "Create dashboard user" }).click();
     await expect(page.getByRole("status")).toContainText("can now sign in");
 
     await page.getByRole("button", { name: "Logout" }).click();
-    await page.getByLabel("Email or Mobile Number").fill("mp.lucknow.browser");
+    await page.getByLabel("Email or Mobile Number").fill("mp.delhi.browser");
     await page.getByLabel("Password", { exact: true }).fill("BrowserPass123!");
     await page.getByRole("button", { name: "Sign In" }).click();
+    await page.goto("/");
 
     const accessBanner = page.getByLabel("Dashboard access scope");
-    await expect(accessBanner).toContainText("Lucknow MP Dashboard");
-    await expect(accessBanner).toContainText("Dashboard locked to MP Lucknow · Lucknow · Uttar Pradesh");
+    await expect(accessBanner).toContainText("Central Delhi MP Dashboard");
+    await expect(accessBanner).toContainText("Dashboard locked to MP Central Delhi · Central Delhi · Delhi");
+    await expect(page.getByRole("heading", { name: "Central Delhi intelligence command center" })).toBeVisible();
+    await expect(page.getByLabel("Dashboard constituency")).toContainText("MP Central Delhi");
     await expect(page.getByLabel("Demo data controls")).toHaveCount(0);
     await expect(page.getByLabel("JanVaani navigation").getByRole("button", { name: "Settings" })).toHaveCount(0);
 
     await page.goto("/#priorities");
-    await expect(page.getByLabel("Configured dashboard area")).toContainText("MP Lucknow");
+    await expect(page.getByLabel("Configured dashboard area")).toContainText("MP Central Delhi");
     await expect(page.getByRole("button", { name: "All India" })).toHaveCount(0);
     await expect(page.getByLabel("State", { exact: true })).toHaveCount(0);
     await expect(page.locator(".queue-row").first()).toBeVisible();
-    await expect(page.locator(".queue-row").first()).toContainText(/Aminabad Basti|Gomti Nagar Extension/);
+    await expect(page.locator(".queue-row").first()).toContainText(/Kalindi Nagar|River Market/);
   });
 });
 
 async function installGoogleMapsMock(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
-    (window as any).__loksetuMapMock = { scripts: [], legacyMarkers: 0, advancedMarkers: 0 };
+    (window as any).__loksetuMapMock = { scripts: [], legacyMarkers: 0, advancedMarkers: 0, mapOptions: [] };
     const originalAppendChild = HTMLHeadElement.prototype.appendChild;
     HTMLHeadElement.prototype.appendChild = function appendChildPatched<T extends Node>(node: T): T {
       if (node instanceof HTMLScriptElement && node.src.includes("maps.googleapis.com/maps/api/js")) {
@@ -464,8 +472,9 @@ async function installGoogleMapsMock(page: import("@playwright/test").Page) {
           }
           class Map {
             element: HTMLElement;
-            constructor(element: HTMLElement) {
+            constructor(element: HTMLElement, options: Record<string, unknown>) {
               this.element = element;
+              (window as any).__loksetuMapMock.mapOptions.push(options);
             }
             fitBounds() {}
             setCenter() {}
@@ -534,7 +543,7 @@ async function loginIfNeeded(page: import("@playwright/test").Page) {
 }
 
 function testUsername() {
-  return process.env.TEST_APP_USERNAME ?? process.env.APP_ADMIN_USERNAME ?? "functional-test";
+  return process.env.TEST_APP_USERNAME ?? process.env.APP_ADMIN_USERNAME ?? "";
 }
 
 function testAccessPassword() {
