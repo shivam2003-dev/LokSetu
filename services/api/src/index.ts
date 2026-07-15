@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import pino from "pino";
@@ -26,7 +27,7 @@ import { runBatch } from "./batch.js";
 import { extractWhatsAppMessages, intakeSchema, processIntake, toRawIntakePayload } from "./intake.js";
 import { buildDiscardedIntakeDecision, isDiscardedPayload, MINIMUM_STORED_CITIZEN_SCORE } from "./noisePolicy.js";
 import { buildDashboard } from "./pipeline.js";
-import { AadhaarIdentity, DashboardFilters, ProjectStatus, RankedProject, UserProfile } from "./types.js";
+import { AadhaarIdentity, AuthUser, DashboardFilters, DashboardPermission, ProjectStatus, RankedProject, UserProfile, UserRole } from "./types.js";
 import { aiRuntimeMode } from "./vertexAi.js";
 import { indicRuntimeMode, translateUiStrings } from "./indicLanguage.js";
 import { seedUiTranslations, seedWebUiTranslations } from "./uiTranslations.js";
@@ -54,6 +55,19 @@ const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
 const memoryProjectRatings = new Map<string, Array<{ rating: number; createdAt: string }>>();
+const apiRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 600,
+  standardHeaders: "draft-7",
+  legacyHeaders: false
+});
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many sign-in attempts. Try again later." }
+});
 
 const dashboardQuerySchema = z.object({
   scope: z.enum(["local", "global", "mp"]).optional(),
@@ -107,11 +121,14 @@ const aadhaarSessionSchema = z.object({
 });
 
 const adminUserCreateSchema = z.object({
-  actorId: z.string().default("admin-user-shivam"),
   username: z.string().trim().min(3).max(80),
-  password: z.string().min(4).max(200),
+  password: z.string().min(8).max(200),
   role: z.enum(["mp", "ward_staff", "district_admin", "state_admin"]).default("district_admin"),
-  displayName: z.string().trim().min(2).max(120)
+  displayName: z.string().trim().min(2).max(120),
+  state: z.string().trim().min(2).max(96),
+  district: z.string().trim().min(2).max(96),
+  constituencyId: z.string().trim().min(2).max(120).optional(),
+  permissions: z.array(z.enum(["dashboard:view", "issues:view", "projects:update", "users:manage"])).min(1)
 });
 
 const mapBoundaryQuerySchema = z.object({
@@ -215,6 +232,8 @@ const rewardMilestones = [
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
+app.set("trust proxy", 1);
+app.use("/api", apiRateLimit);
 
 app.get("/healthz", (_request, response) => {
   response.json({
@@ -225,14 +244,14 @@ app.get("/healthz", (_request, response) => {
   });
 });
 
-app.post("/api/auth/login", async (request, response) => {
-  if (!accessPassword) {
-    response.json({ token: "", expiresAt: "", disabled: true });
-    return;
-  }
+app.post("/api/auth/login", loginRateLimit, async (request, response) => {
   const parsed = loginSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+  if (!accessPassword && !parsed.data.username) {
+    response.json({ token: "", expiresAt: "", disabled: true });
     return;
   }
   if (parsed.data.demoAccess) {
@@ -241,10 +260,11 @@ app.post("/api/auth/login", async (request, response) => {
       return;
     }
     const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+    const demoUser = platformAdminPrincipal("hackathon-demo", "Hackathon Demo");
     response.json({
-      token: signAccessToken(expiresAt, "hackathon-demo"),
+      token: signAccessToken(expiresAt, demoUser),
       expiresAt,
-      user: { id: "hackathon-demo", username: "hackathon-demo", role: "state_admin", displayName: "Hackathon Demo" }
+      user: publicAuthPrincipal(demoUser)
     });
     return;
   }
@@ -254,17 +274,22 @@ app.post("/api/auth/login", async (request, response) => {
   }
   const loginUsername = parsed.data.username?.trim();
   const authUser = loginUsername ? await findAuthUserByUsername(loginUsername) : null;
+  if (!accessPassword && !authUser) {
+    response.json({ token: "", expiresAt: "", disabled: true });
+    return;
+  }
   const passwordMatchesUser = authUser ? verifyPassword(parsed.data.password, authUser.passwordHash) : false;
-  const passwordOnlyFallback = !loginUsername && constantTimeEqual(parsed.data.password, accessPassword);
+  const passwordOnlyFallback = !authUser && constantTimeEqual(parsed.data.password, accessPassword);
   if (!passwordMatchesUser && !passwordOnlyFallback) {
     response.status(401).json({ error: "Invalid password" });
     return;
   }
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  const principal = authUser ? principalFromAuthUser(authUser) : platformAdminPrincipal();
   response.json({
-    token: signAccessToken(expiresAt, authUser?.username ?? "password-access"),
+    token: signAccessToken(expiresAt, principal),
     expiresAt,
-    user: authUser ? { id: authUser.id, username: authUser.username, role: authUser.role, displayName: authUser.displayName } : undefined
+    user: publicAuthPrincipal(principal)
   });
 });
 
@@ -380,12 +405,13 @@ app.post("/api/web/ui-translations", async (request, response) => {
 });
 
 app.use("/api", (request, response, next) => {
-  if (!accessPassword) {
+  const token = authTokenFromRequest(request);
+  const parsedToken = token ? parseAccessToken(token) : null;
+  if (!accessPassword && (!token || token === "auth-disabled")) {
+    response.locals.accessPrincipal = platformAdminPrincipal();
     next();
     return;
   }
-  const token = authTokenFromRequest(request);
-  const parsedToken = token ? parseAccessToken(token) : null;
   if (!parsedToken) {
     response.status(401).json({ error: "Login required" });
     return;
@@ -394,6 +420,7 @@ app.use("/api", (request, response, next) => {
     response.status(403).json({ error: "Citizen token is limited to citizen submission, receipt, and reward routes" });
     return;
   }
+  response.locals.accessPrincipal = parsedToken;
   next();
 });
 
@@ -420,22 +447,25 @@ app.get("/api/client-config", (_request, response) => {
   });
 });
 
-app.get("/api/context", (_request, response) => {
-  const states = [...new Set(areaMappings.map((mapping) => mapping.state))].sort();
+app.get("/api/context", (request, response) => {
+  const principal = requestPrincipal(request, response);
+  const visibleMappings = areaMappings.filter((mapping) => mappingVisibleToPrincipal(mapping, principal));
+  const visibleMps = mpProfiles.filter((mp) => mpVisibleToPrincipal(mp, principal));
+  const states = [...new Set(visibleMappings.map((mapping) => mapping.state))].sort();
   const districtsByState = Object.fromEntries(
     states.map((state) => [
       state,
-      [...new Set(areaMappings.filter((mapping) => mapping.state === state).map((mapping) => mapping.district))].sort()
+      [...new Set(visibleMappings.filter((mapping) => mapping.state === state).map((mapping) => mapping.district))].sort()
     ])
   );
   const wardsByDistrict = Object.fromEntries(
-    [...new Set(areaMappings.map((mapping) => `${mapping.state}::${mapping.district}`))]
+    [...new Set(visibleMappings.map((mapping) => `${mapping.state}::${mapping.district}`))]
       .sort()
       .map((key) => {
         const [state, district] = key.split("::");
         return [
           key,
-          areaMappings
+          visibleMappings
             .filter((mapping) => mapping.state === state && mapping.district === district)
             .map((mapping) => mapping.ward)
             .sort()
@@ -443,22 +473,27 @@ app.get("/api/context", (_request, response) => {
       })
   );
   response.json({
-    mps: mpProfiles,
-    users: seedUsers,
+    mps: visibleMps,
     states,
-    districts: [...new Set(areaMappings.map((mapping) => mapping.district))].sort(),
-    wards: [...new Set(areaMappings.map((mapping) => mapping.ward))].sort(),
+    districts: [...new Set(visibleMappings.map((mapping) => mapping.district))].sort(),
+    wards: [...new Set(visibleMappings.map((mapping) => mapping.ward))].sort(),
     districtsByState,
     wardsByDistrict,
-    areaMappings
+    areaMappings: visibleMappings,
+    access: publicAuthPrincipal(principal)
   });
 });
 
-app.get("/api/demo-data", async (_request, response) => {
-  response.json(await demoDataStatus());
+app.get("/api/demo-data", async (request, response) => {
+  response.json(await demoDataStatus(dashboardFiltersForRequest(request, response, { scope: "global" })));
 });
 
-app.post("/api/demo-data/load", async (_request, response) => {
+app.post("/api/demo-data/load", async (request, response) => {
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("users:manage")) {
+    response.status(403).json({ error: "Workspace administration permission required" });
+    return;
+  }
   demoDataEnabled = true;
   if (isDatabaseEnabled()) {
     for (const submission of demoSubmissions) await insertSubmission(submission);
@@ -469,19 +504,30 @@ app.post("/api/demo-data/load", async (_request, response) => {
       ...demoSubmissions.filter((submission) => !existing.has(submission.id))
     ];
   }
-  response.json(await demoDataStatus());
+  response.json(await demoDataStatus(dashboardFiltersForRequest(request, response, { scope: "global" })));
 });
 
-app.post("/api/demo-data/disable", async (_request, response) => {
+app.post("/api/demo-data/disable", async (request, response) => {
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("users:manage")) {
+    response.status(403).json({ error: "Workspace administration permission required" });
+    return;
+  }
   demoDataEnabled = false;
-  response.json(await demoDataStatus());
+  response.json(await demoDataStatus(dashboardFiltersForRequest(request, response, { scope: "global" })));
 });
 
-app.get("/api/users", (_request, response) => {
+app.get("/api/users", (request, response) => {
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("users:manage")) {
+    response.status(403).json({ error: "User management permission required" });
+    return;
+  }
+  const visibleUsers = seedUsers.filter((user) => geographyWithinPrincipal(principal, user.location.state, user.location.district, user.mpId));
   response.json({
-    users: seedUsers.map(publicUser),
+    users: visibleUsers.map(publicUser),
     roles: ["citizen", "mp", "ward_staff", "district_admin", "state_admin"],
-    areaMappings: memoryAreaMappings
+    areaMappings: memoryAreaMappings.filter((mapping) => mappingVisibleToPrincipal(mapping, principal))
   });
 });
 
@@ -491,39 +537,84 @@ app.post("/api/admin/users", async (request, response) => {
     response.status(400).json({ error: parsed.error.flatten() });
     return;
   }
-  const actor = getActor(parsed.data.actorId);
-  if (!actor || !["district_admin", "state_admin"].includes(actor.role)) {
-    response.status(403).json({ error: "Only district/state admins can create users" });
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("users:manage")) {
+    response.status(403).json({ error: "User management permission required" });
+    return;
+  }
+  if (!parsed.data.permissions.includes("dashboard:view") || !parsed.data.permissions.includes("issues:view")) {
+    response.status(400).json({ error: "Dashboard users require dashboard:view and issues:view permissions" });
+    return;
+  }
+  const constituency = parsed.data.constituencyId
+    ? mpProfiles.find((mp) => mp.id === parsed.data.constituencyId)
+    : undefined;
+  if (parsed.data.constituencyId && (!constituency || constituency.state !== parsed.data.state || constituency.district !== parsed.data.district)) {
+    response.status(400).json({ error: "Constituency must belong to the selected state and district" });
+    return;
+  }
+  if (!geographyWithinPrincipal(principal, parsed.data.state, parsed.data.district, parsed.data.constituencyId)) {
+    response.status(403).json({ error: "Cannot create a user outside your configured geography" });
     return;
   }
   const user = await upsertAuthUser({
     username: parsed.data.username,
     password: parsed.data.password,
     role: parsed.data.role,
-    displayName: parsed.data.displayName
+    displayName: parsed.data.displayName,
+    permissions: parsed.data.permissions,
+    state: parsed.data.state,
+    district: parsed.data.district,
+    constituencyId: parsed.data.constituencyId
+  });
+  memoryAuditEvents.unshift({
+    at: new Date().toISOString(),
+    actor: principal.displayName,
+    action: "created_dashboard_user",
+    object: `${parsed.data.username} / ${parsed.data.constituencyId ?? parsed.data.district}`,
+    privacyMode: false
   });
   response.status(201).json({
     user: user
-      ? { id: user.id, username: user.username, role: user.role, displayName: user.displayName, createdAt: user.createdAt }
-      : { username: parsed.data.username, role: parsed.data.role, displayName: parsed.data.displayName }
+      ? publicAuthPrincipal(principalFromAuthUser(user))
+      : {
+          username: parsed.data.username,
+          role: parsed.data.role,
+          displayName: parsed.data.displayName,
+          permissions: parsed.data.permissions,
+          state: parsed.data.state,
+          district: parsed.data.district,
+          constituencyId: parsed.data.constituencyId
+        }
   });
 });
 
 app.get("/api/session", (request, response) => {
-  const user = getActor(String(request.query.userId ?? "u-kalindi-01"));
-  if (!user) {
-    response.status(404).json({ error: "Unknown user" });
-    return;
-  }
+  const principal = requestPrincipal(request, response);
+  const restricted = principalHasGeography(principal);
   response.json({
-    user: publicUser(user),
-    defaultScope: user.role === "mp" ? "mp" : user.role === "state_admin" ? "global" : "local",
-    allowedScopes: user.role === "citizen" ? ["local", "global"] : ["local", "mp", "global"],
-    area: user.location
+    user: publicAuthPrincipal(principal),
+    defaultScope: principal.constituencyId ? "mp" : restricted ? "local" : "global",
+    allowedScopes: principal.constituencyId ? ["mp"] : restricted ? ["local"] : ["local", "mp", "global"],
+    area: {
+      state: principal.state,
+      district: principal.district,
+      constituencyId: principal.constituencyId,
+      constituencyName: mpProfiles.find((mp) => mp.id === principal.constituencyId)?.name
+    },
+    restricted
   });
 });
 
-app.get("/api/regions", (_request, response) => {
+app.get("/api/regions", (request, response) => {
+  const principal = requestPrincipal(request, response);
+  const onboardingStates = [
+    { state: "Delhi", districts: 11, constituencies: 7, readiness: 92 },
+    { state: "Maharashtra", districts: 36, constituencies: 48, readiness: 71 },
+    { state: "Tamil Nadu", districts: 38, constituencies: 39, readiness: 66 },
+    { state: "West Bengal", districts: 23, constituencies: 42, readiness: 63 },
+    { state: "Uttar Pradesh", districts: 75, constituencies: 80, readiness: 58 }
+  ].filter((item) => !principal.state || item.state === principal.state);
   response.json({
     coverage: {
       statesReady: 28,
@@ -532,19 +623,14 @@ app.get("/api/regions", (_request, response) => {
       districtsTarget: 700,
       wardModel: "urban ward, gram panchayat, assembly segment, polling area"
     },
-    onboardingStates: [
-      { state: "Delhi", districts: 11, constituencies: 7, readiness: 92 },
-      { state: "Maharashtra", districts: 36, constituencies: 48, readiness: 71 },
-      { state: "Tamil Nadu", districts: 38, constituencies: 39, readiness: 66 },
-      { state: "West Bengal", districts: 23, constituencies: 42, readiness: 63 },
-      { state: "Uttar Pradesh", districts: 75, constituencies: 80, readiness: 58 }
-    ]
+    onboardingStates
   });
 });
 
-app.get("/api/analytics", async (_request, response) => {
-  const submissions = await getSubmissions();
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+app.get("/api/analytics", async (request, response) => {
+  const filters = dashboardFiltersForRequest(request, response, { scope: "global" });
+  const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
+  const dashboard = await buildDashboardWithOverrides(filters);
   response.json({
     summary: dashboard.totals,
     topProjects: dashboard.projects.slice(0, 5),
@@ -585,17 +671,19 @@ app.get("/api/ai-ops", (_request, response) => {
   });
 });
 
-app.get("/api/data-sources", (_request, response) => {
-  const freshness = sourceSnapshots.reduce<Record<string, number>>((acc, source) => {
+app.get("/api/data-sources", (request, response) => {
+  const principal = requestPrincipal(request, response);
+  const visibleSnapshots = sourceSnapshots.filter((source) => geographyWithinPrincipal(principal, source.state, source.district));
+  const freshness = visibleSnapshots.reduce<Record<string, number>>((acc, source) => {
     acc[source.freshness] = (acc[source.freshness] ?? 0) + 1;
     return acc;
   }, {});
   response.json({
-    snapshots: sourceSnapshots,
+    snapshots: visibleSnapshots,
     freshness,
     servingTables: ["submissions", "raw_intake", "batch_runs", "source_snapshots"],
     bigQueryTables: ["loksetu.analytics.project_scores", "loksetu.raw.official_source_snapshots"],
-    missingWarnings: sourceSnapshots.filter((source) => source.freshness !== "fresh").map((source) => `${source.source}:${source.ward}`)
+    missingWarnings: visibleSnapshots.filter((source) => source.freshness !== "fresh").map((source) => `${source.source}:${source.ward}`)
   });
 });
 
@@ -613,9 +701,10 @@ app.get("/api/intelligence/sources", (_request, response) => {
   });
 });
 
-app.get("/api/intelligence/daily", async (_request, response) => {
-  const submissions = await getSubmissions();
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+app.get("/api/intelligence/daily", async (request, response) => {
+  const filters = dashboardFiltersForRequest(request, response, { scope: "global" });
+  const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
+  const dashboard = await buildDashboardWithOverrides(filters);
   response.json(buildDailyIntelligence(dashboard.projects, submissions));
 });
 
@@ -633,14 +722,16 @@ app.post("/api/copilot/query", async (request, response) => {
     response.status(400).json({ error: "Invalid copilot query", details: parsed.error.flatten() });
     return;
   }
-  const submissions = await getSubmissions();
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const filters = dashboardFiltersForRequest(request, response, { scope: "global" });
+  const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
+  const dashboard = await buildDashboardWithOverrides(filters);
   response.json(await answerCopilot(parsed.data, dashboard.projects, submissions));
 });
 
-app.get("/api/enterprise/situation-room", async (_request, response) => {
-  const submissions = await getSubmissions();
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+app.get("/api/enterprise/situation-room", async (request, response) => {
+  const filters = dashboardFiltersForRequest(request, response, { scope: "global" });
+  const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
+  const dashboard = await buildDashboardWithOverrides(filters);
   response.json(buildEnterpriseSituation(dashboard.projects, submissions));
 });
 
@@ -650,7 +741,7 @@ app.get("/api/maps/boundaries", async (request, response) => {
     response.status(400).json({ error: "Invalid boundary query", details: parsed.error.flatten() });
     return;
   }
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, { scope: "global" }));
   const features = buildBoundaryFeatures(dashboard.projects)
     .filter((feature) => !parsed.data.level || feature.level === parsed.data.level);
   const levels: BoundaryLevel[] = ["state", "district", "constituency", "ward"];
@@ -676,7 +767,7 @@ app.get("/api/maps/clusters", async (request, response) => {
     response.status(400).json({ error: "Invalid cluster query", details: parsed.error.flatten() });
     return;
   }
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, { scope: "global" }));
   response.json({
     generatedAt: dashboard.generatedAt,
     zoom: parsed.data.zoom,
@@ -719,7 +810,7 @@ app.get("/api/public/projects", async (request, response) => {
     return;
   }
   const { limit, offset, category, ...filters } = parsed.data;
-  const dashboard = await buildDashboardWithOverrides(filters);
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, filters));
   const sorted = dashboard.projects
     .filter((project) => !category || project.category.toLowerCase() === category.toLowerCase())
     .sort((a, b) => b.score - a.score || b.demandCount - a.demandCount || a.title.localeCompare(b.title));
@@ -734,7 +825,7 @@ app.get("/api/public/projects", async (request, response) => {
 });
 
 app.get("/api/public/projects/:projectId", async (request, response) => {
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, { scope: "global" }));
   const project = dashboard.projects.find((item) => item.id === request.params.projectId);
   if (!project) {
     response.status(404).json({ error: "Project not found" });
@@ -751,6 +842,17 @@ app.get("/api/mp/queue", async (request, response) => {
   const parsed = actorQuerySchema.safeParse(request.query);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid MP queue query", details: parsed.error.flatten() });
+    return;
+  }
+  const principal = requestPrincipal(request, response);
+  if (principalHasGeography(principal)) {
+    const targetMpId = parsed.data.mpId ?? principal.constituencyId;
+    if (!targetMpId || targetMpId !== principal.constituencyId) {
+      response.status(403).json({ error: "Role is not allowed to access this MP queue" });
+      return;
+    }
+    const dashboard = await buildDashboardWithOverrides({ scope: "mp", mpId: targetMpId });
+    response.json({ actor: publicAuthPrincipal(principal), mpId: targetMpId, projects: dashboard.projects });
     return;
   }
   const actor = getActor(parsed.data.actorId);
@@ -780,9 +882,9 @@ app.post("/api/admin/area-mappings", (request, response) => {
     response.status(400).json({ error: "Invalid area mapping update", details: parsed.error.flatten() });
     return;
   }
-  const actor = getActor(parsed.data.actorId);
-  if (!actor || !["district_admin", "state_admin"].includes(actor.role)) {
-    response.status(403).json({ error: "Only district/state admins can update area mappings" });
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("users:manage")) {
+    response.status(403).json({ error: "User management permission required" });
     return;
   }
   const mapping = memoryAreaMappings.find((item) => item.ward === parsed.data.ward);
@@ -790,12 +892,16 @@ app.post("/api/admin/area-mappings", (request, response) => {
     response.status(404).json({ error: "Unknown ward mapping" });
     return;
   }
+  if (!mappingVisibleToPrincipal(mapping, principal)) {
+    response.status(403).json({ error: "Cannot update an area mapping outside your configured geography" });
+    return;
+  }
   mapping.mpId = parsed.data.mpId;
   mapping.wardStaffUserIds = parsed.data.wardStaffUserIds;
   mapping.updatedAt = new Date().toISOString();
   memoryAuditEvents.unshift({
     at: mapping.updatedAt,
-    actor: actor.displayName,
+    actor: principal.displayName,
     action: "updated_area_mapping",
     object: `${mapping.ward} -> ${mapping.mpId}`,
     privacyMode: false
@@ -803,8 +909,9 @@ app.post("/api/admin/area-mappings", (request, response) => {
   response.json({ mapping });
 });
 
-app.get("/api/moderation", async (_request, response) => {
-  const submissions = await getSubmissions();
+app.get("/api/moderation", async (request, response) => {
+  const filters = dashboardFiltersForRequest(request, response, { scope: "global" });
+  const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
   response.json({
     queue: submissions.slice(-8).reverse().map((submission) => ({
       id: submission.id,
@@ -1060,11 +1167,13 @@ function auditExplanation(submission: Awaited<ReturnType<typeof getSubmissions>>
   return `${media} was tagged as ${submission.category}, placed in ${area}, ${route}, and scored ${submission.citizenScore}/100 from AI quality ${submission.submissionQualityScore ?? submission.citizenScore}/100, urgency ${submission.urgency}/5, citizen rating ${submission.rating}/5, language ${submission.detectedLanguage}, and ${confidence}.`;
 }
 
-app.get("/api/audit", async (_request, response) => {
-  const submissions = await getSubmissions();
+app.get("/api/audit", async (request, response) => {
+  const principal = requestPrincipal(request, response);
+  const filters = dashboardFiltersForRequest(request, response, { scope: "global" });
+  const submissions = filterSubmissionsForDashboard(await getSubmissions(), filters);
   response.json({
     events: [
-      ...memoryAuditEvents,
+      ...memoryAuditEvents.filter((event) => !principalHasGeography(principal) || event.object.includes(principal.district ?? principal.state ?? "")),
       ...submissions.slice(-10).reverse().map((submission) => ({
         at: submission.createdAt,
         actor: submission.displayName,
@@ -1078,8 +1187,11 @@ app.get("/api/audit", async (_request, response) => {
 
 app.get("/api/priorities", async (request, response) => {
   const parsed = dashboardQuerySchema.safeParse(request.query);
-  const submissions = await getSubmissions();
-  response.json(await buildDashboardWithOverrides(parsed.success ? parsed.data : {}));
+  const filters = dashboardFiltersForRequest(request, response, parsed.success ? parsed.data : {});
+  response.json({
+    ...(await buildDashboardWithOverrides(filters)),
+    access: publicAuthPrincipal(requestPrincipal(request, response))
+  });
 });
 
 // Dashboard / power-user submission (kept for backward compatibility).
@@ -1147,27 +1259,22 @@ app.patch("/api/projects/:projectId/status", async (request, response) => {
     response.status(400).json({ error: "Invalid project status update", details: parsed.error.flatten() });
     return;
   }
-  const actor = getActor(parsed.data.actorId);
-  if (!actor || !["mp", "district_admin", "state_admin"].includes(actor.role)) {
-    response.status(403).json({ error: "Role is not allowed to update project status" });
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("projects:update")) {
+    response.status(403).json({ error: "Project update permission required" });
     return;
   }
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, { scope: "global" }));
   const project = dashboard.projects.find((item) => item.id === request.params.projectId);
   if (!project) {
     response.status(404).json({ error: "Project not found" });
     return;
   }
-  if (actor.role === "mp" && actor.mpId !== project.mpId) {
-    response.status(403).json({ error: "MP can update only their own project queue" });
-    return;
-  }
-
   const updatedAt = new Date().toISOString();
-  memoryProjectStatus.set(project.id, { status: parsed.data.status, updatedAt, actor: actor.displayName });
+  memoryProjectStatus.set(project.id, { status: parsed.data.status, updatedAt, actor: principal.displayName });
   memoryAuditEvents.unshift({
     at: updatedAt,
-    actor: actor.displayName,
+    actor: principal.displayName,
     action: "updated_project_status",
     object: `${project.title} -> ${parsed.data.status}`,
     privacyMode: false
@@ -1182,7 +1289,7 @@ app.post("/api/projects/:projectId/ratings", async (request, response) => {
     response.status(400).json({ error: "Invalid rating" });
     return;
   }
-  const dashboard = await buildDashboardWithOverrides({ scope: "global" });
+  const dashboard = await buildDashboardWithOverrides(dashboardFiltersForRequest(request, response, { scope: "global" }));
   const project = dashboard.projects.find((item) => item.id === request.params.projectId);
   if (!project) {
     response.status(404).json({ error: "Project not found" });
@@ -1325,8 +1432,9 @@ async function getSubmissions() {
   return demoDataEnabled ? submissions : submissions.filter((submission) => !demoSubmissionIds.has(submission.id));
 }
 
-async function demoDataStatus() {
-  const allSubmissions = isDatabaseEnabled() ? await listSubmissions() : memorySubmissions;
+async function demoDataStatus(filters: DashboardFilters = { scope: "global" }) {
+  const allRows = isDatabaseEnabled() ? await listSubmissions() : memorySubmissions;
+  const allSubmissions = filterSubmissionsForDashboard(allRows, filters);
   const demoRows = allSubmissions.filter((submission) => demoSubmissionIds.has(submission.id)).length;
   const visibleRows = demoDataEnabled ? allSubmissions.length : allSubmissions.length - demoRows;
   return {
@@ -1564,16 +1672,36 @@ function publicUser(user: UserProfile) {
   };
 }
 
-type AccessTokenPayload = {
-  sub?: string;
-  user?: string;
-  kind?: "app" | "citizen";
-  exp?: string;
+type AccessPrincipal = {
+  userId: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  permissions: DashboardPermission[];
+  state?: string;
+  district?: string;
+  constituencyId?: string;
+};
+
+type AccessTokenPayload = AccessPrincipal & {
+  sub: "loksetu-access";
+  kind: "app" | "citizen";
+  exp: string;
   citizenIdentity?: AadhaarIdentity;
 };
 
-function signAccessToken(expiresAt: string, username = "password-access", kind: "app" | "citizen" = "app", citizenIdentity?: AadhaarIdentity) {
-  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", user: username, kind, exp: expiresAt, citizenIdentity })).toString("base64url");
+function signAccessToken(
+  expiresAt: string,
+  principal: AccessPrincipal | string = platformAdminPrincipal(),
+  kind: "app" | "citizen" = "app",
+  citizenIdentity?: AadhaarIdentity
+) {
+  const normalized = typeof principal === "string"
+    ? kind === "citizen"
+      ? { userId: principal, username: principal, displayName: "Citizen", role: "citizen" as const, permissions: [] }
+      : platformAdminPrincipal(principal, principal)
+    : principal;
+  const payload = Buffer.from(JSON.stringify({ sub: "loksetu-access", ...normalized, kind, exp: expiresAt, citizenIdentity })).toString("base64url");
   const signature = createHmac("sha256", authSecret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
@@ -1590,13 +1718,115 @@ function parseAccessToken(token: string): AccessTokenPayload | null {
     .some((secret) => constantTimeEqual(signature, createHmac("sha256", secret).update(payload).digest("base64url")));
   if (!validSignature) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessTokenPayload;
+    const raw = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<AccessTokenPayload> & { user?: string };
+    if (raw.sub !== "loksetu-access") return null;
+    const parsed: AccessTokenPayload = {
+      ...platformAdminPrincipal(raw.user ?? "password-access", raw.user ?? "Platform Admin"),
+      ...raw,
+      sub: "loksetu-access",
+      kind: raw.kind ?? "app",
+      exp: raw.exp ?? ""
+    };
     if (parsed.sub !== "loksetu-access" || !parsed.exp || Date.parse(parsed.exp) <= Date.now()) return null;
     if (parsed.kind !== "app" && parsed.kind !== "citizen") return null;
     return parsed;
   } catch {
     return null;
   }
+}
+
+function principalFromAuthUser(user: AuthUser): AccessPrincipal {
+  return {
+    userId: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    permissions: user.permissions,
+    state: user.state,
+    district: user.district,
+    constituencyId: user.constituencyId
+  };
+}
+
+function platformAdminPrincipal(username = "password-access", displayName = "Platform Admin"): AccessPrincipal {
+  return {
+    userId: username,
+    username,
+    displayName,
+    role: "state_admin",
+    permissions: ["dashboard:view", "issues:view", "projects:update", "users:manage"]
+  };
+}
+
+function publicAuthPrincipal(principal: AccessPrincipal) {
+  return {
+    id: principal.userId,
+    username: principal.username,
+    displayName: principal.displayName,
+    role: principal.role,
+    permissions: principal.permissions,
+    state: principal.state,
+    district: principal.district,
+    constituencyId: principal.constituencyId,
+    constituencyName: mpProfiles.find((mp) => mp.id === principal.constituencyId)?.name
+  };
+}
+
+function requestPrincipal(_request: express.Request, response: express.Response): AccessPrincipal {
+  const stored = response.locals.accessPrincipal as AccessTokenPayload | AccessPrincipal | undefined;
+  if (!stored) return platformAdminPrincipal();
+  if ("kind" in stored && stored.kind === "citizen") return stored;
+  return stored;
+}
+
+function principalHasGeography(principal: AccessPrincipal): boolean {
+  return Boolean(principal.state || principal.district || principal.constituencyId);
+}
+
+function dashboardFiltersForRequest(
+  request: express.Request,
+  response: express.Response,
+  requested: DashboardFilters
+): DashboardFilters {
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("dashboard:view") && principal.role !== "state_admin") return { scope: "local", state: "__denied__" };
+  if (principal.constituencyId) {
+    return { ...requested, scope: "mp", mpId: principal.constituencyId, state: undefined, district: undefined, ward: undefined };
+  }
+  if (principal.district) {
+    return { ...requested, scope: "local", state: principal.state, district: principal.district, ward: undefined, mpId: undefined };
+  }
+  if (principal.state) {
+    return { ...requested, scope: "local", state: principal.state, district: undefined, ward: undefined, mpId: undefined };
+  }
+  return requested;
+}
+
+function geographyWithinPrincipal(principal: AccessPrincipal, state: string, district: string, constituencyId?: string): boolean {
+  if (principal.state && principal.state !== state) return false;
+  if (principal.district && principal.district !== district) return false;
+  if (principal.constituencyId && principal.constituencyId !== constituencyId) return false;
+  return true;
+}
+
+function mappingVisibleToPrincipal(mapping: (typeof areaMappings)[number], principal: AccessPrincipal): boolean {
+  return geographyWithinPrincipal(principal, mapping.state, mapping.district, mapping.mpId);
+}
+
+function mpVisibleToPrincipal(mp: (typeof mpProfiles)[number], principal: AccessPrincipal): boolean {
+  return geographyWithinPrincipal(principal, mp.state, mp.district, mp.id);
+}
+
+function filterSubmissionsForDashboard<T extends { state: string; district: string; ward: string; mpId: string }>(items: T[], filters: DashboardFilters): T[] {
+  return items.filter((item) => {
+    if (filters.scope === "mp") return !filters.mpId || item.mpId === filters.mpId;
+    if (filters.scope === "local") {
+      return (!filters.state || item.state === filters.state) &&
+        (!filters.district || item.district === filters.district) &&
+        (!filters.ward || item.ward === filters.ward);
+    }
+    return true;
+  });
 }
 
 function authTokenFromRequest(request: express.Request) {

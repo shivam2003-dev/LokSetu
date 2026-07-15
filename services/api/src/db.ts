@@ -1,13 +1,14 @@
 import { Pool } from "pg";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { seedSubmissions } from "./data.js";
-import { AuthUser, BatchRun, RawIntakePayload, RawIntakeRecord, Submission, UserRole } from "./types.js";
+import { AuthUser, BatchRun, DashboardPermission, RawIntakePayload, RawIntakeRecord, Submission, UserRole } from "./types.js";
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL
     })
   : null;
+const memoryAuthUsers = new Map<string, AuthUser>();
 
 export async function initDatabase(): Promise<void> {
   if (!pool) return;
@@ -19,6 +20,10 @@ export async function initDatabase(): Promise<void> {
       created_at timestamptz not null
     )
   `);
+  await pool.query("alter table app_users add column if not exists permissions jsonb not null default '[]'::jsonb");
+  await pool.query("alter table app_users add column if not exists state text");
+  await pool.query("alter table app_users add column if not exists district text");
+  await pool.query("alter table app_users add column if not exists constituency_id text");
 
   await pool.query(`
     create table if not exists raw_intake (
@@ -287,15 +292,46 @@ export async function ensureAuthUser(input: {
   password: string;
   role: UserRole;
   displayName: string;
+  permissions?: DashboardPermission[];
+  state?: string;
+  district?: string;
+  constituencyId?: string;
 }): Promise<void> {
-  if (!pool || !input.password.trim()) return;
+  if (!input.password.trim()) return;
   const existing = await findAuthUserByUsername(input.username);
   if (existing) return;
+  if (!pool) {
+    const user: AuthUser = {
+      id: input.id,
+      username: input.username.trim(),
+      passwordHash: hashPassword(input.password),
+      role: input.role,
+      displayName: input.displayName,
+      permissions: input.permissions ?? defaultPermissionsForRole(input.role),
+      state: input.state,
+      district: input.district,
+      constituencyId: input.constituencyId,
+      createdAt: new Date().toISOString()
+    };
+    memoryAuthUsers.set(user.username.toLowerCase(), user);
+    return;
+  }
   await pool.query(
-    `insert into app_users (id, username, password_hash, role, display_name, created_at)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into app_users (id, username, password_hash, role, display_name, permissions, state, district, constituency_id, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      on conflict (username) do nothing`,
-    [input.id, input.username, hashPassword(input.password), input.role, input.displayName, new Date().toISOString()]
+    [
+      input.id,
+      input.username.trim(),
+      hashPassword(input.password),
+      input.role,
+      input.displayName,
+      JSON.stringify(input.permissions ?? defaultPermissionsForRole(input.role)),
+      input.state ?? null,
+      input.district ?? null,
+      input.constituencyId ?? null,
+      new Date().toISOString()
+    ]
   );
 }
 
@@ -304,6 +340,10 @@ export async function upsertAuthUser(input: {
   password: string;
   role: UserRole;
   displayName: string;
+  permissions?: DashboardPermission[];
+  state?: string;
+  district?: string;
+  constituencyId?: string;
 }): Promise<AuthUser | null> {
   const now = new Date().toISOString();
   const record: AuthUser = {
@@ -312,40 +352,70 @@ export async function upsertAuthUser(input: {
     passwordHash: hashPassword(input.password),
     role: input.role,
     displayName: input.displayName,
+    permissions: input.permissions ?? defaultPermissionsForRole(input.role),
+    state: input.state,
+    district: input.district,
+    constituencyId: input.constituencyId,
     createdAt: now
   };
-  if (!pool) return record;
+  if (!pool) {
+    memoryAuthUsers.set(record.username.toLowerCase(), record);
+    return record;
+  }
   const result = await pool.query<{
     id: string;
     username: string;
     password_hash: string;
     role: UserRole;
     display_name: string;
+    permissions: DashboardPermission[];
+    state: string | null;
+    district: string | null;
+    constituency_id: string | null;
     created_at: Date;
   }>(
-    `insert into app_users (id, username, password_hash, role, display_name, created_at)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into app_users (id, username, password_hash, role, display_name, permissions, state, district, constituency_id, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      on conflict (username) do update set
        password_hash = excluded.password_hash,
        role = excluded.role,
-       display_name = excluded.display_name
-     returning id, username, password_hash, role, display_name, created_at`,
-    [record.id, record.username, record.passwordHash, record.role, record.displayName, record.createdAt]
+       display_name = excluded.display_name,
+       permissions = excluded.permissions,
+       state = excluded.state,
+       district = excluded.district,
+       constituency_id = excluded.constituency_id
+     returning id, username, password_hash, role, display_name, permissions, state, district, constituency_id, created_at`,
+    [
+      record.id,
+      record.username,
+      record.passwordHash,
+      record.role,
+      record.displayName,
+      JSON.stringify(record.permissions),
+      record.state ?? null,
+      record.district ?? null,
+      record.constituencyId ?? null,
+      record.createdAt
+    ]
   );
   return authUserFromRow(result.rows[0]);
 }
 
 export async function findAuthUserByUsername(username: string): Promise<AuthUser | null> {
-  if (!pool) return null;
+  if (!pool) return memoryAuthUsers.get(username.trim().toLowerCase()) ?? null;
   const result = await pool.query<{
     id: string;
     username: string;
     password_hash: string;
     role: UserRole;
     display_name: string;
+    permissions: DashboardPermission[];
+    state: string | null;
+    district: string | null;
+    constituency_id: string | null;
     created_at: Date;
   }>(
-    `select id, username, password_hash, role, display_name, created_at
+    `select id, username, password_hash, role, display_name, permissions, state, district, constituency_id, created_at
      from app_users
      where lower(username) = lower($1)
      limit 1`,
@@ -381,6 +451,10 @@ function authUserFromRow(row?: {
   password_hash: string;
   role: UserRole;
   display_name: string;
+  permissions: DashboardPermission[];
+  state: string | null;
+  district: string | null;
+  constituency_id: string | null;
   created_at: Date;
 }): AuthUser | null {
   if (!row) return null;
@@ -390,8 +464,21 @@ function authUserFromRow(row?: {
     passwordHash: row.password_hash,
     role: row.role,
     displayName: row.display_name,
+    permissions: Array.isArray(row.permissions) && row.permissions.length ? row.permissions : defaultPermissionsForRole(row.role),
+    state: row.state ?? undefined,
+    district: row.district ?? undefined,
+    constituencyId: row.constituency_id ?? undefined,
     createdAt: row.created_at.toISOString()
   };
+}
+
+function defaultPermissionsForRole(role: UserRole): DashboardPermission[] {
+  if (role === "state_admin" || role === "district_admin") {
+    return ["dashboard:view", "issues:view", "projects:update", "users:manage"];
+  }
+  if (role === "mp") return ["dashboard:view", "issues:view", "projects:update"];
+  if (role === "ward_staff") return ["dashboard:view", "issues:view"];
+  return [];
 }
 
 function rawRecordFromRow(row: {

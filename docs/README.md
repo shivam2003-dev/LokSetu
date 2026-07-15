@@ -10,6 +10,7 @@ Architecture and operating notes for LokSetu.
 - `diagrams.md`: Mermaid architecture diagrams.
 - `ai-pipeline.md`: Vertex/OpenAI-compatible AI flow and guardrails.
 - `batch-data-pipeline.md`: batch-first intake and scoring.
+- `dashboard-user-access.md`: dashboard user permissions and server-enforced state, district, and constituency scoping.
 - `rag/README.md`: standalone pgvector/Vertex-ready RAG platform.
 - `rag/architecture.md`: RAG services, vector index, and retrieval pipeline diagram.
 - `rag/deployment-guide.md`: local Argo and production GKE deployment.

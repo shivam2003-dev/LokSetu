@@ -320,4 +320,89 @@ test.describe("API functional flow", () => {
     expect(receipt.status).toBe("pending_batch");
     await api.dispose();
   });
+
+  test("dashboard users are permissioned and locked to their configured constituency", async () => {
+    const admin = await newApiContext();
+    const username = "mp.lucknow.scoped";
+    const password = "ScopedPass123!";
+    const create = await admin.post("/api/admin/users", {
+      data: {
+        username,
+        password,
+        displayName: "Lucknow MP Office",
+        role: "mp",
+        state: "Uttar Pradesh",
+        district: "Lucknow",
+        constituencyId: "mp-up-lucknow",
+        permissions: ["dashboard:view", "issues:view"]
+      }
+    });
+    expect(create.status()).toBe(201);
+    const created = await create.json();
+    expect(created.user).toMatchObject({
+      username,
+      role: "mp",
+      state: "Uttar Pradesh",
+      district: "Lucknow",
+      constituencyId: "mp-up-lucknow",
+      constituencyName: "MP Lucknow"
+    });
+    await admin.dispose();
+
+    const loginContext = await request.newContext({ baseURL: apiUrl });
+    const login = await loginContext.post("/api/auth/login", { data: { username, password } });
+    await expect(login).toBeOK();
+    const loginPayload = await login.json();
+    expect(loginPayload.user.permissions).toEqual(["dashboard:view", "issues:view"]);
+    await loginContext.dispose();
+
+    const scoped = await request.newContext({
+      baseURL: apiUrl,
+      extraHTTPHeaders: { Authorization: `Bearer ${loginPayload.token}` }
+    });
+    const session = await scoped.get("/api/session");
+    await expect(session).toBeOK();
+    expect(await session.json()).toMatchObject({
+      defaultScope: "mp",
+      allowedScopes: ["mp"],
+      restricted: true,
+      area: { state: "Uttar Pradesh", district: "Lucknow", constituencyId: "mp-up-lucknow" }
+    });
+
+    const context = await scoped.get("/api/context");
+    await expect(context).toBeOK();
+    const scopedContext = await context.json();
+    expect(scopedContext.states).toEqual(["Uttar Pradesh"]);
+    expect(scopedContext.districts).toEqual(["Lucknow"]);
+    expect(scopedContext.mps.map((mp: { id: string }) => mp.id)).toEqual(["mp-up-lucknow"]);
+
+    const tamperedGlobal = await scoped.get("/api/priorities?scope=global&state=Delhi&district=Central%20Delhi");
+    await expect(tamperedGlobal).toBeOK();
+    const scopedDashboard = await tamperedGlobal.json();
+    expect(scopedDashboard.projects.length).toBeGreaterThan(0);
+    expect(scopedDashboard.projects.every((project: { mpId: string; state: string; district: string }) =>
+      project.mpId === "mp-up-lucknow" && project.state === "Uttar Pradesh" && project.district === "Lucknow"
+    )).toBe(true);
+
+    const deniedUpdate = await scoped.patch(`/api/projects/${scopedDashboard.projects[0].id}/status`, {
+      data: { status: "approved" }
+    });
+    expect(deniedUpdate.status()).toBe(403);
+    expect((await deniedUpdate.json()).error).toContain("Project update permission");
+
+    const deniedUserCreate = await scoped.post("/api/admin/users", {
+      data: {
+        username: "outside.scope",
+        password: "OutsidePass123!",
+        displayName: "Outside Scope",
+        role: "mp",
+        state: "Delhi",
+        district: "Central Delhi",
+        constituencyId: "mp-delhi-central",
+        permissions: ["dashboard:view"]
+      }
+    });
+    expect(deniedUserCreate.status()).toBe(403);
+    await scoped.dispose();
+  });
 });
