@@ -158,6 +158,10 @@ spec:
               value: {{ .Values.api.env.BATCH_SCHEDULE | quote }}
             - name: RAG_API_URL
               value: {{ .Values.api.env.RAG_API_URL | quote }}
+            - name: WATER_CANNON_ALERTS_ENABLED
+              value: {{ .Values.api.env.WATER_CANNON_ALERTS_ENABLED | quote }}
+            - name: WATER_CANNON_AQI_THRESHOLD
+              value: {{ .Values.api.env.WATER_CANNON_AQI_THRESHOLD | quote }}
             {{- with .Values.api.env.APP_DEMO_ACCESS_ENABLED }}
             - name: APP_DEMO_ACCESS_ENABLED
               value: {{ . | quote }}
