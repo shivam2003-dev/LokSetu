@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import pino from "pino";
@@ -54,6 +55,19 @@ const memoryAreaMappings = [...areaMappings];
 const memoryAuditEvents: Array<{ at: string; actor: string; action: string; object: string; privacyMode: boolean }> = [];
 const memoryProjectStatus = new Map<string, { status: ProjectStatus; updatedAt: string; actor: string }>();
 const memoryProjectRatings = new Map<string, Array<{ rating: number; createdAt: string }>>();
+const apiRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 600,
+  standardHeaders: "draft-7",
+  legacyHeaders: false
+});
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many sign-in attempts. Try again later." }
+});
 
 const dashboardQuerySchema = z.object({
   scope: z.enum(["local", "global", "mp"]).optional(),
@@ -218,6 +232,8 @@ const rewardMilestones = [
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
+app.set("trust proxy", 1);
+app.use("/api", apiRateLimit);
 
 app.get("/healthz", (_request, response) => {
   response.json({
@@ -228,7 +244,7 @@ app.get("/healthz", (_request, response) => {
   });
 });
 
-app.post("/api/auth/login", async (request, response) => {
+app.post("/api/auth/login", loginRateLimit, async (request, response) => {
   const parsed = loginSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(401).json({ error: "Invalid username or password" });
