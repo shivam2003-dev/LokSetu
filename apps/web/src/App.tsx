@@ -1500,13 +1500,17 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   ];
   const constituency = session.area.constituencyName ?? (session.restricted ? "Configured constituency" : "All India");
   const constituencyArea = [session.area.district, session.area.state].filter(Boolean).join(" · ");
+  const configuredAreaName = session.area.constituencyName ?? session.area.district ?? session.area.state;
+  const commandCenterTitle = session.restricted && configuredAreaName
+    ? `${configuredAreaName.replace(/^MP\s+/i, "")} intelligence command center`
+    : "Constituency intelligence command center";
 
   return (
     <section className="overview-page">
       <section className="overview-hero panel">
         <div>
           <p className="eyebrow">JanVaani AI Executive Overview</p>
-          <h3>Constituency intelligence command center</h3>
+          <h3>{commandCenterTitle}</h3>
           <div className="overview-constituency" aria-label="Dashboard constituency">
             <MapPinned size={18} />
             <span>Dashboard constituency</span>
