@@ -3,6 +3,34 @@ import { expect, test } from "@playwright/test";
 const expectedCitizenAppUrl = process.env.VITE_CITIZEN_APP_URL ?? "http://localhost:5174";
 
 test.describe("MP/admin web functional flow", () => {
+  test("overview decision controls synchronize project context", async ({ page }) => {
+    await loginIfNeeded(page);
+    await page.goto("/#overview");
+
+    const controls = page.getByLabel("Overview analysis controls");
+    await expect(controls).toBeVisible();
+    await expect(controls.getByRole("button", { name: "AI priority" })).toHaveAttribute("aria-pressed", "true");
+    await controls.getByRole("button", { name: "Delivery risk" }).click();
+    await expect(controls.getByRole("button", { name: "Delivery risk" })).toHaveAttribute("aria-pressed", "true");
+
+    const priorities = page.locator(".overview-priority-panel > button");
+    await expect(priorities).toHaveCount(5);
+    const selectedTitle = await priorities.nth(1).locator("strong").innerText();
+    await priorities.nth(1).click();
+    await expect(page.locator(".overview-focus-copy > strong")).toHaveText(selectedTitle);
+    await expect(priorities.nth(1)).toHaveAttribute("aria-pressed", "true");
+
+    const budgetBars = page.locator(".overview-budget-chart button");
+    await expect(budgetBars).toHaveCount(6);
+    await budgetBars.nth(2).click();
+    await expect(budgetBars.nth(2)).toHaveAttribute("aria-pressed", "true");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(controls).toBeVisible();
+    const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+    expect(hasHorizontalOverflow).toBe(false);
+  });
+
   test("priority desk decision loop, pulse, map, signals, and copilot render", async ({ page }) => {
     await loginIfNeeded(page);
     await page.goto("/");

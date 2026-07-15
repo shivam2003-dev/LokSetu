@@ -1499,9 +1499,19 @@ function HealthGauge({ score, signals, confidence, wards }: { score: number; sig
 }
 
 function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"]; session: SessionResponse }) {
-  const projects = buildManagedProjects(dashboard.projects);
-  const [selectedHotspotId, setSelectedHotspotId] = useState("");
-  const topPriorities = projects.slice(0, 5);
+  const projects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [overviewLens, setOverviewLens] = useState<"priority" | "delivery" | "impact">("priority");
+  const rankedProjects = useMemo(() => [...projects].sort((a, b) => {
+    if (overviewLens === "delivery") {
+      const deliveryWeight = (project: ManagedProject) => project.deliveryStatus === "delayed" ? 3 : project.deliveryStatus === "ongoing" ? 2 : project.deliveryStatus === "proposed" ? 1 : 0;
+      return deliveryWeight(b) - deliveryWeight(a) || b.aiRisk - a.aiRisk;
+    }
+    if (overviewLens === "impact") return b.citizenImpact - a.citizenImpact || b.demandCount - a.demandCount;
+    return b.score - a.score || b.demandCount - a.demandCount;
+  }), [overviewLens, projects]);
+  const topPriorities = rankedProjects.slice(0, 5);
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? topPriorities[0];
   const totalDemand = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
   const avgConfidence = Math.round(average(dashboard.projects.map((project) => project.confidence)) * 100) || 86;
   const healthScore = Math.round(average([
@@ -1551,25 +1561,59 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
         <HealthGauge score={healthScore} signals={totalDemand} confidence={avgConfidence} wards={dashboard.totals.wards} />
       </section>
 
-      <section className="overview-kpi-grid">
-        <article className="panel"><span>Citizen Priorities</span><strong>{dashboard.projects.length}</strong><small>{formatCount(totalDemand)} processed demand signals</small></article>
-        <article className="panel"><span>Development Progress</span><strong>{completed}/{projects.length}</strong><small>{delayed} delayed works need attention</small></article>
-        <article className="panel"><span>Active Wards</span><strong>{dashboard.totals.wards}</strong><small>{dashboard.totals.languages} languages normalized</small></article>
-        <article className="panel"><span>AI Risk</span><strong>{dashboard.totals.botRisk}</strong><small>bot and duplicate demand monitor</small></article>
+      <section className="panel overview-command-bar" aria-label="Overview analysis controls">
+        <div>
+          <span>Decision lens</span>
+          <strong>Re-rank the command center instantly</strong>
+        </div>
+        <div className="overview-lens-tabs" role="group" aria-label="Overview decision lens">
+          <button className={overviewLens === "priority" ? "active" : ""} aria-pressed={overviewLens === "priority"} onClick={() => setOverviewLens("priority")} type="button">AI priority</button>
+          <button className={overviewLens === "delivery" ? "active" : ""} aria-pressed={overviewLens === "delivery"} onClick={() => setOverviewLens("delivery")} type="button">Delivery risk</button>
+          <button className={overviewLens === "impact" ? "active" : ""} aria-pressed={overviewLens === "impact"} onClick={() => setOverviewLens("impact")} type="button">Citizen impact</button>
+        </div>
+        <small><Sparkles size={14} /> Select any card, chart bar, or map marker to synchronize the project focus.</small>
       </section>
+
+      <section className="overview-kpi-grid">
+        <button className="panel" onClick={() => setPage("recommendations")} type="button"><span>Citizen Priorities</span><strong>{dashboard.projects.length}</strong><small>{formatCount(totalDemand)} processed demand signals</small><em>Explore ranked needs <ArrowRight size={14} /></em></button>
+        <button className="panel" onClick={() => setPage("projects")} type="button"><span>Development Progress</span><strong>{completed}/{projects.length}</strong><small>{delayed} delayed works need attention</small><em>Open delivery board <ArrowRight size={14} /></em></button>
+        <button className="panel" onClick={() => setPage("map")} type="button"><span>Active Wards</span><strong>{dashboard.totals.wards}</strong><small>{dashboard.totals.languages} languages normalized</small><em>Inspect ward map <ArrowRight size={14} /></em></button>
+        <button className="panel" onClick={() => setPage("signals")} type="button"><span>AI Risk</span><strong>{dashboard.totals.botRisk}</strong><small>bot and duplicate demand monitor</small><em>Review live signals <ArrowRight size={14} /></em></button>
+      </section>
+
+      {selectedProject ? (
+        <section className="panel overview-focus-card" aria-live="polite">
+          <div className="overview-focus-copy">
+            <span className="overview-focus-kicker"><Target size={15} /> Current decision focus</span>
+            <strong>{selectedProject.title}</strong>
+            <small>{selectedProject.department} · {selectedProject.district} · {selectedProject.ward}</small>
+          </div>
+          <div className="overview-focus-metrics">
+            <div><span>AI score</span><strong>{selectedProject.score}</strong></div>
+            <div><span>Signals</span><strong>{formatCount(selectedProject.demandCount)}</strong></div>
+            <div><span>Progress</span><strong>{selectedProject.progress}%</strong></div>
+            <div><span>Budget</span><strong>₹{selectedProject.budgetCr.toFixed(1)}Cr</strong></div>
+          </div>
+          <div className="overview-focus-progress">
+            <div><span>{selectedProject.deliveryStatus} delivery</span><b>{Math.round(selectedProject.confidence * 100)}% confidence</b></div>
+            <meter min="0" max="100" value={selectedProject.progress} />
+          </div>
+          <button onClick={() => setPage("recommendations")} type="button">Open decision brief <ArrowRight size={15} /></button>
+        </section>
+      ) : null}
 
       <section className="overview-main-grid">
         <section className="panel overview-priority-panel">
-          <PanelTitle title="Top Citizen Priorities" icon={Scale} detail="AI-ranked demand" />
+          <PanelTitle title="Top Citizen Priorities" icon={Scale} detail={overviewLens === "priority" ? "AI-ranked demand" : overviewLens === "delivery" ? "delivery risk first" : "highest citizen impact"} />
           {topPriorities.map((project, index) => (
-            <article key={project.id}>
+            <button className={project.id === selectedProject?.id ? "active" : ""} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
               <span>#{index + 1}</span>
               <div>
                 <strong>{project.title}</strong>
                 <small>{project.category} · {project.ward} · {formatCount(project.demandCount)} signals</small>
               </div>
-              <b>{project.score}</b>
-            </article>
+              <b>{overviewLens === "delivery" ? project.aiRisk : overviewLens === "impact" ? formatCount(project.citizenImpact) : project.score}</b>
+            </button>
           ))}
         </section>
 
@@ -1582,10 +1626,11 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
         <section className="panel overview-alert-panel">
           <PanelTitle title="Real-Time Alerts" icon={Zap} detail="requires action" />
           {alertItems.map((item) => (
-            <article className={item.tone} key={item.title}>
+            <button className={item.tone} key={item.title} onClick={() => setPage(item.tone === "high" ? "signals" : "projects")} type="button">
               <strong>{item.title}</strong>
               <span>{item.detail}</span>
-            </article>
+              <em>Review now <ArrowRight size={13} /></em>
+            </button>
           ))}
         </section>
 
@@ -1605,28 +1650,30 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
                 band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
               }] : [];
             })}
-            selectedId={selectedHotspotId}
-            onSelect={setSelectedHotspotId}
+            selectedId={selectedProject?.id ?? ""}
+            onSelect={setSelectedProjectId}
           />
+          <p className="overview-map-hint"><MapPin size={14} /> Map markers synchronize the decision focus above.</p>
         </section>
       </section>
 
       <section className="overview-bottom-grid">
         <section className="panel overview-progress-panel">
           <PanelTitle title="Development Progress" icon={Briefcase} detail="portfolio execution" />
-          {projects.slice(0, 5).map((project) => (
-            <article key={project.id}>
+          {rankedProjects.slice(0, 5).map((project) => (
+            <button className={project.id === selectedProject?.id ? "active" : ""} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
               <div><strong>{project.ward}</strong><span>{project.deliveryStatus}</span></div>
               <meter min="0" max="100" value={project.progress} />
-            </article>
+              <small>{project.progress}% complete · {project.aiRisk}/100 execution risk</small>
+            </button>
           ))}
         </section>
 
         <section className="panel overview-budget-panel">
           <PanelTitle title="Budget and Impact" icon={Database} detail="expected beneficiaries" />
           <div className="overview-budget-chart">
-            {projects.slice(0, 6).map((project) => (
-              <span key={project.id} style={{ height: `${Math.max(26, project.budgetCr * 11)}px` }}><b>₹{project.budgetCr.toFixed(1)}Cr</b></span>
+            {rankedProjects.slice(0, 6).map((project) => (
+              <button className={project.id === selectedProject?.id ? "active" : ""} aria-label={`${project.title}, budget ₹${project.budgetCr.toFixed(1)} crore`} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} style={{ height: `${Math.max(76, project.budgetCr * 18)}px` }} type="button"><b>₹{project.budgetCr.toFixed(1)}Cr</b><span>{project.ward}</span></button>
             ))}
           </div>
         </section>
@@ -1634,8 +1681,9 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
         <section className="panel overview-compare-panel">
           <PanelTitle title="District Snapshot" icon={TrendingUp} detail="health vs demand" />
           {["Infrastructure", "Healthcare", "Education", "Water", "Employment"].map((item, index) => (
-            <article key={item}><span>{item}</span><i style={{ width: `${88 - index * 9}%` }} /><strong>{88 - index * 9}</strong></article>
+            <button key={item} onClick={() => setPage("compare")} type="button"><span>{item}</span><i style={{ width: `${88 - index * 9}%` }} /><strong>{88 - index * 9}</strong></button>
           ))}
+          <small className="overview-compare-hint">Select a category to open synchronized district comparison.</small>
         </section>
       </section>
     </section>
