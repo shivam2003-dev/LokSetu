@@ -263,6 +263,7 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".topbar h2")).toHaveText("Where demand is concentrated");
 
     await page.goto("/#map");
+    await page.getByRole("button", { name: "Timeline & Analysis" }).click();
     await page.getByRole("button", { name: "Route analysis" }).click();
     await expect(page.locator(".action-status").filter({ hasText: "Route analysis created" })).toBeVisible();
     await page.getByRole("button", { name: "AI hotspot detection" }).click();
@@ -332,6 +333,7 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".hotspot-row").first()).toContainText("Roads");
     await page.getByRole("button", { name: "Demand heatmap" }).click();
     await expect(page.getByRole("button", { name: "Demand heatmap" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Timeline & Analysis" }).click();
     await page.getByLabel("GIS timeline slider").fill("100");
     await expect(page.locator(".gis-control-panel .action-status")).toContainText("Full year");
 
