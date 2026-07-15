@@ -63,7 +63,7 @@ jobs:
           done
           node --input-type=module -e '
             const config = await fetch("http://127.0.0.1:18180/api/client-config").then((r) => r.json());
-            if (!config.maps.enabled || config.maps.source !== "runtime-api") {
+            if (!config.maps.enabled || config.maps.source !== "runtime-google-api") {
               throw new Error(`runtime maps config missing: ${JSON.stringify({ enabled: config.maps.enabled, source: config.maps.source })}`);
             }
             console.log(JSON.stringify({ ok: true, maps: config.maps.source, dataMode: config.dataMode }));

@@ -26,10 +26,12 @@ import {
   Lock,
   Mail,
   Map as MapIcon,
+  Maximize2,
   MapPinned,
   MapPin,
   Menu,
   MessageSquareText,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -320,6 +322,37 @@ type CopilotAnswer = {
   guardrails: string[];
 };
 type CopilotEvidenceItem = { type: string; id: string; title: string; snippet: string; url?: string };
+type CopilotMessage = { id: string; role: "assistant" | "user"; text: string; answer?: CopilotAnswer };
+type CopilotHistoryThread = { id: string; title: string; updatedAt: string; messages: CopilotMessage[] };
+
+const COPILOT_HISTORY_STORAGE_KEY = "loksetu:copilot-history:v1";
+const COPILOT_WELCOME_TEXT = "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current LokSetu intelligence corpus and cite the supporting records.";
+
+function copilotWelcomeMessage(): CopilotMessage {
+  return { id: "welcome", role: "assistant", text: COPILOT_WELCOME_TEXT };
+}
+
+function loadCopilotHistory(): CopilotHistoryThread[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(COPILOT_HISTORY_STORAGE_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((thread): thread is CopilotHistoryThread => {
+      if (!thread || typeof thread !== "object") return false;
+      const candidate = thread as Partial<CopilotHistoryThread>;
+      return typeof candidate.id === "string" && typeof candidate.title === "string" && typeof candidate.updatedAt === "string" && Array.isArray(candidate.messages);
+    }).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function saveCopilotHistory(history: CopilotHistoryThread[]) {
+  try {
+    window.localStorage.setItem(COPILOT_HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, 20)));
+  } catch {
+    // The assistant remains usable if browser storage is unavailable or full.
+  }
+}
 
 type RagStatusResponse = {
   mode: string;
@@ -1744,7 +1777,7 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
       <section className="overview-bottom-grid">
         <section className="panel overview-progress-panel">
           <PanelTitle title="Development Progress" icon={Briefcase} detail="portfolio execution" />
-          {rankedProjects.slice(0, 5).map((project) => (
+          {rankedProjects.slice(0, 4).map((project) => (
             <button className={project.id === selectedProject?.id ? "active" : ""} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
               <div><strong>{project.ward}</strong><span>{project.deliveryStatus}</span></div>
               <meter aria-label={`${project.title} progress`} min="0" max="100" value={project.progress} />
@@ -1757,7 +1790,7 @@ function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: {
           <PanelTitle title="Budget and Impact" icon={Database} detail="expected beneficiaries" />
           <div className="overview-budget-chart">
             {budgetProjects.map((project) => (
-              <button className={project.id === selectedProject?.id ? "active" : ""} aria-label={`${project.title}, budget ₹${project.budgetCr.toFixed(1)} crore`} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} style={{ height: `${Math.max(76, (project.budgetCr / maxBudget) * 150)}px` }} type="button"><b>₹{project.budgetCr.toFixed(1)}Cr</b><span>{project.ward}</span></button>
+              <button className={project.id === selectedProject?.id ? "active" : ""} aria-label={`${project.title}, budget ₹${project.budgetCr.toFixed(1)} crore`} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} style={{ height: `${Math.max(58, (project.budgetCr / maxBudget) * 110)}px` }} type="button"><b>₹{project.budgetCr.toFixed(1)}Cr</b><span>{project.ward}</span></button>
             ))}
           </div>
         </section>
@@ -1878,6 +1911,7 @@ function IssueMap({
   exitMap: () => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const [mapState, setMapState] = useState<MapLoadState>(maps.enabled ? "idle" : "fallback");
   const [fallbackReason, setFallbackReason] = useState(maps.enabled ? "" : "Map SDK key is not configured.");
   const [gisAction, setGisAction] = useState("Ready to run GIS analysis.");
@@ -1891,6 +1925,7 @@ function IssueMap({
   const [showMapFilters, setShowMapFilters] = useState(false);
   const [mapSearch, setMapSearch] = useState("");
   const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   const allHotspots = useMemo(() => buildMapHotspots(dashboard).filter(isWithinIndiaBounds), [dashboard]);
   const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
     const search = mapSearch.trim().toLowerCase();
@@ -1923,6 +1958,28 @@ function IssueMap({
   const lastOverlayRef = useRef(mapOverlay);
   const initialCenterRef = useRef(hotspots);
   initialCenterRef.current = hotspots;
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      const active = document.fullscreenElement === mapCanvasRef.current;
+      setMapFullscreen(active);
+      window.setTimeout(() => {
+        if (googleMapRef.current && window.google?.maps?.event) window.google.maps.event.trigger(googleMapRef.current, "resize");
+        mapplsMapRef.current?.resize?.();
+      }, 80);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+
+  async function toggleMapFullscreen() {
+    try {
+      if (document.fullscreenElement === mapCanvasRef.current) await document.exitFullscreen();
+      else await mapCanvasRef.current?.requestFullscreen();
+    } catch {
+      setGisAction("Fullscreen mode is not available in this browser session.");
+    }
+  }
 
   // Bootstrap the map SDK once per provider/key; overlays sync in separate effects
   // so filter, overlay, and boundary changes never rebuild the base map.
@@ -2012,7 +2069,7 @@ function IssueMap({
           zoom: points.length > 1 ? 5 : 12,
           mapTypeControl: false,
           streetViewControl: false,
-          fullscreenControl: true,
+          fullscreenControl: false,
           zoomControl: true,
           clickableIcons: false,
           gestureHandling: "greedy",
@@ -2215,9 +2272,12 @@ function IssueMap({
         </aside>
 
         <section className="gis-map-panel">
-          <div className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""} overlay-${mapOverlay}`}>
+          <div ref={mapCanvasRef} className={`map-canvas india-map ${mapState === "ready" ? "google-ready" : ""} overlay-${mapOverlay}`}>
             <div ref={mapRef} className="google-map" aria-label="Google map of citizen issue hotspots" />
             {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
+            <button className="reference-map-fullscreen" aria-label={mapFullscreen ? "Exit map fullscreen" : "Open map fullscreen"} onClick={toggleMapFullscreen} title={mapFullscreen ? "Exit fullscreen" : "Fullscreen map"} type="button">
+              {mapFullscreen ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
+            </button>
             <div className="reference-map-search">
               <button className="reference-map-home" onClick={exitMap} title="Back to overview" type="button"><Home size={18} /><span>LokSetu</span></button>
               <label><Search size={18} /><input aria-label="Search constituency or issue" placeholder="Search constituency, ward or issue…" value={mapSearch} onChange={(event) => setMapSearch(event.currentTarget.value)} /></label>
@@ -3012,13 +3072,9 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
   const [mode, setMode] = useState<"online" | "submitted" | "all">("all");
   const [question, setQuestion] = useState("Why are road complaints increasing in Ludhiana South?");
   const [projectId, setProjectId] = useState("");
-  const [messages, setMessages] = useState<Array<{ id: string; role: "assistant" | "user"; text: string; answer?: CopilotAnswer }>>([
-    {
-      id: "welcome",
-      role: "assistant",
-      text: "Ask about priorities, project evidence, source coverage, budget paths, public meeting notes, maps, or what changed today. Answers are retrieved from the current LokSetu intelligence corpus and cite the supporting records."
-    }
-  ]);
+  const [messages, setMessages] = useState<CopilotMessage[]>(() => [copilotWelcomeMessage()]);
+  const [history, setHistory] = useState<CopilotHistoryThread[]>(loadCopilotHistory);
+  const [threadId, setThreadId] = useState(() => `thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -3050,6 +3106,38 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
+
+  useEffect(() => {
+    if (messages.length <= 1) return;
+    const firstQuestion = messages.find((message) => message.role === "user")?.text ?? "Saved assistant query";
+    const entry: CopilotHistoryThread = {
+      id: threadId,
+      title: firstQuestion.slice(0, 80),
+      updatedAt: new Date().toISOString(),
+      messages
+    };
+    setHistory((current) => {
+      const next = [entry, ...current.filter((thread) => thread.id !== threadId)].slice(0, 20);
+      saveCopilotHistory(next);
+      return next;
+    });
+  }, [messages, threadId]);
+
+  function startNewQuery() {
+    setThreadId(`thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    setMessages([copilotWelcomeMessage()]);
+    setQuestion("");
+    setProjectId("");
+    setHistoryOpen(false);
+    setActionNotice("Started a new query thread. Previous queries remain in History.");
+  }
+
+  function openHistoryThread(thread: CopilotHistoryThread) {
+    setThreadId(thread.id);
+    setMessages(thread.messages.length ? thread.messages : [copilotWelcomeMessage()]);
+    setHistoryOpen(false);
+    setActionNotice(`Restored: ${thread.title}`);
+  }
 
   async function askCopilot(nextQuestion = question) {
     const cleanQuestion = nextQuestion.trim();
@@ -3186,13 +3274,21 @@ function CopilotPage({ capabilities, ragStatus, projects, maps, hotspots }: { ca
         </div>
         <div className="rag-hero-actions">
           <button onClick={() => { setHistoryOpen((v) => !v); setActionNotice(historyOpen ? "History closed." : "History opened."); }} type="button">History</button>
-          <button className="primary" onClick={() => { setMessages((c) => c.slice(0, 1)); setActionNotice("Started a new query thread."); }} type="button">New Query</button>
+          <button className="primary" onClick={startNewQuery} type="button">New Query</button>
         </div>
       </header>
       {historyOpen ? (
         <section className="panel rag-history-panel" aria-label="Query history">
           <strong>Query History</strong>
-          {messages.slice(-5).map((message) => <p key={message.id}>{message.role}: {message.text.slice(0, 120)}</p>)}
+          <div className="rag-history-list">
+            {history.map((thread) => (
+              <button className={thread.id === threadId ? "active" : ""} key={thread.id} onClick={() => openHistoryThread(thread)} type="button">
+                <span>{thread.title}</span>
+                <small>{new Date(thread.updatedAt).toLocaleString()} · {Math.max(1, thread.messages.filter((message) => message.role === "user").length)} queries</small>
+              </button>
+            ))}
+            {!history.length ? <p>No saved queries yet. Run a question and it will appear here.</p> : null}
+          </div>
         </section>
       ) : null}
       <p className="action-status" role="status">{actionNotice}</p>

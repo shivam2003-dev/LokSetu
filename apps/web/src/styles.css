@@ -7144,6 +7144,43 @@ button.problem-row.selected {
   line-height: 1.45;
 }
 
+.rag-history-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.rag-history-list button {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.rag-history-list button:hover,
+.rag-history-list button.active {
+  border-color: #60a5fa;
+  background: #eff6ff;
+  box-shadow: inset 3px 0 #1780ff;
+}
+
+.rag-history-list span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-history-list small { color: var(--muted); font-size: 10px; }
+
 .rag-filters {
   display: grid;
   grid-template-columns: 1fr 1fr 1.2fr 1fr 1fr 1fr;
@@ -9564,21 +9601,22 @@ button.problem-row.selected {
 .overview-mini-map span { position: absolute; inset: 22px; border: 2px solid rgba(23, 128, 255,0.48); border-radius: 45% 55% 50% 50%; display: grid; place-items: center; color: rgba(15,23,42,0.48); font-size: 11px; font-weight: 900; text-transform: uppercase; }
 .overview-mini-map i { position: absolute; z-index: 2; display: grid; place-items: center; width: 38px; height: 38px; border: 2px solid #fff; border-radius: 999px; background: linear-gradient(135deg, #1780ff, #0ea5e9); color: #fff; font-family: var(--font-mono); font-size: 11px; font-style: normal; font-weight: 900; box-shadow: none; }
 .overview-map-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: #64748b; font-size: 11px; }
-.overview-bottom-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.overview-progress-panel button { appearance: none; display: grid; gap: 7px; width: 100%; border: 1px solid transparent; border-radius: 10px; background: transparent; padding: 8px; text-align: left; transition: border-color .16s ease, background .16s ease; }
+.overview-bottom-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.overview-bottom-grid > .panel { gap: 9px; padding: 13px; }
+.overview-progress-panel button { appearance: none; display: grid; gap: 3px; width: 100%; border: 1px solid transparent; border-radius: 9px; background: transparent; padding: 5px 7px; text-align: left; transition: border-color .16s ease, background .16s ease; }
 .overview-progress-panel button:hover, .overview-progress-panel button.active { border-color: #bfdbfe; background: #f8fbff; }
 .overview-progress-panel div { display: flex; justify-content: space-between; gap: 10px; color: var(--ink-2); font-size: 12px; }
 .overview-progress-panel strong, .overview-compare-panel span { color: var(--ink); font-weight: 850; }
 .overview-progress-panel span, .overview-compare-panel strong { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
-.overview-progress-panel meter { width: 100%; height: 9px; }
+.overview-progress-panel meter { width: 100%; height: 7px; }
 .overview-progress-panel button > small { color: #64748b; font-size: 10px; }
-.overview-budget-chart { display: flex; align-items: end; gap: 10px; min-height: 190px; border-radius: 14px; background: #f8fafc; padding: 16px; }
-.overview-budget-chart button { flex: 1; min-width: 32px; max-height: 160px; border: 0; border-radius: 10px 10px 4px 4px; background: linear-gradient(180deg, #1780ff, #0ea5e9); display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 4px 6px; color: #fff; transition: transform .16s ease, filter .16s ease, box-shadow .16s ease; }
+.overview-budget-chart { display: flex; align-items: end; gap: 7px; min-height: 136px; border-radius: 12px; background: #f8fafc; padding: 10px; }
+.overview-budget-chart button { flex: 1; min-width: 28px; max-height: 112px; border: 0; border-radius: 9px 9px 4px 4px; background: linear-gradient(180deg, #1780ff, #0ea5e9); display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 4px; padding: 6px 3px 5px; color: #fff; transition: transform .16s ease, filter .16s ease, box-shadow .16s ease; }
 .overview-budget-chart button:hover { transform: translateY(-3px); filter: saturate(1.18); }
 .overview-budget-chart button.active { box-shadow: 0 0 0 3px #fff, 0 0 0 5px #1780ff; }
 .overview-budget-chart b { writing-mode: vertical-rl; font-family: var(--font-mono); font-size: 10px; }
 .overview-budget-chart span { overflow: hidden; max-width: 100%; font-size: 8px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
-.overview-compare-panel button { display: grid; grid-template-columns: 118px minmax(0, 1fr) 42px; align-items: center; gap: 7px; width: 100%; border: 1px solid transparent; border-radius: 9px; background: transparent; padding: 7px; text-align: left; transition: border-color .16s ease, background .16s ease; }
+.overview-compare-panel button { display: grid; grid-template-columns: 108px minmax(0, 1fr) 36px; align-items: center; gap: 6px; width: 100%; border: 1px solid transparent; border-radius: 8px; background: transparent; padding: 5px 6px; text-align: left; transition: border-color .16s ease, background .16s ease; }
 .overview-compare-panel button:hover { border-color: #bfdbfe; background: #f8fbff; }
 .overview-compare-panel i { display: block; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #1780ff, #0ea5e9); }
 .overview-compare-hint { color: #64748b; font-size: 10px; line-height: 1.4; }
@@ -10380,13 +10418,14 @@ button.problem-row.selected {
   overflow: hidden;
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
-  gap: 12px;
-  padding: 16px;
+  gap: 0;
+  padding: 0;
 }
 
 .map-focus .topbar {
   min-height: 46px;
   align-items: center;
+  padding: 16px 18px 12px;
 }
 
 .map-focus .explore-workspace,
@@ -10418,9 +10457,43 @@ button.problem-row.selected {
   box-shadow: none;
 }
 
+.map-focus .explore-workspace > .gis-surface-panel:first-child { padding: 0; }
+
 .map-focus .gis-map-panel { position: relative; }
 .map-focus .map-canvas { box-shadow: none; background: #0d1022; }
 .map-focus .google-map { background: #0d1022; }
+
+.map-focus .map-canvas:fullscreen {
+  width: 100dvw;
+  height: 100dvh;
+  min-height: 100dvh;
+  border-radius: 0;
+  background: #0d1022;
+}
+
+.reference-map-fullscreen {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 12px;
+  background: rgba(7, 22, 49, 0.92);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(14px);
+}
+
+.reference-map-fullscreen:hover,
+.reference-map-fullscreen:focus-visible {
+  border-color: #60a5fa;
+  background: linear-gradient(135deg, #1780ff, #0a5fd0);
+  outline: 0;
+}
 
 .reference-map-search {
   position: absolute;
@@ -10432,9 +10505,9 @@ button.problem-row.selected {
   gap: 9px;
   width: min(760px, calc(100% - 32px));
   transform: translateX(-50%);
-  border: 1px solid rgba(135, 146, 190, 0.35);
+  border: 1px solid rgba(96, 165, 250, 0.4);
   border-radius: 18px;
-  background: rgba(20, 22, 46, 0.9);
+  background: rgba(7, 22, 49, 0.92);
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
   padding: 9px;
   backdrop-filter: blur(16px);
@@ -10466,9 +10539,9 @@ button.problem-row.selected {
   align-items: center;
   gap: 6px;
   height: 40px;
-  border: 1px solid rgba(135, 146, 190, 0.3);
+  border: 1px solid rgba(96, 165, 250, 0.34);
   border-radius: 12px;
-  background: rgba(48, 52, 86, 0.72);
+  background: rgba(20, 51, 92, 0.82);
   color: #e9edff;
   padding: 0 13px;
   font-weight: 850;
@@ -10476,7 +10549,7 @@ button.problem-row.selected {
 }
 
 .reference-map-search > button:hover,
-.reference-map-search > button.active { border-color: #8b7cff; background: rgba(91, 76, 190, 0.72); }
+.reference-map-search > button.active { border-color: #60a5fa; background: linear-gradient(135deg, #1780ff, #0a5fd0); }
 .reference-map-home span { font-size: 12px; }
 
 .reference-map-shortcuts {
@@ -10494,9 +10567,9 @@ button.problem-row.selected {
 
 .reference-map-shortcuts button {
   min-width: max-content;
-  border: 1px solid rgba(135, 146, 190, 0.32);
+  border: 1px solid rgba(96, 165, 250, 0.34);
   border-radius: 999px;
-  background: rgba(20, 22, 46, 0.9);
+  background: rgba(7, 22, 49, 0.92);
   color: #d7def5;
   padding: 8px 13px;
   font-size: 11px;
@@ -10506,7 +10579,7 @@ button.problem-row.selected {
 }
 
 .reference-map-shortcuts button.active,
-.reference-map-shortcuts button:hover { border-color: #8b7cff; background: #373064; color: #fff; }
+.reference-map-shortcuts button:hover { border-color: #60a5fa; background: linear-gradient(135deg, #1780ff, #0a5fd0); color: #fff; }
 
 .map-focus .gis-control-panel {
   display: none;
@@ -10518,8 +10591,8 @@ button.problem-row.selected {
   width: min(300px, calc(100% - 48px));
   max-height: calc(100dvh - 230px);
   overflow-y: auto;
-  border-color: rgba(135, 146, 190, 0.35);
-  background: rgba(20, 22, 46, 0.94);
+  border-color: rgba(96, 165, 250, 0.4);
+  background: rgba(7, 22, 49, 0.95);
   color: #d7def5;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.44);
   backdrop-filter: blur(16px);
@@ -10529,7 +10602,7 @@ button.problem-row.selected {
 .map-focus .gis-control-panel h4,
 .map-focus .gis-control-panel .gis-section-toggle h4 { color: #f8fafc; }
 .map-focus .gis-control-panel select,
-.map-focus .gis-tool-grid button { border-color: rgba(135, 146, 190, 0.3); background: #242744; color: #e9edff; }
+.map-focus .gis-tool-grid button { border-color: rgba(96, 165, 250, 0.32); background: #14335c; color: #e9edff; }
 .map-focus .gis-layer-list label,
 .map-focus .gis-section-toggle span,
 .map-focus .gis-time-row { color: #aeb7d4; }
@@ -10542,21 +10615,34 @@ button.problem-row.selected {
   z-index: 9;
   justify-content: center;
   padding: 6px;
-  border: 1px solid rgba(135, 146, 190, 0.25);
+  border: 1px solid rgba(96, 165, 250, 0.3);
   border-radius: 18px;
-  background: rgba(20, 22, 46, 0.9);
+  background: rgba(7, 22, 49, 0.92);
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
   backdrop-filter: blur(16px);
 }
 
 .map-focus .issue-map-tabs button {
-  border-color: rgba(135, 146, 190, 0.22);
-  background: rgba(45, 48, 78, 0.75);
+  border-color: rgba(96, 165, 250, 0.26);
+  background: rgba(20, 51, 92, 0.8);
   color: #d7def5;
 }
 
-.map-focus .issue-map-tabs button:hover,
-.map-focus .issue-map-tabs button.active { background: #f8fafc; }
+.map-focus .issue-map-tabs button:hover {
+  border-color: color-mix(in srgb, var(--issue-color, #1780ff) 70%, white);
+  background: #1b4d82;
+  color: #fff;
+}
+
+.map-focus .issue-map-tabs button.active {
+  border-color: color-mix(in srgb, var(--issue-color, #1780ff) 68%, white);
+  background: var(--issue-color, #1780ff);
+  color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--issue-color, #1780ff) 34%, transparent);
+}
+
+.map-focus .issue-map-tabs button.active small,
+.map-focus .issue-map-tabs button:hover small { color: rgba(255, 255, 255, 0.82); }
 .map-focus .gis-scale { right: 26px; bottom: 112px; border-color: #f8fafc; color: #f8fafc; text-shadow: 0 1px 4px #000; }
 
 @media (max-width: 720px) {
@@ -10567,4 +10653,5 @@ button.problem-row.selected {
   .map-focus .issue-map-tabs { right: 10px; bottom: 10px; left: 10px; justify-content: flex-start; }
   .map-focus .issue-map-tabs button { padding: 7px 9px; }
   .map-focus .gis-control-panel { top: 124px; right: 10px; left: auto; width: calc(100% - 20px); }
+  .reference-map-fullscreen { top: 76px; right: 10px; }
 }
