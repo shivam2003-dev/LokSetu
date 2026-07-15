@@ -1553,9 +1553,9 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
           </div>
           <p>A 360 degree view of citizen priorities, AI-ranked risks, development progress, and live alerts for Members of Parliament.</p>
           <div className="overview-actions">
-            <button onClick={() => setPage("recommendations")} type="button">Open AI recommendations</button>
-            <button onClick={() => setPage("projects")} type="button">Review projects</button>
-            <button onClick={() => setPage("map")} type="button">View GIS map</button>
+            <button onClick={() => setPage("recommendations")} type="button"><Sparkles size={16} /> Open AI recommendations</button>
+            <button onClick={() => setPage("projects")} type="button"><Briefcase size={16} /> Review projects</button>
+            <button onClick={() => setPage("map")} type="button"><MapPinned size={16} /> View GIS map</button>
           </div>
         </div>
         <HealthGauge score={healthScore} signals={totalDemand} confidence={avgConfidence} wards={dashboard.totals.wards} />

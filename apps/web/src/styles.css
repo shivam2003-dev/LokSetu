@@ -9381,7 +9381,7 @@ button.problem-row.selected {
 .overview-constituency strong { color: #0f172a; font-size: 14px; }
 .overview-constituency small { padding-left: 8px; border-left: 1px solid #bfdbfe; color: #475569; font-size: 12px; }
 .overview-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
-.overview-actions button { border: 1px solid rgba(23, 128, 255,0.22); border-radius: 999px; background: rgba(255,255,255,0.78); color: #0a5fd0; padding: 10px 14px; font-weight: 900; box-shadow: none; transition: transform 0.16s ease, box-shadow 0.16s ease; }
+.overview-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(23, 128, 255,0.22); border-radius: 999px; background: rgba(255,255,255,0.78); color: #0a5fd0; padding: 10px 14px; font-weight: 900; box-shadow: none; transition: transform 0.16s ease, box-shadow 0.16s ease; }
 .overview-actions button:first-child { background: #1780ff; border-color: #1780ff; color: #fff; }
 .overview-actions button:hover { transform: translateY(-1px); box-shadow: none; }
 .overview-actions button:focus-visible, .overview-lens-tabs button:focus-visible, .overview-kpi-grid button:focus-visible, .overview-priority-panel button:focus-visible, .overview-alert-panel button:focus-visible, .overview-focus-card > button:focus-visible, .overview-progress-panel button:focus-visible, .overview-budget-chart button:focus-visible, .overview-compare-panel button:focus-visible { outline: 3px solid rgba(23,128,255,.28); outline-offset: 2px; }
