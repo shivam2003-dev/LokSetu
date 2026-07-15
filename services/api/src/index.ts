@@ -36,6 +36,7 @@ import { buildDailyIntelligence, intelligenceSourceGroups, sourceCoverage } from
 import { answerCopilot, buildProductionRagStatus, copilotKnowledgeSummary } from "./copilot.js";
 import { buildEnterpriseSituation } from "./enterprise.js";
 import { BoundaryLevel, buildBoundaryFeatures, buildHotspotClusters } from "./mapIntelligence.js";
+import { recordWaterCannonDeployment, waterCannonAlertsEnabled, waterCannonAqiThreshold, waterCannonTarget } from "./waterCannonAlerts.js";
 
 const logger = pino({ name: "people-priority-api" });
 const app = express();
@@ -76,6 +77,13 @@ const loginRateLimit = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "Too many sign-in attempts. Try again later." }
+});
+const waterCannonAlertRateLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 5,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many water-cannon deployment alerts. Try again later." }
 });
 
 const dashboardQuerySchema = z.object({
@@ -146,6 +154,10 @@ const mapBoundaryQuerySchema = z.object({
 
 const mapClusterQuerySchema = z.object({
   zoom: z.coerce.number().int().min(1).max(18).default(5)
+});
+
+const waterCannonAlertSchema = z.object({
+  aqi: z.coerce.number().int().min(0).max(1_000)
 });
 
 const simulationScenarios = [
@@ -249,7 +261,8 @@ app.get("/healthz", (_request, response) => {
     ok: true,
     service: "people-priority-api",
     database: isDatabaseEnabled() ? "postgres" : "memory",
-    processing: "batch"
+    processing: "batch",
+    waterCannonAlerts: waterCannonAlertsEnabled() ? "gcp-monitoring" : "disabled"
   });
 });
 
@@ -433,7 +446,7 @@ app.use("/api", (request, response, next) => {
   next();
 });
 
-app.get("/api/client-config", (_request, response) => {
+app.get("/api/client-config", (request, response) => {
   const mapplsMapSdkKey = process.env.PUBLIC_MAPPLS_MAP_SDK_KEY ?? process.env.MAPPLS_MAP_SDK_KEY ?? "";
   const browserMapsKey =
     process.env.PUBLIC_GOOGLE_MAPS_API_KEY ??
@@ -441,6 +454,14 @@ app.get("/api/client-config", (_request, response) => {
     process.env.VITE_GOOGLE_MAPS_API_KEY ??
     process.env.GOOGLE_MAPS_API_KEY ??
     "";
+  const principal = requestPrincipal(request, response);
+  const alertTarget = waterCannonTarget();
+  const alertVisible = waterCannonAlertsEnabled() && geographyWithinPrincipal(
+    principal,
+    alertTarget.state,
+    alertTarget.district,
+    alertTarget.constituencyId
+  );
   response.json({
     dataMode: isDatabaseEnabled() ? "postgres" : "memory",
     maps: {
@@ -450,6 +471,11 @@ app.get("/api/client-config", (_request, response) => {
       provider: mapplsMapSdkKey ? "mappls" : browserMapsKey ? "google" : "osm",
       mapplsKey: mapplsMapSdkKey,
       source: mapplsMapSdkKey ? "runtime-mappls-api" : browserMapsKey ? "runtime-api" : "not-configured"
+    },
+    waterCannonAlert: {
+      enabled: alertVisible,
+      aqiThreshold: waterCannonAqiThreshold(),
+      ...(alertVisible ? alertTarget : {})
     },
     citizenAppUrl: process.env.CITIZEN_APP_URL ?? "",
     generatedAt: new Date().toISOString()
@@ -1271,6 +1297,70 @@ app.post("/api/simulation/submit", async (request, response) => {
     response,
     { friendly: true }
   );
+});
+
+app.post("/api/alerts/water-cannon", waterCannonAlertRateLimit, async (request, response) => {
+  const parsed = waterCannonAlertSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "A valid AQI reading is required", details: parsed.error.flatten() });
+    return;
+  }
+  const principal = requestPrincipal(request, response);
+  if (!principal.permissions.includes("projects:update")) {
+    response.status(403).json({ error: "Project update permission required to deploy a water cannon" });
+    return;
+  }
+  const target = waterCannonTarget();
+  if (!geographyWithinPrincipal(principal, target.state, target.district, target.constituencyId)) {
+    response.status(403).json({ error: "Water-cannon deployment is outside this user's configured geography" });
+    return;
+  }
+  const threshold = waterCannonAqiThreshold();
+  if (parsed.data.aqi < threshold) {
+    response.status(422).json({
+      error: `AQI ${parsed.data.aqi} is below the severe-pollution deployment threshold of ${threshold}`,
+      threshold
+    });
+    return;
+  }
+
+  try {
+    const result = await recordWaterCannonDeployment({ aqi: parsed.data.aqi, actor: principal.displayName, target });
+    memoryAuditEvents.unshift({
+      at: result.recordedAt,
+      actor: principal.displayName,
+      action: "requested_water_cannon_deployment",
+      object: `${target.constituencyName} / ${target.ward} / AQI ${parsed.data.aqi}`,
+      privacyMode: false,
+      state: target.state,
+      district: target.district,
+      constituencyId: target.constituencyId
+    });
+    response.status(202).json({
+      ok: true,
+      message: result.delivery === "gcp_monitoring"
+        ? "Water-cannon deployment recorded. Google Cloud Monitoring is sending the email alert."
+        : "Water-cannon deployment validated. Email alerting is disabled in this environment.",
+      aqi: parsed.data.aqi,
+      threshold,
+      severity: parsed.data.aqi >= 401 ? "Severe" : "Very Poor",
+      actionPlan: {
+        constituency: target.constituencyName,
+        constituencyId: target.constituencyId,
+        ward: target.ward,
+        deploymentSite: target.deploymentSite,
+        district: target.district,
+        state: target.state,
+        coordinates: { latitude: target.latitude, longitude: target.longitude },
+        mapUrl: `https://www.google.com/maps?q=${target.latitude},${target.longitude}`,
+        responseWindow: target.responseWindow
+      },
+      ...result
+    });
+  } catch (error) {
+    logger.error({ error, target, aqi: parsed.data.aqi }, "water-cannon email alert failed");
+    response.status(503).json({ error: "Google Cloud could not send the water-cannon email alert. Try again." });
+  }
 });
 
 app.patch("/api/projects/:projectId/status", async (request, response) => {

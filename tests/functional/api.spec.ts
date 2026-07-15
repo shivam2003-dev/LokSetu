@@ -41,6 +41,7 @@ test.describe("API functional flow", () => {
     const configPayload = await clientConfig.json();
     expect(configPayload.maps).toHaveProperty("enabled");
     expect(configPayload.maps).toHaveProperty("source");
+    expect(configPayload.waterCannonAlert).toMatchObject({ enabled: false, aqiThreshold: 301 });
 
     const context = await api.get("/api/context");
     await expect(context).toBeOK();
@@ -153,6 +154,34 @@ test.describe("API functional flow", () => {
     const auditPayload = await auditAfterMutation.json();
     expect(auditPayload.events.map((event: { action: string }) => event.action)).toContain("updated_area_mapping");
     expect(auditPayload.events.map((event: { action: string }) => event.action)).toContain("updated_project_status");
+
+    const lowPollutionAlert = await api.post("/api/alerts/water-cannon", {
+      data: { aqi: 220 }
+    });
+    expect(lowPollutionAlert.status()).toBe(422);
+
+    const severePollutionAlert = await api.post("/api/alerts/water-cannon", {
+      data: { aqi: 318 }
+    });
+    expect(severePollutionAlert.status()).toBe(202);
+    expect(await severePollutionAlert.json()).toMatchObject({
+      ok: true,
+      delivery: "disabled",
+      aqi: 318,
+      threshold: 301,
+      severity: "Very Poor",
+      actionPlan: {
+        constituency: "Central Delhi",
+        constituencyId: "mp-delhi-central",
+        ward: "Kalindi Nagar",
+        deploymentSite: "Kalindi Nagar pollution hotspot",
+        district: "Central Delhi",
+        state: "Delhi",
+        coordinates: { latitude: 28.618, longitude: 77.245 },
+        mapUrl: "https://www.google.com/maps?q=28.618,77.245",
+        responseWindow: "30 minutes"
+      }
+    });
 
     const deniedQueue = await api.get("/api/mp/queue?actorId=mp-user-delhi-central&mpId=mp-up-lucknow");
     expect(deniedQueue.status()).toBe(403);

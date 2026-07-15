@@ -88,6 +88,17 @@ api:
     OPENAI_COMPATIBLE_MODEL: google/gemini-2.0-flash-001
     BATCH_SCHEDULE: "*/15 * * * *"
     RAG_API_URL: http://people-priority-rag-api:8090
+    WATER_CANNON_ALERTS_ENABLED: "false"
+    WATER_CANNON_AQI_THRESHOLD: "301"
+    WATER_CANNON_ALERT_STATE: Delhi
+    WATER_CANNON_ALERT_DISTRICT: Central Delhi
+    WATER_CANNON_ALERT_CONSTITUENCY_ID: mp-delhi-central
+    WATER_CANNON_ALERT_CONSTITUENCY_NAME: Central Delhi
+    WATER_CANNON_ALERT_WARD: Kalindi Nagar
+    WATER_CANNON_ALERT_DEPLOYMENT_SITE: Kalindi Nagar pollution hotspot
+    WATER_CANNON_ALERT_LATITUDE: "28.618"
+    WATER_CANNON_ALERT_LONGITUDE: "77.245"
+    WATER_CANNON_ALERT_RESPONSE_WINDOW: 30 minutes
   openAiCompatible:
     existingSecret: ""
     secretKey: api-key

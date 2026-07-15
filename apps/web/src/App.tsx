@@ -119,6 +119,13 @@ type DashboardResponse = {
   access?: SessionUser;
 };
 
+type WaterCannonAlertResponse = {
+  ok: boolean;
+  message: string;
+  delivery: "gcp_monitoring" | "disabled";
+  recordedAt: string;
+};
+
 type RegionResponse = {
   coverage: {
     statesReady: number;
@@ -148,6 +155,19 @@ type ClientConfig = {
     provider?: "mappls" | "google" | "osm";
     mapplsKey?: string;
     source: string;
+  };
+  waterCannonAlert: {
+    enabled: boolean;
+    aqiThreshold: number;
+    state?: string;
+    district?: string;
+    constituencyId?: string;
+    constituencyName?: string;
+    ward?: string;
+    deploymentSite?: string;
+    latitude?: number;
+    longitude?: number;
+    responseWindow?: string;
   };
   citizenAppUrl?: string;
   generatedAt: string;
@@ -309,6 +329,30 @@ const gisLayers = [
   { label: "Satellite Imagery", color: "#475569", active: false },
   { label: "Demand Heatmaps", color: "#dc2626", active: true }
 ];
+
+const issueMapCategories = [
+  { category: "Roads", filter: "Roads", emoji: "🛣️", color: "#dc2626" },
+  { category: "Water", filter: "Water Supply", emoji: "💧", color: "#0284c7" },
+  { category: "Health", filter: "Healthcare", emoji: "🏥", color: "#16a34a" },
+  { category: "Education", filter: "Education", emoji: "🎓", color: "#7c3aed" },
+  { category: "Sanitation", filter: "Sanitation", emoji: "🧹", color: "#0d9488" },
+  { category: "Power", filter: "Power", emoji: "⚡", color: "#ea580c" },
+  { category: "Digital Access", filter: "Digital Access", emoji: "📶", color: "#db2777" },
+  { category: "Employment", filter: "Employment", emoji: "💼", color: "#a16207" }
+] as const;
+
+const fallbackIssueMapStyle = { category: "Other", filter: "Other", emoji: "📍", color: "#64748b" } as const;
+
+function issueMapStyle(category: string) {
+  const normalized = normalizedIssueFilter(category);
+  return issueMapCategories.find((item) => normalizedIssueFilter(item.category) === normalized) ?? fallbackIssueMapStyle;
+}
+
+function issueMarkerIconUrl(category: string) {
+  const style = issueMapStyle(category);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="${style.color}" stroke="white" stroke-width="3"/><text x="22" y="28" text-anchor="middle" font-size="20">${style.emoji}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
 type TileFallbackState = {
   zoom: number;
@@ -569,6 +613,7 @@ const fallbackClientConfig: ClientConfig = {
     mapplsKey: envMapplsMapSdkKey,
     source: envMapplsMapSdkKey ? "vite-mappls-env" : envGoogleMapsApiKey ? "vite-env" : "not-configured"
   },
+  waterCannonAlert: { enabled: false, aqiThreshold: 301 },
   citizenAppUrl,
   generatedAt: new Date().toISOString()
 };
@@ -736,7 +781,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(() => localStorage.getItem(tourStorageKey) !== "1");
   const [tourStep, setTourStep] = useState(0);
-  const [scope, setScope] = useState<Scope>("local");
+  const [scope, setScope] = useState<Scope>("global");
   const [state, setState] = useState("Delhi");
   const [district, setDistrict] = useState("Central Delhi");
   const [ward, setWard] = useState("Kalindi Nagar");
@@ -763,7 +808,6 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
   const effectiveCitizenAppUrl = clientConfig.citizenAppUrl?.trim() || citizenAppUrl;
-  const showControlStrip = page === "priorities" || page === "map" || page === "recommendations" || page === "projects";
   const canManageUsers = session.user.permissions.includes("users:manage");
 
   useEffect(() => {
@@ -1033,28 +1077,13 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         <DashboardAccessBanner session={session} />
 
-        {showControlStrip ? (
-          session.restricted ? <RestrictedControlStrip session={session} query={query} setQuery={setQuery} apply={applyFilters} /> : <ControlStrip
-            context={context}
-            scope={scope}
-            setScope={setScope}
-            state={state}
-            setState={updateState}
-            district={district}
-            setDistrict={updateDistrict}
-            ward={ward}
-            setWard={updateWard}
-            mpId={mpId}
-            setMpId={setMpId}
-            query={query}
-            setQuery={setQuery}
-            apply={applyFilters}
-          />
+        {session.restricted && ["priorities", "map", "recommendations", "projects"].includes(page) ? (
+          <RestrictedControlStrip session={session} query={query} setQuery={setQuery} apply={applyFilters} />
         ) : null}
 
         {!apiConnected ? <ConnectionBanner error={connectionError} /> : null}
 
-        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} session={session} /> : null}
+        {page === "overview" ? <OverviewPage dashboard={dashboard} setPage={setPage} maps={clientConfig.maps} waterCannonAlert={clientConfig.waterCannonAlert} session={session} /> : null}
         {page === "priorities" ? <PriorityDeskPage dashboard={dashboard} activeProject={activeProject} setActiveProjectId={setActiveProjectId} refreshAll={refreshAll} setPage={setPage} /> : null}
         {page === "map" ? <ExplorePage dashboard={dashboard} regions={regions} maps={clientConfig.maps} boundaries={mapBoundaries} clusters={mapClusters} setActiveProjectId={setActiveProjectId} setPage={setPage} /> : null}
         {page === "pulse" ? <PulsePage setPage={setPage} /> : null}
@@ -1313,54 +1342,6 @@ function RestrictedControlStrip({
   );
 }
 
-function ControlStrip(props: {
-  context: ContextResponse;
-  scope: Scope;
-  setScope: (scope: Scope) => void;
-  state: string;
-  setState: (value: string) => void;
-  district: string;
-  setDistrict: (value: string) => void;
-  ward: string;
-  setWard: (value: string) => void;
-  mpId: string;
-  setMpId: (value: string) => void;
-  query: string;
-  setQuery: (value: string) => void;
-  apply: () => void;
-}) {
-  const districtOptions = props.context.districtsByState[props.state] ?? props.context.districts;
-  const wardOptions = props.context.wardsByDistrict[`${props.state}::${props.district}`] ?? props.context.wards;
-  const mpOptions = props.context.mps.filter((mp) => props.scope === "global" || mp.state === props.state);
-
-  return (
-    <section className="control-strip" aria-label="India search and locality controls">
-      <div className="segmented">
-        <button className={props.scope === "local" ? "active" : ""} onClick={() => props.setScope("local")}>My area</button>
-        <button className={props.scope === "mp" ? "active" : ""} onClick={() => props.setScope("mp")}>My MP</button>
-        <button className={props.scope === "global" ? "active" : ""} onClick={() => props.setScope("global")}>All India</button>
-      </div>
-      <select value={props.state} onChange={(event) => props.setState(event.target.value)} aria-label="State">
-        {props.context.states.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select value={props.district} onChange={(event) => props.setDistrict(event.target.value)} aria-label="District">
-        {districtOptions.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select value={props.ward} onChange={(event) => props.setWard(event.target.value)} aria-label="Ward">
-        {wardOptions.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select value={props.mpId} onChange={(event) => props.setMpId(event.target.value)} aria-label="MP">
-        {mpOptions.map((mp) => <option value={mp.id} key={mp.id}>{mp.name}</option>)}
-      </select>
-      <span className="search-box">
-        <Search size={16} />
-        <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Search school, road, water, ward" />
-      </span>
-      <button className="primary" onClick={props.apply}>Apply</button>
-    </section>
-  );
-}
-
 function ConnectionBanner({ error }: { error: string | null }) {
   return (
     <section className="connection-banner" role="status">
@@ -1380,6 +1361,7 @@ function mergeClientConfig(config: ClientConfig): ClientConfig {
   const provider = mapplsKey ? "mappls" : apiKey ? "google" : "osm";
   return {
     ...config,
+    waterCannonAlert: config.waterCannonAlert ?? fallbackClientConfig.waterCannonAlert,
     maps: {
       ...config.maps,
       enabled: Boolean(mapplsKey || apiKey),
@@ -1474,10 +1456,41 @@ function HealthGauge({ score, signals, confidence, wards }: { score: number; sig
   );
 }
 
-function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"]; session: SessionResponse }) {
-  const projects = buildManagedProjects(dashboard.projects);
-  const [selectedHotspotId, setSelectedHotspotId] = useState("");
-  const topPriorities = projects.slice(0, 5);
+function OverviewPage({ dashboard, setPage, maps, waterCannonAlert, session }: { dashboard: DashboardResponse; setPage: (page: Page) => void; maps: ClientConfig["maps"]; waterCannonAlert: ClientConfig["waterCannonAlert"]; session: SessionResponse }) {
+  const projects = useMemo(() => buildManagedProjects(dashboard.projects), [dashboard.projects]);
+  const districtSnapshot = useMemo(() => {
+    const groups: Array<{ label: string; categories: string[] }> = [
+      { label: "Infrastructure", categories: ["roads", "power", "sanitation"] },
+      { label: "Healthcare", categories: ["health", "healthcare"] },
+      { label: "Education", categories: ["education"] },
+      { label: "Water", categories: ["water", "water supply"] },
+      { label: "Employment", categories: ["employment"] }
+    ];
+    const overall = Math.round(average(dashboard.projects.map((project) => project.score))) || 62;
+    return groups.map((group) => {
+      const matching = dashboard.projects.filter((project) => group.categories.includes(project.category.toLowerCase()));
+      const value = matching.length ? Math.round(average(matching.map((project) => project.score))) : Math.max(20, Math.round(overall * 0.72));
+      return { label: group.label, value: Math.min(100, value) };
+    });
+  }, [dashboard.projects]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [overviewLens, setOverviewLens] = useState<"priority" | "delivery" | "impact">("priority");
+  const [waterCannonStatus, setWaterCannonStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [waterCannonMessage, setWaterCannonMessage] = useState("");
+  const rankedProjects = useMemo(() => {
+    const deliveryWeight = (project: ManagedProject) => project.deliveryStatus === "delayed" ? 3 : project.deliveryStatus === "ongoing" ? 2 : project.deliveryStatus === "proposed" ? 1 : 0;
+    return [...projects].sort((a, b) => {
+    if (overviewLens === "delivery") {
+      return deliveryWeight(b) - deliveryWeight(a) || b.aiRisk - a.aiRisk;
+    }
+    if (overviewLens === "impact") return b.citizenImpact - a.citizenImpact || b.demandCount - a.demandCount;
+    return b.score - a.score || b.demandCount - a.demandCount;
+    });
+  }, [overviewLens, projects]);
+  const topPriorities = rankedProjects.slice(0, 5);
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? topPriorities[0];
+  const budgetProjects = rankedProjects.slice(0, 6);
+  const maxBudget = Math.max(1, ...budgetProjects.map((project) => project.budgetCr));
   const totalDemand = dashboard.projects.reduce((sum, project) => sum + project.demandCount, 0);
   const avgConfidence = Math.round(average(dashboard.projects.map((project) => project.confidence)) * 100) || 86;
   const healthScore = Math.round(average([
@@ -1488,10 +1501,17 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   ]));
   const completed = projects.filter((project) => project.deliveryStatus === "completed").length;
   const delayed = projects.filter((project) => project.deliveryStatus === "delayed").length;
+  const pollutionAqi = Math.max(318, waterCannonAlert.aqiThreshold);
   const alertItems = [
-    { title: "Road complaints rising", detail: "Clustered citizen demand needs 48-hour review", tone: "high" },
-    { title: "PHC staffing risk", detail: "Health requests exceed district baseline by 22%", tone: "medium" },
-    { title: "Budget release pending", detail: `${delayed} delayed works require officer follow-up`, tone: "medium" }
+    ...(waterCannonAlert.enabled ? [{
+      title: `High air pollution · AQI ${pollutionAqi} (Very Poor)`,
+      detail: `Deploy at ${waterCannonAlert.deploymentSite}, ${waterCannonAlert.ward} · ${waterCannonAlert.constituencyName} constituency`,
+      tone: "high",
+      action: "water-cannon" as const
+    }] : []),
+    { title: "Road complaints rising", detail: "Clustered citizen demand needs 48-hour review", tone: "high", action: "navigate" as const },
+    { title: "PHC staffing risk", detail: "Health requests exceed district baseline by 22%", tone: "medium", action: "navigate" as const },
+    { title: "Budget release pending", detail: `${delayed} delayed works require officer follow-up`, tone: "medium", action: "navigate" as const }
   ];
   const insightCards = [
     "AI recommends funding high-demand road and drainage works before monsoon acceleration.",
@@ -1500,13 +1520,34 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
   ];
   const constituency = session.area.constituencyName ?? (session.restricted ? "Configured constituency" : "All India");
   const constituencyArea = [session.area.district, session.area.state].filter(Boolean).join(" · ");
+  const configuredAreaName = session.area.constituencyName ?? session.area.district ?? session.area.state;
+  const commandCenterTitle = session.restricted && configuredAreaName
+    ? `${configuredAreaName.replace(/^MP\s+/i, "")} intelligence command center`
+    : "Constituency intelligence command center";
+
+  async function deployWaterCannon() {
+    if (waterCannonStatus === "sending") return;
+    setWaterCannonStatus("sending");
+    setWaterCannonMessage("");
+    try {
+      const result = await requestJson<WaterCannonAlertResponse>("/api/alerts/water-cannon", {
+        method: "POST",
+        body: JSON.stringify({ aqi: pollutionAqi })
+      });
+      setWaterCannonStatus("sent");
+      setWaterCannonMessage(result.message);
+    } catch {
+      setWaterCannonStatus("error");
+      setWaterCannonMessage("Email alert could not be sent. Please retry.");
+    }
+  }
 
   return (
     <section className="overview-page">
       <section className="overview-hero panel">
         <div>
           <p className="eyebrow">JanVaani AI Executive Overview</p>
-          <h3>Constituency intelligence command center</h3>
+          <h3>{commandCenterTitle}</h3>
           <div className="overview-constituency" aria-label="Dashboard constituency">
             <MapPinned size={18} />
             <span>Dashboard constituency</span>
@@ -1515,33 +1556,67 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
           </div>
           <p>A 360 degree view of citizen priorities, AI-ranked risks, development progress, and live alerts for Members of Parliament.</p>
           <div className="overview-actions">
-            <button onClick={() => setPage("recommendations")} type="button">Open AI recommendations</button>
-            <button onClick={() => setPage("projects")} type="button">Review projects</button>
-            <button onClick={() => setPage("map")} type="button">View GIS map</button>
+            <button onClick={() => setPage("recommendations")} type="button"><Sparkles size={16} /> Open AI recommendations</button>
+            <button onClick={() => setPage("projects")} type="button"><Briefcase size={16} /> Review projects</button>
+            <button onClick={() => setPage("map")} type="button"><MapPinned size={16} /> View GIS map</button>
           </div>
         </div>
         <HealthGauge score={healthScore} signals={totalDemand} confidence={avgConfidence} wards={dashboard.totals.wards} />
       </section>
 
-      <section className="overview-kpi-grid">
-        <article className="panel"><span>Citizen Priorities</span><strong>{dashboard.projects.length}</strong><small>{formatCount(totalDemand)} processed demand signals</small></article>
-        <article className="panel"><span>Development Progress</span><strong>{completed}/{projects.length}</strong><small>{delayed} delayed works need attention</small></article>
-        <article className="panel"><span>Active Wards</span><strong>{dashboard.totals.wards}</strong><small>{dashboard.totals.languages} languages normalized</small></article>
-        <article className="panel"><span>AI Risk</span><strong>{dashboard.totals.botRisk}</strong><small>bot and duplicate demand monitor</small></article>
+      <section className="panel overview-command-bar" aria-label="Overview analysis controls">
+        <div>
+          <span>Decision lens</span>
+          <strong>Re-rank the command center instantly</strong>
+        </div>
+        <div className="overview-lens-tabs" role="group" aria-label="Overview decision lens">
+          <button className={overviewLens === "priority" ? "active" : ""} aria-pressed={overviewLens === "priority"} onClick={() => setOverviewLens("priority")} type="button">AI priority</button>
+          <button className={overviewLens === "delivery" ? "active" : ""} aria-pressed={overviewLens === "delivery"} onClick={() => setOverviewLens("delivery")} type="button">Delivery risk</button>
+          <button className={overviewLens === "impact" ? "active" : ""} aria-pressed={overviewLens === "impact"} onClick={() => setOverviewLens("impact")} type="button">Citizen impact</button>
+        </div>
+        <small><Sparkles size={14} /> Select any card, chart bar, or map marker to synchronize the project focus.</small>
       </section>
+
+      <section className="overview-kpi-grid">
+        <button className="panel" onClick={() => setPage("recommendations")} type="button"><span>Citizen Priorities</span><strong>{dashboard.projects.length}</strong><small>{formatCount(totalDemand)} processed demand signals</small><em>Explore ranked needs <ArrowRight size={14} /></em></button>
+        <button className="panel" onClick={() => setPage("projects")} type="button"><span>Development Progress</span><strong>{completed}/{projects.length}</strong><small>{delayed} delayed works need attention</small><em>Open delivery board <ArrowRight size={14} /></em></button>
+        <button className="panel" onClick={() => setPage("map")} type="button"><span>Active Wards</span><strong>{dashboard.totals.wards}</strong><small>{dashboard.totals.languages} languages normalized</small><em>Inspect ward map <ArrowRight size={14} /></em></button>
+        <button className="panel" onClick={() => setPage("signals")} type="button"><span>AI Risk</span><strong>{dashboard.totals.botRisk}</strong><small>bot and duplicate demand monitor</small><em>Review live signals <ArrowRight size={14} /></em></button>
+      </section>
+
+      {selectedProject ? (
+        <section className="panel overview-focus-card" aria-live="polite">
+          <div className="overview-focus-copy">
+            <span className="overview-focus-kicker"><Target size={15} /> Current decision focus</span>
+            <strong>{selectedProject.title}</strong>
+            <small>{selectedProject.department} · {selectedProject.district} · {selectedProject.ward}</small>
+          </div>
+          <div className="overview-focus-metrics">
+            <div><span>AI score</span><strong>{selectedProject.score}</strong></div>
+            <div><span>Signals</span><strong>{formatCount(selectedProject.demandCount)}</strong></div>
+            <div><span>Progress</span><strong>{selectedProject.progress}%</strong></div>
+            <div><span>Budget</span><strong>₹{selectedProject.budgetCr.toFixed(1)}Cr</strong></div>
+          </div>
+          <div className="overview-focus-progress">
+            <div><span>{selectedProject.deliveryStatus} delivery</span><b>{Math.round(selectedProject.confidence * 100)}% confidence</b></div>
+            <meter aria-label={`${selectedProject.title} progress`} min="0" max="100" value={selectedProject.progress} />
+          </div>
+          <button onClick={() => setPage("recommendations")} type="button">Open decision brief <ArrowRight size={15} /></button>
+        </section>
+      ) : null}
 
       <section className="overview-main-grid">
         <section className="panel overview-priority-panel">
-          <PanelTitle title="Top Citizen Priorities" icon={Scale} detail="AI-ranked demand" />
+          <PanelTitle title="Top Citizen Priorities" icon={Scale} detail={overviewLens === "priority" ? "AI-ranked demand" : overviewLens === "delivery" ? "delivery risk first" : "highest citizen impact"} />
           {topPriorities.map((project, index) => (
-            <article key={project.id}>
+            <button className={project.id === selectedProject?.id ? "active" : ""} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
               <span>#{index + 1}</span>
               <div>
                 <strong>{project.title}</strong>
                 <small>{project.category} · {project.ward} · {formatCount(project.demandCount)} signals</small>
               </div>
-              <b>{project.score}</b>
-            </article>
+              <b>{overviewLens === "delivery" ? project.aiRisk : overviewLens === "impact" ? formatCount(project.citizenImpact) : project.score}</b>
+            </button>
           ))}
         </section>
 
@@ -1554,11 +1629,19 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
         <section className="panel overview-alert-panel">
           <PanelTitle title="Real-Time Alerts" icon={Zap} detail="requires action" />
           {alertItems.map((item) => (
-            <article className={item.tone} key={item.title}>
+            <button
+              className={`${item.tone}${item.action === "water-cannon" ? " water-cannon-alert" : ""}`}
+              disabled={item.action === "water-cannon" && waterCannonStatus === "sending"}
+              key={item.title}
+              onClick={() => item.action === "water-cannon" ? void deployWaterCannon() : setPage(item.tone === "high" ? "signals" : "projects")}
+              type="button"
+            >
               <strong>{item.title}</strong>
               <span>{item.detail}</span>
-            </article>
+              <em>{item.action === "water-cannon" ? waterCannonStatus === "sending" ? "Sending email…" : waterCannonStatus === "sent" ? "Deployment email sent" : "Deploy + send email" : "Review now"} <ArrowRight size={13} /></em>
+            </button>
           ))}
+          {waterCannonMessage ? <p className={`water-cannon-status ${waterCannonStatus}`} role="status">{waterCannonMessage}</p> : null}
         </section>
 
         <section className="panel overview-map-panel">
@@ -1577,37 +1660,40 @@ function OverviewPage({ dashboard, setPage, maps, session }: { dashboard: Dashbo
                 band: project.score >= 85 ? "High" : project.score >= 68 ? "Medium" : "Low"
               }] : [];
             })}
-            selectedId={selectedHotspotId}
-            onSelect={setSelectedHotspotId}
+            selectedId={selectedProject?.id ?? ""}
+            onSelect={setSelectedProjectId}
           />
+          <p className="overview-map-hint"><MapPin size={14} /> Map markers synchronize the decision focus above.</p>
         </section>
       </section>
 
       <section className="overview-bottom-grid">
         <section className="panel overview-progress-panel">
           <PanelTitle title="Development Progress" icon={Briefcase} detail="portfolio execution" />
-          {projects.slice(0, 5).map((project) => (
-            <article key={project.id}>
+          {rankedProjects.slice(0, 5).map((project) => (
+            <button className={project.id === selectedProject?.id ? "active" : ""} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} type="button">
               <div><strong>{project.ward}</strong><span>{project.deliveryStatus}</span></div>
-              <meter min="0" max="100" value={project.progress} />
-            </article>
+              <meter aria-label={`${project.title} progress`} min="0" max="100" value={project.progress} />
+              <small>{project.progress}% complete · {project.aiRisk}/100 execution risk</small>
+            </button>
           ))}
         </section>
 
         <section className="panel overview-budget-panel">
           <PanelTitle title="Budget and Impact" icon={Database} detail="expected beneficiaries" />
           <div className="overview-budget-chart">
-            {projects.slice(0, 6).map((project) => (
-              <span key={project.id} style={{ height: `${Math.max(26, project.budgetCr * 11)}px` }}><b>₹{project.budgetCr.toFixed(1)}Cr</b></span>
+            {budgetProjects.map((project) => (
+              <button className={project.id === selectedProject?.id ? "active" : ""} aria-label={`${project.title}, budget ₹${project.budgetCr.toFixed(1)} crore`} aria-pressed={project.id === selectedProject?.id} key={project.id} onClick={() => setSelectedProjectId(project.id)} style={{ height: `${Math.max(76, (project.budgetCr / maxBudget) * 150)}px` }} type="button"><b>₹{project.budgetCr.toFixed(1)}Cr</b><span>{project.ward}</span></button>
             ))}
           </div>
         </section>
 
         <section className="panel overview-compare-panel">
           <PanelTitle title="District Snapshot" icon={TrendingUp} detail="health vs demand" />
-          {["Infrastructure", "Healthcare", "Education", "Water", "Employment"].map((item, index) => (
-            <article key={item}><span>{item}</span><i style={{ width: `${88 - index * 9}%` }} /><strong>{88 - index * 9}</strong></article>
+          {districtSnapshot.map((item) => (
+            <button aria-label={`Compare ${item.label}, score ${item.value}`} key={item.label} onClick={() => setPage("compare")} type="button"><span>{item.label}</span><i style={{ width: `${item.value}%` }} /><strong>{item.value}</strong></button>
           ))}
+          <small className="overview-compare-hint">Select a category to open district comparison.</small>
         </section>
       </section>
     </section>
@@ -1723,6 +1809,8 @@ function IssueMap({
   const [confidenceFilter, setConfidenceFilter] = useState("High confidence");
   const [timelineValue, setTimelineValue] = useState(72);
   const [mapOverlay, setMapOverlay] = useState<"hotspots" | "clusters" | "heatmap">("hotspots");
+  const [showLayerList, setShowLayerList] = useState(false);
+  const [showGisTools, setShowGisTools] = useState(false);
   const allHotspots = useMemo(() => buildMapHotspots(dashboard).filter(isWithinIndiaBounds), [dashboard]);
   const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
     const issueMatches = issueFilter === "All issue types" || normalizedIssueFilter(issueFilter) === normalizedIssueFilter(hotspot.category);
@@ -1733,11 +1821,31 @@ function IssueMap({
     const timelineMatches = hotspot.batchPosition <= timelineValue;
     return issueMatches && confidenceMatches && timelineMatches && categoryLayerEnabled(hotspot.category, activeLayers);
   }), [activeLayers, allHotspots, confidenceFilter, issueFilter, timelineValue]);
+  const visibleClusters = useMemo(() => {
+    const visibleProjectIds = new Set(hotspots.map((hotspot) => hotspot.projectId));
+    return clusters.clusters.flatMap((cluster) => {
+      const projectIds = cluster.projectIds.filter((projectId) => visibleProjectIds.has(projectId));
+      return projectIds.length ? [{ ...cluster, projectIds, count: projectIds.length }] : [];
+    });
+  }, [clusters.clusters, hotspots]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
 
+  const googleMapRef = useRef<any>(null);
+  const mapplsMapRef = useRef<any>(null);
+  const mapplsMarkersRef = useRef<any[]>([]);
+  const overlayObjectsRef = useRef<MapOverlayObject[]>([]);
+  const boundaryObjectsRef = useRef<MapOverlayObject[]>([]);
+  const fitDoneRef = useRef(false);
+  const prevDataRef = useRef("");
+  const lastOverlayRef = useRef(mapOverlay);
+  const initialCenterRef = useRef(hotspots);
+  initialCenterRef.current = hotspots;
+
+  // Bootstrap the map SDK once per provider/key; overlays sync in separate effects
+  // so filter, overlay, and boundary changes never rebuild the base map.
   useEffect(() => {
-    if (!maps.enabled || hotspots.length === 0 || !mapRef.current) {
-      setFallbackReason(!maps.enabled ? "Map SDK key is not configured." : "No hotspot coordinates available for the current filters.");
+    if (!maps.enabled || !mapRef.current) {
+      setFallbackReason("Map SDK key is not configured.");
       setMapState("fallback");
       return;
     }
@@ -1757,10 +1865,11 @@ function IssueMap({
           if (cancelled || !mapRef.current || !window.mappls?.Map) return;
           mapRef.current.replaceChildren();
           mapRef.current.id ||= `mappls-${Math.random().toString(36).slice(2)}`;
-          const center = hotspots[0] ?? { lat: 28.6139, lng: 77.2090 };
+          const points = initialCenterRef.current;
+          const center = points[0] ?? { lat: 28.6139, lng: 77.2090 };
           const map = new window.mappls.Map(mapRef.current.id, {
             center: [center.lat, center.lng],
-            zoom: hotspots.length > 1 ? 5 : 12,
+            zoom: points.length > 1 ? 5 : 12,
             minZoom: 4,
             maxZoom: 18,
             maxBounds: [[INDIA_BOUNDS.south, INDIA_BOUNDS.west], [INDIA_BOUNDS.north, INDIA_BOUNDS.east]],
@@ -1768,25 +1877,18 @@ function IssueMap({
             geolocation: false,
             clickableIcons: false
           });
-          if (window.mappls.Marker) {
-            hotspots.forEach((hotspot, index) => {
-              try {
-                new window.mappls!.Marker!({
-                  map,
-                  position: { lat: hotspot.lat, lng: hotspot.lng },
-                  title: `${index + 1}. ${hotspot.category} - ${hotspot.ward}`,
-                  draggable: false
-                });
-              } catch {
-                // Mappls marker API varies by SDK version. Base map remains usable.
-              }
-            });
-          }
+          mapplsMapRef.current = map;
           setMapState("ready");
         })
         .catch(() => activateFallback("Mappls Map SDK failed to load. Showing the live OpenStreetMap tile layer."));
       return () => {
         cancelled = true;
+        mapplsMarkersRef.current.forEach((marker) => {
+          if (typeof marker.remove === "function") marker.remove();
+          else if (typeof marker.setMap === "function") marker.setMap(null);
+        });
+        mapplsMarkersRef.current = [];
+        mapplsMapRef.current = null;
       };
     }
 
@@ -1796,6 +1898,9 @@ function IssueMap({
     const originalAuthFailure = window.gm_authFailure;
     const activateFallback = (reason: string) => {
       if (cancelled) return;
+      googleMapRef.current = null;
+      overlayObjectsRef.current = [];
+      boundaryObjectsRef.current = [];
       setFallbackReason(reason);
       if (mapRef.current) mapRef.current.replaceChildren();
       setMapState("fallback");
@@ -1806,8 +1911,8 @@ function IssueMap({
     };
     window.console.error = (...args: unknown[]) => {
       const message = args.map(String).join(" ");
-      if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError/.test(message)) {
-        activateFallback("Google Maps demo-key quota or browser-key access failed. Showing the live OpenStreetMap tile layer.");
+      if (!cancelled && /Maps Demo Key limit reached|Google Maps JavaScript API error|Quota|RefererNotAllowedMapError|ApiNotActivatedMapError|InvalidKeyMapError/.test(message)) {
+        activateFallback("Google Maps browser-key access failed. Showing the live OpenStreetMap tile layer.");
       }
       originalConsoleError.apply(window.console, args);
     };
@@ -1817,29 +1922,28 @@ function IssueMap({
     loadGoogleMaps(maps.apiKey, maps.mapId)
       .then(() => {
         if (cancelled || !mapRef.current || !window.google?.maps) return;
-
-        const bounds = new window.google.maps.LatLngBounds();
-        hotspots.forEach((hotspot) => bounds.extend({ lat: hotspot.lat, lng: hotspot.lng }));
-
+        const points = initialCenterRef.current;
+        const center = points[0] ?? { lat: 22.9, lng: 79.2 };
         const map = new window.google.maps.Map(mapRef.current, {
-          center: hotspots[0],
-          zoom: hotspots.length > 1 ? 5 : 12,
+          center: { lat: center.lat, lng: center.lng },
+          zoom: points.length > 1 ? 5 : 12,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
           clickableIcons: false,
           gestureHandling: "greedy",
           ...indiaMapRestriction(),
-          ...(maps.mapId ? { mapId: maps.mapId } : {}),
-          styles: [
-            { featureType: "poi", stylers: [{ visibility: "off" }] },
-            { featureType: "transit", stylers: [{ visibility: "off" }] }
-          ]
+          ...(maps.mapId
+            ? { mapId: maps.mapId }
+            : {
+              styles: [
+                { featureType: "poi", stylers: [{ visibility: "off" }] },
+                { featureType: "transit", stylers: [{ visibility: "off" }] }
+              ]
+            })
         });
-
-        hotspots.forEach((hotspot, index) => addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => selectProject(hotspot.projectId)));
-
-        if (hotspots.length > 1) map.fitBounds(bounds, 60);
+        googleMapRef.current = map;
+        fitDoneRef.current = false;
         setMapState("ready");
         mapErrorTimer = window.setTimeout(() => {
           if (!cancelled && mapRef.current?.querySelector(".gm-err-container, .gm-err-title, .gm-err-message")) {
@@ -1856,40 +1960,105 @@ function IssueMap({
       if (mapErrorTimer) window.clearTimeout(mapErrorTimer);
       window.console.error = originalConsoleError;
       window.gm_authFailure = originalAuthFailure;
+      googleMapRef.current = null;
+      overlayObjectsRef.current = [];
+      boundaryObjectsRef.current = [];
     };
-  }, [hotspots, maps.enabled, maps.provider, maps.mapplsKey, maps.apiKey, maps.mapId, selectProject]);
+  }, [maps.enabled, maps.provider, maps.mapplsKey, maps.apiKey, maps.mapId]);
+
+  // Mappls does not share the Google overlay API, so keep its marker set in
+  // sync explicitly when GIS filters, layers, or the timeline change.
+  useEffect(() => {
+    const map = mapplsMapRef.current;
+    if (mapState !== "ready" || maps.provider !== "mappls" || !map || !window.mappls?.Marker) return;
+    mapplsMarkersRef.current.forEach((marker) => {
+      if (typeof marker.remove === "function") marker.remove();
+      else if (typeof marker.setMap === "function") marker.setMap(null);
+    });
+    mapplsMarkersRef.current = [];
+    hotspots.forEach((hotspot, index) => {
+      try {
+        const markerStyle = issueMapStyle(hotspot.category);
+        const marker = new window.mappls!.Marker!({
+          map,
+          position: { lat: hotspot.lat, lng: hotspot.lng },
+          title: `${markerStyle.emoji} ${index + 1}. ${hotspot.category} - ${hotspot.ward}`,
+          icon_url: issueMarkerIconUrl(hotspot.category),
+          draggable: false
+        });
+        mapplsMarkersRef.current.push(marker);
+      } catch {
+        // Mappls marker API varies by SDK version. Base map remains usable.
+      }
+    });
+  }, [hotspots, mapState, maps.provider]);
+
+  // Sync the active overlay (hotspot markers / cluster circles / demand heatmap)
+  // onto the live Google map whenever data or the selected overlay changes.
+  useEffect(() => {
+    const map = googleMapRef.current;
+    if (mapState !== "ready" || maps.provider === "mappls" || !map || !window.google?.maps) return;
+    const dataKey = `${hotspots.map((hotspot) => hotspot.projectId).join("|")}::${visibleClusters.map((cluster) => `${cluster.id}:${cluster.projectIds.join(",")}`).join("|")}`;
+    const dataChanged = prevDataRef.current !== dataKey;
+    prevDataRef.current = dataKey;
+    clearMapOverlays(overlayObjectsRef.current);
+    if (mapOverlay === "clusters" && visibleClusters.length) {
+      overlayObjectsRef.current.push(...drawClusterOverlay(map, visibleClusters, selectProject));
+    } else if (mapOverlay === "heatmap" && hotspots.length) {
+      overlayObjectsRef.current.push(...drawHeatmapOverlay(map, hotspots));
+    } else {
+      hotspots.forEach((hotspot, index) => {
+        overlayObjectsRef.current.push(addHotspotMarker(map, hotspot, index, Boolean(maps.mapId), () => selectProject(hotspot.projectId)));
+      });
+    }
+    const overlayChanged = lastOverlayRef.current !== mapOverlay;
+    lastOverlayRef.current = mapOverlay;
+    if (!fitDoneRef.current || overlayChanged || dataChanged) {
+      if (mapOverlay === "heatmap" && overlayObjectsRef.current.length) {
+        const bounds = new window.google.maps.LatLngBounds();
+        overlayObjectsRef.current.forEach((object: any) => {
+          if (typeof object.getBounds === "function") bounds.union(object.getBounds());
+        });
+        map.fitBounds(bounds, 40);
+        fitDoneRef.current = true;
+        return;
+      }
+      const points: Array<{ lat: number; lng: number }> = mapOverlay === "clusters" && visibleClusters.length
+        ? visibleClusters.map((cluster) => cluster.centroid)
+        : hotspots;
+      if (points.length > 1) {
+        const bounds = new window.google.maps.LatLngBounds();
+        points.forEach((point) => bounds.extend({ lat: point.lat, lng: point.lng }));
+        map.fitBounds(bounds, 60);
+        fitDoneRef.current = true;
+      } else if (points.length === 1) {
+        map.setCenter({ lat: points[0].lat, lng: points[0].lng });
+        map.setZoom(12);
+        fitDoneRef.current = true;
+      }
+    }
+  }, [mapState, mapOverlay, hotspots, visibleClusters, maps.provider, maps.mapId, selectProject]);
+
+  // Draw bbox rectangles for the selected boundary level on the live map.
+  useEffect(() => {
+    const map = googleMapRef.current;
+    if (mapState !== "ready" || maps.provider === "mappls" || !map || !window.google?.maps) return;
+    clearMapOverlays(boundaryObjectsRef.current);
+    const features = boundaries.features.filter((feature) => feature.level === boundaryLevel);
+    boundaryObjectsRef.current.push(...drawBoundaryOverlay(map, features, selectProject));
+  }, [mapState, boundaries, boundaryLevel, maps.provider, selectProject]);
 
   return (
     <div className="map-stack gis-dashboard">
       <div className="map-toolbar">
         <div>
           <strong>Geospatial demand hotspots</strong>
-          <span>India boundary enforced · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {clusters.clusters.length} AI clusters</span>
+          <span>India boundary enforced · {hotspots.length} ward-level signals · {boundaries.features.length} boundary features · {visibleClusters.length} visible AI clusters</span>
         </div>
         <small className={`map-state ${mapState}`}>{mapStatusText(mapState, maps.provider)}</small>
       </div>
       <div className="map-layout gis-layout">
         <aside className="gis-control-panel" aria-label="GIS layer controls">
-          <section>
-            <h4>Layers</h4>
-            <div className="gis-layer-list">
-              {gisLayers.map((layer) => (
-                <label key={layer.label}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(activeLayers[layer.label])}
-                    onChange={(event) => {
-                      const checked = event.currentTarget.checked;
-                      setActiveLayers((current) => ({ ...current, [layer.label]: checked }));
-                      setGisAction(`${layer.label} layer ${checked ? "enabled" : "hidden"}; ${hotspots.length} signals match the current view.`);
-                    }}
-                  />
-                  <i style={{ background: layer.color }} />
-                  <span>{layer.label}</span>
-                </label>
-              ))}
-            </div>
-          </section>
           <section>
             <h4>Filters</h4>
             <select aria-label="GIS issue filter" value={issueFilter} onChange={(event) => {
@@ -1897,12 +2066,7 @@ function IssueMap({
               setGisAction(`${event.currentTarget.value} issue filter applied.`);
             }}>
               <option>All issue types</option>
-              <option>Roads</option>
-              <option>Healthcare</option>
-              <option>Water Supply</option>
-              <option>Education</option>
-              <option>Sanitation</option>
-              <option>Power</option>
+              {issueMapCategories.map((item) => <option key={item.category}>{item.filter}</option>)}
             </select>
             <select aria-label="GIS confidence filter" value={confidenceFilter} onChange={(event) => {
               setConfidenceFilter(event.currentTarget.value);
@@ -1914,22 +2078,53 @@ function IssueMap({
             </select>
           </section>
           <section>
-            <h4>Timeline</h4>
-            <input aria-label="GIS timeline slider" value={timelineValue} max="100" min="20" type="range" onChange={(event) => {
-              const next = Number(event.currentTarget.value);
-              setTimelineValue(next);
-              setGisAction(`Timeline window moved to ${timelineLabel(next)}; map now uses matching batch signals.`);
-            }} />
-            <div className="gis-time-row"><span>Jan</span><b>{timelineLabel(timelineValue)}</b><span>Dec</span></div>
+            <button className="gis-section-toggle" type="button" aria-expanded={showLayerList} onClick={() => setShowLayerList((current) => !current)}>
+              <h4>Layers</h4>
+              <span>{Object.values(activeLayers).filter(Boolean).length} on</span>
+              <ChevronDown className={showLayerList ? "open" : ""} size={14} />
+            </button>
+            {showLayerList ? (
+              <div className="gis-layer-list">
+                {gisLayers.map((layer) => (
+                  <label key={layer.label}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(activeLayers[layer.label])}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setActiveLayers((current) => ({ ...current, [layer.label]: checked }));
+                        setGisAction(`${layer.label} layer ${checked ? "enabled" : "hidden"}; ${hotspots.length} signals match the current view.`);
+                      }}
+                    />
+                    <i style={{ background: layer.color }} />
+                    <span>{layer.label}</span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
           </section>
           <section>
-            <h4>Analysis</h4>
-            <div className="gis-tool-grid">
-              <button onClick={() => setGisAction(`Route analysis created from ${selectedProject.ward} to nearest delivery cluster.`)} type="button">Route analysis</button>
-              <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} filtered hotspots checked.`)} type="button">Buffer 2 km</button>
-              <button onClick={() => setGisAction(`Flood overlap checked for ${selectedProject.district}; at-risk layers highlighted.`)} type="button">Flood overlap</button>
-              <button onClick={() => setGisAction(`${boundaryLevel} boundary clip applied to current demand layer.`)} type="button">Boundary clip</button>
-            </div>
+            <button className="gis-section-toggle" type="button" aria-expanded={showGisTools} onClick={() => setShowGisTools((current) => !current)}>
+              <h4>Timeline & Analysis</h4>
+              <span>{timelineLabel(timelineValue)}</span>
+              <ChevronDown className={showGisTools ? "open" : ""} size={14} />
+            </button>
+            {showGisTools ? (
+              <>
+                <input aria-label="GIS timeline slider" value={timelineValue} max="100" min="20" type="range" onChange={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  setTimelineValue(next);
+                  setGisAction(`Timeline window moved to ${timelineLabel(next)}; map now uses matching batch signals.`);
+                }} />
+                <div className="gis-time-row"><span>Jan</span><b>{timelineLabel(timelineValue)}</b><span>Dec</span></div>
+                <div className="gis-tool-grid">
+                  <button onClick={() => setGisAction(`Route analysis created from ${selectedProject.ward} to nearest delivery cluster.`)} type="button">Route analysis</button>
+                  <button onClick={() => setGisAction(`2 km buffer applied around ${selectedProject.ward}; ${hotspots.length} filtered hotspots checked.`)} type="button">Buffer 2 km</button>
+                  <button onClick={() => setGisAction(`Flood overlap checked for ${selectedProject.district}; at-risk layers highlighted.`)} type="button">Flood overlap</button>
+                  <button onClick={() => setGisAction(`${boundaryLevel} boundary clip applied to current demand layer.`)} type="button">Boundary clip</button>
+                </div>
+              </>
+            ) : null}
           </section>
           <p className="action-status" role="status">{gisAction}</p>
         </aside>
@@ -1940,19 +2135,39 @@ function IssueMap({
             {mapState !== "ready" ? <FallbackSignalMap hotspots={hotspots} selectedProjectId={selectedProjectId} selectProject={selectProject} /> : null}
             <div className="gis-map-actions" aria-label="GIS map tools">
               <button className={mapOverlay === "hotspots" ? "active" : ""} aria-pressed={mapOverlay === "hotspots"} onClick={() => { setMapOverlay("hotspots"); setGisAction(`AI hotspot detection refreshed ${hotspots.length} filtered ward signals.`); }} type="button">AI hotspot detection</button>
-              <button className={mapOverlay === "clusters" ? "active" : ""} aria-pressed={mapOverlay === "clusters"} onClick={() => { setMapOverlay("clusters"); setGisAction(`${clusters.clusters.length} cluster markers loaded for visible map signals.`); }} type="button">Cluster markers</button>
+              <button className={mapOverlay === "clusters" ? "active" : ""} aria-pressed={mapOverlay === "clusters"} onClick={() => { setMapOverlay("clusters"); setGisAction(`${visibleClusters.length} cluster markers loaded for visible map signals.`); }} type="button">Cluster markers</button>
               <button className={mapOverlay === "heatmap" ? "active" : ""} aria-pressed={mapOverlay === "heatmap"} onClick={() => { setMapOverlay("heatmap"); setGisAction(`Demand heatmap overlay enabled for ${issueFilter.toLowerCase()} / ${confidenceFilter.toLowerCase()}.`); }} type="button">Demand heatmap</button>
             </div>
             <div className="gis-scale">5 km</div>
           </div>
+          <div className="issue-map-tabs" role="tablist" aria-label="Issue type map tabs">
+            <button className={issueFilter === "All issue types" ? "active" : ""} role="tab" aria-selected={issueFilter === "All issue types"} onClick={() => setIssueFilter("All issue types")} type="button">
+              <span>🗺️</span><strong>All issues</strong><small>{allHotspots.length}</small>
+            </button>
+            {issueMapCategories.map((item) => {
+              const count = allHotspots.filter((hotspot) => normalizedIssueFilter(hotspot.category) === normalizedIssueFilter(item.category)).length;
+              const active = normalizedIssueFilter(issueFilter) === normalizedIssueFilter(item.filter);
+              return (
+                <button className={active ? "active" : ""} role="tab" aria-selected={active} key={item.category} onClick={() => {
+                  setIssueFilter(item.filter);
+                  setGisAction(`${item.emoji} ${item.category} hotspots selected; ${count} signals visible before confidence and timeline filters.`);
+                }} style={{ ["--issue-color" as string]: item.color }} type="button">
+                  <span>{item.emoji}</span><strong>{item.category}</strong><small>{count}</small>
+                </button>
+              );
+            })}
+          </div>
           <div className="hotspot-list" aria-label="Map hotspot details">
-            {hotspots.map((hotspot, index) => (
-              <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)}>
-                <span>{index + 1}</span>
-                <strong>{hotspot.category}</strong>
-                <small>{hotspot.ward} · score {hotspot.intensity}</small>
-              </button>
-            ))}
+            {hotspots.map((hotspot, index) => {
+              const markerStyle = issueMapStyle(hotspot.category);
+              return (
+                <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)} style={{ ["--issue-color" as string]: markerStyle.color }}>
+                  <span aria-hidden="true">{markerStyle.emoji}</span>
+                  <strong>{hotspot.category}</strong>
+                  <small>#{index + 1} · {hotspot.ward} · score {hotspot.intensity}</small>
+                </button>
+              );
+            })}
             {!hotspots.length ? <p className="empty-state">No hotspots match the selected GIS layers and filters.</p> : null}
           </div>
         </section>
@@ -2173,6 +2388,7 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
         <div className="osm-map-tint" aria-hidden="true" />
         {indiaHotspots.map((hotspot, index) => {
           const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
+          const markerStyle = issueMapStyle(hotspot.category);
           return (
             <button
               className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
@@ -2183,12 +2399,14 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
                 width: `${44 + hotspot.intensity / 4}px`,
                 height: `${44 + hotspot.intensity / 4}px`,
                 ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
-                ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
+                ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`,
+                ["--issue-color" as string]: markerStyle.color
               }}
               onClick={(e) => { if (Math.abs(drag.x) < 5 && Math.abs(drag.y) < 5) selectProject(hotspot.projectId); e.stopPropagation(); }}
               title={`${hotspot.category} in ${hotspot.ward}`}
             >
-              {index + 1}
+              <span aria-hidden="true">{markerStyle.emoji}</span>
+              <small>{index + 1}</small>
             </button>
           );
         })}
@@ -2512,17 +2730,20 @@ function mapStatusText(state: MapLoadState, provider?: ClientConfig["maps"]["pro
   return "Live tile map";
 }
 
-function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void) {
+function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void): MapOverlayObject {
   const position = { lat: hotspot.lat, lng: hotspot.lng };
   const title = `${hotspot.category} in ${hotspot.ward}`;
+  const markerStyle = issueMapStyle(hotspot.category);
   const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
 
   if (useAdvancedMarker && AdvancedMarkerElement) {
     const content = document.createElement("button");
     content.className = "google-hotspot-marker";
     content.type = "button";
-    content.textContent = String(index + 1);
+    content.textContent = markerStyle.emoji;
     content.title = title;
+    content.dataset.issueCategory = markerStyle.category;
+    content.style.setProperty("--issue-color", markerStyle.color);
     content.addEventListener("click", onClick);
 
     const marker = new AdvancedMarkerElement({
@@ -2532,17 +2753,120 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
       content
     });
     marker.addEventListener("gmp-click", onClick);
-    return;
+    return marker;
   }
 
   const marker = new window.google.maps.Marker({
     map,
     position,
     title,
-    label: String(index + 1),
+    label: { text: markerStyle.emoji, fontSize: "17px" },
+    icon: {
+      path: window.google.maps.SymbolPath?.CIRCLE ?? 0,
+      scale: 18,
+      fillColor: markerStyle.color,
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 3
+    },
     optimized: true
   });
   marker.addListener("click", onClick);
+  return marker;
+}
+
+type MapOverlayObject = { setMap?: (map: unknown) => void; map?: unknown };
+
+function clearMapOverlays(objects: MapOverlayObject[]) {
+  objects.forEach((object) => {
+    if (typeof object.setMap === "function") object.setMap(null);
+    else if ("map" in object) object.map = null;
+  });
+  objects.length = 0;
+}
+
+function drawClusterOverlay(map: any, clusters: HotspotCluster[], onSelect: (projectId: string) => void): MapOverlayObject[] {
+  const objects: MapOverlayObject[] = [];
+  clusters.forEach((cluster) => {
+    const circle = new window.google.maps.Circle({
+      map,
+      center: cluster.centroid,
+      radius: Math.min(90000, 18000 + cluster.count * 9000),
+      fillColor: "#f97316",
+      fillOpacity: 0.22,
+      strokeColor: "#ea580c",
+      strokeOpacity: 0.85,
+      strokeWeight: 1.5,
+      clickable: true
+    });
+    circle.addListener("click", () => { if (cluster.projectIds[0]) onSelect(cluster.projectIds[0]); });
+    objects.push(circle);
+    const label = new window.google.maps.Marker({
+      map,
+      position: cluster.centroid,
+      title: `${cluster.label} · ${cluster.count} issues · score ${cluster.score}`,
+      label: { text: String(cluster.count), color: "#ffffff", fontSize: "12px", fontWeight: "700" },
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: "#ea580c",
+        fillOpacity: 0.95,
+        strokeColor: "#ffffff",
+        strokeWeight: 2
+      }
+    });
+    label.addListener("click", () => { if (cluster.projectIds[0]) onSelect(cluster.projectIds[0]); });
+    objects.push(label);
+  });
+  return objects;
+}
+
+// google.maps.visualization.HeatmapLayer was removed in Maps JS v3.65, so the
+// demand heatmap renders as layered intensity circles instead.
+function drawHeatmapOverlay(map: any, hotspots: MapHotspot[]): MapOverlayObject[] {
+  const heatColor = (intensity: number) => (intensity >= 85 ? "#ef4444" : intensity >= 65 ? "#f97316" : "#facc15");
+  return hotspots.flatMap((hotspot) => {
+    const center = { lat: hotspot.lat, lng: hotspot.lng };
+    const baseRadius = 14000 + hotspot.intensity * 500;
+    return [
+      new window.google.maps.Circle({
+        map,
+        center,
+        radius: baseRadius,
+        fillColor: heatColor(hotspot.intensity),
+        fillOpacity: 0.16,
+        strokeOpacity: 0,
+        clickable: false
+      }),
+      new window.google.maps.Circle({
+        map,
+        center,
+        radius: baseRadius * 0.45,
+        fillColor: heatColor(Math.min(100, hotspot.intensity + 15)),
+        fillOpacity: 0.34,
+        strokeOpacity: 0,
+        clickable: false
+      })
+    ];
+  });
+}
+
+function drawBoundaryOverlay(map: any, features: BoundaryFeature[], onSelect: (projectId: string) => void): MapOverlayObject[] {
+  return features.map((feature) => {
+    const [west, south, east, north] = feature.bbox;
+    const rectangle = new window.google.maps.Rectangle({
+      map,
+      bounds: { north, south, east, west },
+      fillColor: "#6366f1",
+      fillOpacity: 0.05,
+      strokeColor: "#6366f1",
+      strokeOpacity: 0.7,
+      strokeWeight: 1.2,
+      clickable: Boolean(feature.projectIds.length)
+    });
+    if (feature.projectIds.length) rectangle.addListener("click", () => onSelect(feature.projectIds[0]));
+    return rectangle;
+  });
 }
 
 function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
@@ -3816,12 +4140,15 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
   onSelect: (id: string) => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const markersRef = useRef<MapOverlayObject[]>([]);
+  const prevPointsRef = useRef("");
+  const fitDoneRef = useRef(false);
   const [ready, setReady] = useState(false);
   const indiaPoints = useMemo(() => points.filter(isWithinIndiaBounds), [points]);
-  const bandColor = (band: string) => (band === "High" ? "#ef4444" : band === "Medium" ? "#f59e0b" : "#22c55e");
 
   useEffect(() => {
-    if (!maps.enabled || !maps.apiKey || indiaPoints.length === 0 || !mapRef.current) {
+    if (!maps.enabled || !maps.apiKey || !mapRef.current) {
       setReady(false);
       return;
     }
@@ -3829,46 +4156,74 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
     loadGoogleMaps(maps.apiKey, maps.mapId)
       .then(() => {
         if (cancelled || !mapRef.current || !window.google?.maps) return;
-        const bounds = new window.google.maps.LatLngBounds();
-        indiaPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
         const map = new window.google.maps.Map(mapRef.current, {
-          center: indiaPoints[0],
-          zoom: indiaPoints.length > 1 ? 5 : 11,
+          center: { lat: 22.9, lng: 79.2 },
+          zoom: 5,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
           clickableIcons: false,
           gestureHandling: "greedy",
           ...indiaMapRestriction(),
-          ...(maps.mapId ? { mapId: maps.mapId } : {}),
-          styles: [
-            { featureType: "poi", stylers: [{ visibility: "off" }] },
-            { featureType: "transit", stylers: [{ visibility: "off" }] }
-          ]
+          ...(maps.mapId
+            ? { mapId: maps.mapId }
+            : {
+              styles: [
+                { featureType: "poi", stylers: [{ visibility: "off" }] },
+                { featureType: "transit", stylers: [{ visibility: "off" }] }
+              ]
+            })
         });
-        indiaPoints.forEach((p) => {
-          const marker = new window.google!.maps!.Marker!({
-            map,
-            position: { lat: p.lat, lng: p.lng },
-            title: `${p.ward} · ${p.category} · score ${p.score}`,
-            label: { text: String(p.score), color: "#fff", fontSize: "11px", fontWeight: "700" },
-            icon: {
-              path: window.google!.maps!.SymbolPath!.CIRCLE,
-              scale: p.projectId === selectedId ? 16 : 13,
-              fillColor: bandColor(p.band),
-              fillOpacity: 1,
-              strokeColor: "#fff",
-              strokeWeight: 2
-            }
-          }) as { addListener: (ev: string, cb: () => void) => void };
-          marker.addListener("click", () => onSelect(p.projectId));
-        });
-        if (indiaPoints.length > 1) map.fitBounds(bounds, 48);
+        mapInstanceRef.current = map;
+        fitDoneRef.current = false;
         setReady(true);
       })
       .catch(() => setReady(false));
-    return () => { cancelled = true; };
-  }, [maps.enabled, maps.apiKey, maps.mapId, indiaPoints, selectedId, onSelect]);
+    return () => {
+      cancelled = true;
+      mapInstanceRef.current = null;
+      markersRef.current = [];
+    };
+  }, [maps.enabled, maps.apiKey, maps.mapId]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!ready || !map || !window.google?.maps) return;
+    const pointsKey = indiaPoints.map((point) => point.projectId).join("|");
+    const pointsChanged = prevPointsRef.current !== pointsKey;
+    prevPointsRef.current = pointsKey;
+    clearMapOverlays(markersRef.current);
+    indiaPoints.forEach((p) => {
+      const markerStyle = issueMapStyle(p.category);
+      const marker = new window.google!.maps!.Marker!({
+        map,
+        position: { lat: p.lat, lng: p.lng },
+        title: `${p.ward} · ${p.category} · score ${p.score}`,
+        label: { text: markerStyle.emoji, color: "#fff", fontSize: "17px", fontWeight: "700" },
+        icon: {
+          path: window.google!.maps!.SymbolPath!.CIRCLE,
+          scale: p.projectId === selectedId ? 16 : 13,
+          fillColor: markerStyle.color,
+          fillOpacity: 1,
+          strokeColor: "#fff",
+          strokeWeight: 2
+        }
+      }) as MapOverlayObject & { addListener: (ev: string, cb: () => void) => void };
+      marker.addListener("click", () => onSelect(p.projectId));
+      markersRef.current.push(marker);
+    });
+    if ((!fitDoneRef.current || pointsChanged) && indiaPoints.length) {
+      if (indiaPoints.length > 1) {
+        const bounds = new window.google.maps.LatLngBounds();
+        indiaPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+        map.fitBounds(bounds, 48);
+      } else {
+        map.setCenter({ lat: indiaPoints[0].lat, lng: indiaPoints[0].lng });
+        map.setZoom(11);
+      }
+      fitDoneRef.current = true;
+    }
+  }, [ready, indiaPoints, selectedId, onSelect]);
 
   // When Google isn't configured/ready, fall back to the same live OpenStreetMap
   // tile map the main GIS page uses — real geography, no key required.
@@ -4455,14 +4810,41 @@ function CompareBars({ regions, metric, color, compact = false }: { regions: Com
   );
 }
 
+const trendLineColors = ["#1780ff", "#f97316", "#16a34a", "#8b5cf6", "#e11d48"];
+
 function TrendMini({ regions }: { regions: CompareRegion[] }) {
+  const months = ["Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+  const series = regions.map((region, index) => ({
+    region,
+    color: trendLineColors[index % trendLineColors.length],
+    values: Array.from({ length: 6 }, (_, month) => Math.max(10, Math.min(100, region.priority - 18 + month * 4 + index * 3)))
+  }));
+  const chartX = (month: number) => 40 + month * ((300 - 40) / 5);
+  const chartY = (value: number) => 116 - (value / 100) * 96;
   return (
     <div className="trend-mini">
-      {regions.map((region, index) => {
-        const values = Array.from({ length: 6 }, (_, month) => Math.max(10, region.priority - 18 + month * 4 + index * 3));
-        const points = values.map((value, month) => `${month * 48},${90 - value}`).join(" ");
-        return <svg key={region.id} viewBox="0 0 240 100"><polyline points={points} /><text x="0" y={96 - index * 12}>{region.name}</text></svg>;
-      })}
+      <svg viewBox="0 0 312 140" role="img" aria-label="Six month synchronized priority trend">
+        {[0, 25, 50, 75, 100].map((tick) => (
+          <g key={tick}>
+            <line className="grid" x1={40} x2={304} y1={chartY(tick)} y2={chartY(tick)} />
+            <text className="tick" x={34} y={chartY(tick) + 3} textAnchor="end">{tick}</text>
+          </g>
+        ))}
+        {months.map((month, index) => (
+          <text className="tick" key={month} x={chartX(index)} y={132} textAnchor="middle">{month}</text>
+        ))}
+        {series.map((entry) => (
+          <polyline key={entry.region.id} points={entry.values.map((value, month) => `${chartX(month)},${chartY(value)}`).join(" ")} style={{ stroke: entry.color }} />
+        ))}
+        {series.flatMap((entry) => entry.values.map((value, month) => (
+          <circle key={`${entry.region.id}-${month}`} cx={chartX(month)} cy={chartY(value)} r={2.6} style={{ fill: entry.color }} />
+        )))}
+      </svg>
+      <div className="trend-legend">
+        {series.map((entry) => (
+          <span key={entry.region.id}><i style={{ background: entry.color }} />{entry.region.name}</span>
+        ))}
+      </div>
     </div>
   );
 }
