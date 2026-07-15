@@ -309,6 +309,30 @@ const gisLayers = [
   { label: "Satellite Imagery", color: "#475569", active: false },
   { label: "Demand Heatmaps", color: "#dc2626", active: true }
 ];
+
+const issueMapCategories = [
+  { category: "Roads", filter: "Roads", emoji: "🛣️", color: "#dc2626" },
+  { category: "Water", filter: "Water Supply", emoji: "💧", color: "#0284c7" },
+  { category: "Health", filter: "Healthcare", emoji: "🏥", color: "#16a34a" },
+  { category: "Education", filter: "Education", emoji: "🎓", color: "#7c3aed" },
+  { category: "Sanitation", filter: "Sanitation", emoji: "🧹", color: "#0d9488" },
+  { category: "Power", filter: "Power", emoji: "⚡", color: "#ea580c" },
+  { category: "Digital Access", filter: "Digital Access", emoji: "📶", color: "#db2777" },
+  { category: "Employment", filter: "Employment", emoji: "💼", color: "#a16207" }
+] as const;
+
+const fallbackIssueMapStyle = { category: "Other", filter: "Other", emoji: "📍", color: "#64748b" } as const;
+
+function issueMapStyle(category: string) {
+  const normalized = normalizedIssueFilter(category);
+  return issueMapCategories.find((item) => normalizedIssueFilter(item.category) === normalized) ?? fallbackIssueMapStyle;
+}
+
+function issueMarkerIconUrl(category: string) {
+  const style = issueMapStyle(category);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="${style.color}" stroke="white" stroke-width="3"/><text x="22" y="28" text-anchor="middle" font-size="20">${style.emoji}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 type MapLoadState = "idle" | "loading" | "ready" | "fallback";
 type TileFallbackState = {
   zoom: number;
@@ -1775,10 +1799,12 @@ function IssueMap({
           if (window.mappls.Marker) {
             hotspots.forEach((hotspot, index) => {
               try {
+                const markerStyle = issueMapStyle(hotspot.category);
                 new window.mappls!.Marker!({
                   map,
                   position: { lat: hotspot.lat, lng: hotspot.lng },
-                  title: `${index + 1}. ${hotspot.category} - ${hotspot.ward}`,
+                  title: `${markerStyle.emoji} ${index + 1}. ${hotspot.category} - ${hotspot.ward}`,
+                  icon_url: issueMarkerIconUrl(hotspot.category),
                   draggable: false
                 });
               } catch {
@@ -1901,12 +1927,7 @@ function IssueMap({
               setGisAction(`${event.currentTarget.value} issue filter applied.`);
             }}>
               <option>All issue types</option>
-              <option>Roads</option>
-              <option>Healthcare</option>
-              <option>Water Supply</option>
-              <option>Education</option>
-              <option>Sanitation</option>
-              <option>Power</option>
+              {issueMapCategories.map((item) => <option key={item.category}>{item.filter}</option>)}
             </select>
             <select aria-label="GIS confidence filter" value={confidenceFilter} onChange={(event) => {
               setConfidenceFilter(event.currentTarget.value);
@@ -1949,14 +1970,34 @@ function IssueMap({
             </div>
             <div className="gis-scale">5 km</div>
           </div>
+          <div className="issue-map-tabs" role="tablist" aria-label="Issue type map tabs">
+            <button className={issueFilter === "All issue types" ? "active" : ""} role="tab" aria-selected={issueFilter === "All issue types"} onClick={() => setIssueFilter("All issue types")} type="button">
+              <span>🗺️</span><strong>All issues</strong><small>{allHotspots.length}</small>
+            </button>
+            {issueMapCategories.map((item) => {
+              const count = allHotspots.filter((hotspot) => normalizedIssueFilter(hotspot.category) === normalizedIssueFilter(item.category)).length;
+              const active = normalizedIssueFilter(issueFilter) === normalizedIssueFilter(item.filter);
+              return (
+                <button className={active ? "active" : ""} role="tab" aria-selected={active} key={item.category} onClick={() => {
+                  setIssueFilter(item.filter);
+                  setGisAction(`${item.emoji} ${item.category} hotspots selected; ${count} signals visible before confidence and timeline filters.`);
+                }} style={{ ["--issue-color" as string]: item.color }} type="button">
+                  <span>{item.emoji}</span><strong>{item.category}</strong><small>{count}</small>
+                </button>
+              );
+            })}
+          </div>
           <div className="hotspot-list" aria-label="Map hotspot details">
-            {hotspots.map((hotspot, index) => (
-              <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)}>
-                <span>{index + 1}</span>
-                <strong>{hotspot.category}</strong>
-                <small>{hotspot.ward} · score {hotspot.intensity}</small>
-              </button>
-            ))}
+            {hotspots.map((hotspot, index) => {
+              const markerStyle = issueMapStyle(hotspot.category);
+              return (
+                <button className={`hotspot-row ${hotspot.projectId === selectedProjectId ? "selected" : ""}`} key={`${hotspot.projectId}-${hotspot.lat}-${hotspot.lng}`} onClick={() => selectProject(hotspot.projectId)} style={{ ["--issue-color" as string]: markerStyle.color }}>
+                  <span aria-hidden="true">{markerStyle.emoji}</span>
+                  <strong>{hotspot.category}</strong>
+                  <small>#{index + 1} · {hotspot.ward} · score {hotspot.intensity}</small>
+                </button>
+              );
+            })}
             {!hotspots.length ? <p className="empty-state">No hotspots match the selected GIS layers and filters.</p> : null}
           </div>
         </section>
@@ -2177,6 +2218,7 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
         <div className="osm-map-tint" aria-hidden="true" />
         {indiaHotspots.map((hotspot, index) => {
           const position = tileProjection(hotspot.lat, hotspot.lng, tileMap);
+          const markerStyle = issueMapStyle(hotspot.category);
           return (
             <button
               className={`hotspot ${hotspot.projectId === selectedProjectId ? "selected" : ""}`}
@@ -2187,12 +2229,14 @@ function FallbackSignalMap({ hotspots, selectedProjectId, selectProject }: { hot
                 width: `${44 + hotspot.intensity / 4}px`,
                 height: `${44 + hotspot.intensity / 4}px`,
                 ["--marker-offset-x" as string]: `${((index % 3) - 1) * 10}px`,
-                ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`
+                ["--marker-offset-y" as string]: `${(Math.floor(index / 3) % 3 - 1) * 8}px`,
+                ["--issue-color" as string]: markerStyle.color
               }}
               onClick={(e) => { if (Math.abs(drag.x) < 5 && Math.abs(drag.y) < 5) selectProject(hotspot.projectId); e.stopPropagation(); }}
               title={`${hotspot.category} in ${hotspot.ward}`}
             >
-              {index + 1}
+              <span aria-hidden="true">{markerStyle.emoji}</span>
+              <small>{index + 1}</small>
             </button>
           );
         })}
@@ -2519,14 +2563,17 @@ function mapStatusText(state: MapLoadState, provider?: ClientConfig["maps"]["pro
 function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, index: number, useAdvancedMarker: boolean, onClick: () => void) {
   const position = { lat: hotspot.lat, lng: hotspot.lng };
   const title = `${hotspot.category} in ${hotspot.ward}`;
+  const markerStyle = issueMapStyle(hotspot.category);
   const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
 
   if (useAdvancedMarker && AdvancedMarkerElement) {
     const content = document.createElement("button");
     content.className = "google-hotspot-marker";
     content.type = "button";
-    content.textContent = String(index + 1);
+    content.textContent = markerStyle.emoji;
     content.title = title;
+    content.dataset.issueCategory = markerStyle.category;
+    content.style.setProperty("--issue-color", markerStyle.color);
     content.addEventListener("click", onClick);
 
     const marker = new AdvancedMarkerElement({
@@ -2543,7 +2590,15 @@ function addHotspotMarker(map: any, hotspot: Hotspot & { projectId: string }, in
     map,
     position,
     title,
-    label: String(index + 1),
+    label: { text: markerStyle.emoji, fontSize: "17px" },
+    icon: {
+      path: window.google.maps.SymbolPath?.CIRCLE ?? 0,
+      scale: 18,
+      fillColor: markerStyle.color,
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 3
+    },
     optimized: true
   });
   marker.addListener("click", onClick);
@@ -3822,7 +3877,6 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
   const indiaPoints = useMemo(() => points.filter(isWithinIndiaBounds), [points]);
-  const bandColor = (band: string) => (band === "High" ? "#ef4444" : band === "Medium" ? "#f59e0b" : "#22c55e");
 
   useEffect(() => {
     if (!maps.enabled || !maps.apiKey || indiaPoints.length === 0 || !mapRef.current) {
@@ -3851,15 +3905,16 @@ function RecommendationMap({ maps, points, selectedId, onSelect }: {
           ]
         });
         indiaPoints.forEach((p) => {
+          const markerStyle = issueMapStyle(p.category);
           const marker = new window.google!.maps!.Marker!({
             map,
             position: { lat: p.lat, lng: p.lng },
             title: `${p.ward} · ${p.category} · score ${p.score}`,
-            label: { text: String(p.score), color: "#fff", fontSize: "11px", fontWeight: "700" },
+            label: { text: markerStyle.emoji, color: "#fff", fontSize: "17px", fontWeight: "700" },
             icon: {
               path: window.google!.maps!.SymbolPath!.CIRCLE,
               scale: p.projectId === selectedId ? 16 : 13,
-              fillColor: bandColor(p.band),
+              fillColor: markerStyle.color,
               fillOpacity: 1,
               strokeColor: "#fff",
               strokeWeight: 2

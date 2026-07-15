@@ -3060,7 +3060,7 @@ meter::-moz-meter-bar {
   height: 34px;
   border: 2px solid #fff;
   border-radius: 999px;
-  background: var(--saffron);
+  background: var(--issue-color, var(--saffron));
   color: #fff;
   font-size: 13px;
   font-weight: 800;
@@ -3070,7 +3070,8 @@ meter::-moz-meter-bar {
 }
 
 .google-hotspot-marker:hover {
-  background: #c2410c;
+  filter: brightness(0.86);
+  transform: scale(1.12);
 }
 
 .fallback-map {
@@ -3162,6 +3163,47 @@ meter::-moz-meter-bar {
   font-weight: 900;
 }
 
+.issue-map-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 1px 5px;
+  scrollbar-width: thin;
+}
+
+.issue-map-tabs button {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 7px;
+  min-width: max-content;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink-2);
+  padding: 8px 11px;
+  text-align: left;
+}
+
+.issue-map-tabs button > span {
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--issue-color, #2563eb);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--issue-color, #2563eb) 45%, transparent);
+  font-size: 16px;
+}
+
+.issue-map-tabs strong { font-size: 11.5px; }
+.issue-map-tabs small { color: var(--muted); font-size: 10px; }
+.issue-map-tabs button:hover,
+.issue-map-tabs button.active { border-color: var(--issue-color, #2563eb); background: color-mix(in srgb, var(--issue-color, #2563eb) 8%, white); color: var(--issue-color, #2563eb); }
+
 .hotspot-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -3244,13 +3286,13 @@ meter::-moz-meter-bar {
 }
 
 .hotspot-row:hover {
-  border-color: var(--saffron);
+  border-color: var(--issue-color, var(--saffron));
   box-shadow: var(--shadow-sm);
 }
 
 .hotspot-row.selected {
-  border-color: var(--saffron);
-  box-shadow: inset 3px 0 0 var(--saffron), var(--shadow-sm);
+  border-color: var(--issue-color, var(--saffron));
+  box-shadow: inset 3px 0 0 var(--issue-color, var(--saffron)), var(--shadow-sm);
 }
 
 .hotspot-row span {
@@ -3260,8 +3302,9 @@ meter::-moz-meter-bar {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background: var(--saffron-soft);
-  color: #c2410c;
+  background: color-mix(in srgb, var(--issue-color, var(--saffron)) 14%, white);
+  color: var(--issue-color, #c2410c);
+  font-size: 16px;
   font-weight: 800;
 }
 
@@ -3425,13 +3468,16 @@ meter::-moz-meter-bar {
   transform: translate(-50%, -50%) translate(var(--marker-offset-x, 0), var(--marker-offset-y, 0));
   border-radius: 50%;
   border: 2px solid #fff;
-  background: radial-gradient(circle at 35% 30%, #ff9a4d, var(--saffron));
+  background: var(--issue-color, var(--saffron));
   color: #fff;
   font-weight: 800;
   font-size: 13px;
   box-shadow: none;
   transition: transform 0.16s ease;
 }
+
+.hotspot > span { position: relative; z-index: 1; font-size: 18px; line-height: 1; }
+.hotspot > small { position: absolute; right: -5px; bottom: -5px; z-index: 2; display: grid; place-items: center; min-width: 17px; height: 17px; border: 2px solid #fff; border-radius: 999px; background: #0f172a; color: #fff; font-size: 8px; line-height: 1; }
 
 .state-onboarding-panel {
   display: grid;
@@ -3529,7 +3575,7 @@ meter::-moz-meter-bar {
   position: absolute;
   inset: -8px;
   border-radius: 50%;
-  border: 2px solid rgba(245, 121, 33, 0.45);
+  border: 2px solid color-mix(in srgb, var(--issue-color, var(--saffron)) 52%, transparent);
   animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 .hotspot:hover {
@@ -3538,7 +3584,7 @@ meter::-moz-meter-bar {
 }
 
 .hotspot.selected {
-  outline: 4px solid rgba(245, 121, 33, 0.25);
+  outline: 4px solid color-mix(in srgb, var(--issue-color, var(--saffron)) 30%, transparent);
   z-index: 3;
 }
 
