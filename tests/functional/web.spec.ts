@@ -422,6 +422,40 @@ test.describe("MP/admin web functional flow", () => {
     expect(markerStats.legacyMarkers).toBe(0);
     expect(markerStats.scripts[0]).toContain("libraries=marker");
   });
+
+  test("admin creates an MP user whose homepage is locked to the configured constituency", async ({ page }) => {
+    await loginIfNeeded(page);
+    await page.goto("/#settings");
+    await expect(page.getByLabel("Dashboard user management")).toBeVisible();
+    await page.getByLabel("Dashboard user full name").fill("Lucknow MP Dashboard");
+    await page.getByLabel("Dashboard user username").fill("mp.lucknow.browser");
+    await page.getByLabel("Dashboard user temporary password").fill("BrowserPass123!");
+    await page.getByLabel("Dashboard user role").selectOption("mp");
+    await page.getByLabel("Dashboard user state").selectOption("Uttar Pradesh");
+    await page.getByLabel("Dashboard user district").selectOption("Lucknow");
+    await page.getByLabel("Dashboard user constituency").selectOption("mp-up-lucknow");
+    await page.getByRole("checkbox", { name: /Update projects/ }).uncheck();
+    await page.getByRole("button", { name: "Create dashboard user" }).click();
+    await expect(page.getByRole("status")).toContainText("can now sign in");
+
+    await page.getByRole("button", { name: "Logout" }).click();
+    await page.getByLabel("Email or Mobile Number").fill("mp.lucknow.browser");
+    await page.getByLabel("Password", { exact: true }).fill("BrowserPass123!");
+    await page.getByRole("button", { name: "Sign In" }).click();
+
+    const accessBanner = page.getByLabel("Dashboard access scope");
+    await expect(accessBanner).toContainText("Lucknow MP Dashboard");
+    await expect(accessBanner).toContainText("Dashboard locked to MP Lucknow · Lucknow · Uttar Pradesh");
+    await expect(page.getByLabel("Demo data controls")).toHaveCount(0);
+    await expect(page.getByLabel("JanVaani navigation").getByRole("button", { name: "Settings" })).toHaveCount(0);
+
+    await page.goto("/#priorities");
+    await expect(page.getByLabel("Configured dashboard area")).toContainText("MP Lucknow");
+    await expect(page.getByRole("button", { name: "All India" })).toHaveCount(0);
+    await expect(page.getByLabel("State", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".queue-row").first()).toBeVisible();
+    await expect(page.locator(".queue-row").first()).toContainText(/Aminabad Basti|Gomti Nagar Extension/);
+  });
 });
 
 async function installGoogleMapsMock(page: import("@playwright/test").Page) {

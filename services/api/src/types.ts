@@ -1,6 +1,7 @@
 export type Channel = "text" | "voice" | "photo" | "video" | "whatsapp";
 export type ProjectStatus = "review" | "shortlist" | "approved";
 export type UserRole = "citizen" | "mp" | "ward_staff" | "district_admin" | "state_admin";
+export type DashboardPermission = "dashboard:view" | "issues:view" | "projects:update" | "users:manage";
 
 export type Location = {
   state: string;
@@ -37,6 +38,10 @@ export type AuthUser = {
   passwordHash: string;
   role: UserRole;
   displayName: string;
+  permissions: DashboardPermission[];
+  state?: string;
+  district?: string;
+  constituencyId?: string;
   createdAt: string;
 };
 

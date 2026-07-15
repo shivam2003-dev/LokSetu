@@ -58,6 +58,27 @@ const janVaaniLogo = "/images/JanVaniRobo.png";
 type Page = "overview" | "priorities" | "pulse" | "map" | "signals" | "explorer" | "copilot" | "knowledge" | "recommendations" | "projects" | "reports" | "compare" | "settings";
 
 type Scope = "local" | "mp" | "global";
+type DashboardPermission = "dashboard:view" | "issues:view" | "projects:update" | "users:manage";
+
+type SessionUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: "citizen" | "mp" | "ward_staff" | "district_admin" | "state_admin";
+  permissions: DashboardPermission[];
+  state?: string;
+  district?: string;
+  constituencyId?: string;
+  constituencyName?: string;
+};
+
+type SessionResponse = {
+  user: SessionUser;
+  defaultScope: Scope;
+  allowedScopes: Scope[];
+  area: { state?: string; district?: string; constituencyId?: string; constituencyName?: string };
+  restricted: boolean;
+};
 
 type RankedProject = {
   id: string;
@@ -95,6 +116,7 @@ type DashboardResponse = {
   totals: { submissions: number; wards: number; languages: number; botRisk: "low" | "medium" | "high" };
   projects: RankedProject[];
   hotspots: Array<{ ward: string; category: string; intensity: number; lat: number; lng: number }>;
+  access?: SessionUser;
 };
 
 type RegionResponse = {
@@ -492,6 +514,20 @@ const fallbackContext: ContextResponse = {
   wardsByDistrict: { [`${fallbackProject.state}::${fallbackProject.district}`]: [fallbackProject.ward] }
 };
 
+const fallbackSession: SessionResponse = {
+  user: {
+    id: "password-access",
+    username: "password-access",
+    displayName: "Platform Admin",
+    role: "state_admin",
+    permissions: ["dashboard:view", "issues:view", "projects:update", "users:manage"]
+  },
+  defaultScope: "global",
+  allowedScopes: ["local", "mp", "global"],
+  area: {},
+  restricted: false
+};
+
 const fallbackClientConfig: ClientConfig = {
   dataMode: "memory",
   maps: {
@@ -569,6 +605,23 @@ async function fetchDashboard(filters: { scope: Scope; state: string; district: 
   if (filters.scope === "mp") params.set("mpId", filters.mpId);
   if (filters.q.trim()) params.set("q", filters.q.trim());
   return requestJson<DashboardResponse>(`/api/priorities?${params}`);
+}
+
+function filtersForSession(
+  session: SessionResponse,
+  filters: { scope: Scope; state: string; district: string; ward: string; mpId: string; q: string }
+) {
+  if (!session.restricted) return filters;
+  if (session.area.constituencyId) {
+    return { ...filters, scope: "mp" as const, mpId: session.area.constituencyId };
+  }
+  return {
+    ...filters,
+    scope: "local" as const,
+    state: session.area.state ?? filters.state,
+    district: session.area.district ?? "",
+    ward: ""
+  };
 }
 
 export default function App() {
@@ -672,11 +725,13 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [notice, setNotice] = useState("Connecting");
   const [refreshing, setRefreshing] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState(fallbackProject.id);
+  const [session, setSession] = useState<SessionResponse>(fallbackSession);
 
   const filters = useMemo(() => ({ scope, state, district, ward, mpId, q: query }), [scope, state, district, ward, mpId, query]);
   const activeProject = dashboard.projects.find((project) => project.id === activeProjectId) ?? dashboard.projects[0] ?? fallbackProject;
   const effectiveCitizenAppUrl = clientConfig.citizenAppUrl?.trim() || citizenAppUrl;
   const showControlStrip = page === "priorities" || page === "map" || page === "recommendations" || page === "projects";
+  const canManageUsers = session.user.permissions.includes("users:manage");
 
   useEffect(() => {
     refreshAll();
@@ -727,11 +782,13 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   async function refreshAll() {
     setRefreshing(true);
     try {
+      const nextSession = await requestJson<SessionResponse>("/api/session");
+      const nextFilters = filtersForSession(nextSession, filters);
       const [nextConfig, nextDemoData, nextContext, nextDashboard, nextRegions, nextCopilot, nextRagStatus, nextBoundaries, nextClusters] = await Promise.all([
         requestJson<ClientConfig>("/api/client-config"),
         getJson<DemoDataStatus>("/api/demo-data", fallbackDemoDataStatus),
         requestJson<ContextResponse>("/api/context"),
-        fetchDashboard(filters),
+        fetchDashboard(nextFilters),
         getJson<RegionResponse>("/api/regions", {
           coverage: { statesReady: 28, unionTerritoriesReady: 8, lokSabhaConstituenciesTarget: 543, districtsTarget: 700, wardModel: "ward and panchayat" },
           onboardingStates: []
@@ -741,6 +798,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         getJson<MapBoundaryResponse>("/api/maps/boundaries", fallbackMapBoundaries),
         getJson<MapClusterResponse>("/api/maps/clusters?zoom=5", fallbackMapClusters)
       ]);
+      setSession(nextSession);
+      if (nextSession.defaultScope !== scope) setScope(nextSession.defaultScope);
+      if (nextSession.area.state && nextSession.area.state !== state) setState(nextSession.area.state);
+      if (nextSession.area.district && nextSession.area.district !== district) setDistrict(nextSession.area.district);
+      if (nextSession.area.constituencyId && nextSession.area.constituencyId !== mpId) setMpId(nextSession.area.constituencyId);
       setClientConfig(mergeClientConfig(nextConfig));
       setDemoData(nextDemoData);
       setContext(nextContext);
@@ -769,7 +831,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   async function applyFilters() {
     try {
-      const next = await fetchDashboard(filters);
+      const next = await fetchDashboard(filtersForSession(session, filters));
       setDashboard(next);
       setActiveProjectId((current) => (next.projects.some((project) => project.id === current) ? current : next.projects[0]?.id ?? fallbackProject.id));
       setApiConnected(true);
@@ -866,7 +928,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         <nav className="nav-scroll">
           <div className="nav-section">
             <span><T>Core workflow</T></span>
-            {navItems.map((item) => {
+            {navItems.filter((item) => item.page !== "settings" || canManageUsers).map((item) => {
               const Icon = item.icon;
               return (
                 <button className={`nav-item rich ${activeNavIdByPage[page] === item.id ? "active" : ""}`} key={item.id} onClick={() => setPage(item.page)}>
@@ -912,12 +974,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
               <Star size={16} />
               <T>Tour</T>
             </button>
-            <div className={`demo-data-toggle ${demoData.enabled ? "enabled" : "disabled"}`} aria-label="Demo data controls">
+            {canManageUsers ? <div className={`demo-data-toggle ${demoData.enabled ? "enabled" : "disabled"}`} aria-label="Demo data controls">
               <span>{demoData.label}</span>
               <small>{formatCount(demoData.visibleRows)} visible / {formatCount(demoData.demoRows)} demo</small>
               <button onClick={() => updateDemoData("load")} type="button"><T>Load local demo data</T></button>
               <button onClick={() => updateDemoData("disable")} type="button"><T>Disable demo data</T></button>
-            </div>
+            </div> : null}
             <button className="icon-button" title={t("Refresh data")} onClick={refreshAll} disabled={refreshing} type="button">
               <RefreshCw className={refreshing ? "spin" : ""} size={18} />
             </button>
@@ -925,8 +987,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           </div>
         </header>
 
+        <DashboardAccessBanner session={session} />
+
         {showControlStrip ? (
-          <ControlStrip
+          session.restricted ? <RestrictedControlStrip session={session} query={query} setQuery={setQuery} apply={applyFilters} /> : <ControlStrip
             context={context}
             scope={scope}
             setScope={setScope}
@@ -958,7 +1022,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "projects" ? <ProjectsManagementPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
         {page === "reports" ? <ReportsPage dashboard={dashboard} maps={clientConfig.maps} /> : null}
         {page === "compare" ? <ComparePage /> : null}
-        {page === "settings" ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} /> : null}
+        {page === "settings" && canManageUsers ? <SettingsPage clientConfig={clientConfig} ragStatus={ragStatus} demoData={demoData} context={context} session={session} /> : null}
       </section>
       {tourOpen ? (
         <TourOverlay
@@ -1161,6 +1225,47 @@ function LoginPage({ onLogin }: { onLogin: (token: string) => void }) {
         <span><Building2 size={17} /> Government Grade Security</span>
       </footer>
     </main>
+  );
+}
+
+function DashboardAccessBanner({ session }: { session: SessionResponse }) {
+  const area = [session.area.constituencyName, session.area.district, session.area.state].filter(Boolean).join(" · ");
+  return (
+    <section className={`dashboard-access-banner ${session.restricted ? "restricted" : "global"}`} aria-label="Dashboard access scope">
+      <span><ShieldCheck size={17} /></span>
+      <div>
+        <strong>{session.user.displayName}</strong>
+        <p>{session.restricted ? `Dashboard locked to ${area}` : "Authorized for the all-India dashboard"}</p>
+      </div>
+      <mark>{session.user.role.replaceAll("_", " ")}</mark>
+      <small>{session.user.permissions.map((permission) => permission.split(":")[0]).join(" · ")}</small>
+    </section>
+  );
+}
+
+function RestrictedControlStrip({
+  session,
+  query,
+  setQuery,
+  apply
+}: {
+  session: SessionResponse;
+  query: string;
+  setQuery: (value: string) => void;
+  apply: () => void;
+}) {
+  return (
+    <section className="control-strip restricted-control-strip" aria-label="Configured dashboard area">
+      <span className="locked-scope"><Lock size={15} /> Configured area</span>
+      <strong>{session.area.constituencyName ?? "All constituencies"}</strong>
+      <span>{session.area.district}</span>
+      <span>{session.area.state}</span>
+      <span className="search-box">
+        <Search size={16} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search issues in your area" />
+      </span>
+      <button className="primary" onClick={apply}>Search</button>
+    </section>
   );
 }
 
@@ -4351,7 +4456,7 @@ const indiaAdminDistricts: Record<string, string[]> = {
   "Dadra and Nagar Haveli and Daman and Diu": ["Daman", "Diu", "Dadra and Nagar Haveli"]
 };
 
-function SettingsPage({ clientConfig, ragStatus, demoData, context }: { clientConfig: ClientConfig; ragStatus: RagStatusResponse | null; demoData: DemoDataStatus; context: ContextResponse }) {
+function SettingsPage({ clientConfig, ragStatus, demoData, context, session }: { clientConfig: ClientConfig; ragStatus: RagStatusResponse | null; demoData: DemoDataStatus; context: ContextResponse; session: SessionResponse }) {
   const adminDistricts = useMemo(() => {
     const merged = { ...indiaAdminDistricts };
     for (const [state, districts] of Object.entries(context.districtsByState)) {
@@ -4410,12 +4515,14 @@ function SettingsPage({ clientConfig, ragStatus, demoData, context }: { clientCo
         </div>
       </section>
 
+      <DashboardUserManagement context={context} />
+
       <section className="settings-grid">
         <section className="panel settings-card">
           <PanelTitle title="Profile" icon={Users} />
-          <label>Name<input value="Shivam Kumar" readOnly /></label>
-          <label>Email<input value="admin@janvaani.local" readOnly /></label>
-          <label>Role<select defaultValue="MP Admin">{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+          <label>Name<input value={session.user.displayName} readOnly /></label>
+          <label>Username<input value={session.user.username} readOnly /></label>
+          <label>Role<input value={session.user.role.replaceAll("_", " ")} readOnly /></label>
         </section>
 
         <section className="panel settings-card">
@@ -4527,6 +4634,140 @@ function SettingsPage({ clientConfig, ragStatus, demoData, context }: { clientCo
           ))}
         </div>
       </section>
+    </section>
+  );
+}
+
+const dashboardPermissionOptions: Array<{ id: DashboardPermission; label: string; detail: string }> = [
+  { id: "dashboard:view", label: "View dashboard", detail: "Open the configured dashboard and summary cards." },
+  { id: "issues:view", label: "View issues", detail: "Read issue queues, maps, reports, and evidence." },
+  { id: "projects:update", label: "Update projects", detail: "Shortlist, approve, or return projects for review." },
+  { id: "users:manage", label: "Manage users", detail: "Create users within the administrator's own geography." }
+];
+
+function defaultPermissionsForDashboardRole(role: SessionUser["role"]): DashboardPermission[] {
+  if (role === "state_admin" || role === "district_admin") return ["dashboard:view", "issues:view", "projects:update", "users:manage"];
+  if (role === "mp") return ["dashboard:view", "issues:view", "projects:update"];
+  return ["dashboard:view", "issues:view"];
+}
+
+function DashboardUserManagement({ context }: { context: ContextResponse }) {
+  const [role, setRole] = useState<SessionUser["role"]>("mp");
+  const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [state, setState] = useState(context.states[0] ?? "Delhi");
+  const districts = context.districtsByState[state] ?? [];
+  const [district, setDistrict] = useState(districts[0] ?? "");
+  const constituencies = context.mps.filter((mp) => mp.state === state && mp.district === district);
+  const [constituencyId, setConstituencyId] = useState(constituencies[0]?.id ?? "");
+  const [permissions, setPermissions] = useState<DashboardPermission[]>(defaultPermissionsForDashboardRole("mp"));
+  const [status, setStatus] = useState<{ type: "idle" | "busy" | "success" | "error"; message: string }>({ type: "idle", message: "" });
+
+  useEffect(() => {
+    if (!districts.includes(district)) setDistrict(districts[0] ?? "");
+  }, [districts, district]);
+
+  useEffect(() => {
+    const options = context.mps.filter((mp) => mp.state === state && mp.district === district);
+    if (!options.some((mp) => mp.id === constituencyId)) setConstituencyId(options[0]?.id ?? "");
+  }, [context.mps, state, district, constituencyId]);
+
+  async function createUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus({ type: "busy", message: "Creating scoped dashboard user…" });
+    try {
+      const response = await apiFetch("/api/admin/users", {
+        method: "POST",
+        body: JSON.stringify({
+          role,
+          displayName,
+          username,
+          password,
+          state,
+          district,
+          constituencyId: constituencyId || undefined,
+          permissions
+        })
+      });
+      const payload = await response.json() as { error?: string | { formErrors?: string[] }; user?: SessionUser };
+      if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : payload.error?.formErrors?.join(", ") || "User creation failed");
+      setStatus({
+        type: "success",
+        message: `${payload.user?.displayName ?? displayName} can now sign in as ${payload.user?.username ?? username}; access is locked to ${payload.user?.constituencyName ?? district}, ${state}.`
+      });
+      setDisplayName("");
+      setUsername("");
+      setPassword("");
+    } catch (error) {
+      setStatus({ type: "error", message: error instanceof Error ? error.message : "User creation failed" });
+    }
+  }
+
+  function changeRole(nextRole: SessionUser["role"]) {
+    setRole(nextRole);
+    setPermissions(defaultPermissionsForDashboardRole(nextRole));
+  }
+
+  function togglePermission(permission: DashboardPermission, enabled: boolean) {
+    setPermissions((current) => enabled ? [...new Set([...current, permission])] : current.filter((item) => item !== permission));
+  }
+
+  return (
+    <section className="panel dashboard-user-admin" aria-label="Dashboard user management">
+      <div className="dashboard-user-admin-copy">
+        <p className="eyebrow">Access management</p>
+        <h3>Create a geographically scoped dashboard user</h3>
+        <p>The API enforces this assignment on every dashboard request. Changing browser filters cannot expose another constituency, district, or state.</p>
+      </div>
+      <form onSubmit={createUser}>
+        <div className="dashboard-user-fields">
+          <label>Full name<input aria-label="Dashboard user full name" required minLength={2} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
+          <label>Username<input aria-label="Dashboard user username" required minLength={3} autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+          <label>Temporary password<input aria-label="Dashboard user temporary password" required minLength={8} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <label>Role
+            <select aria-label="Dashboard user role" value={role} onChange={(event) => changeRole(event.target.value as SessionUser["role"])}>
+              <option value="mp">MP</option>
+              <option value="ward_staff">Ward staff</option>
+              <option value="district_admin">District admin</option>
+              <option value="state_admin">State admin</option>
+            </select>
+          </label>
+          <label>State
+            <select aria-label="Dashboard user state" value={state} onChange={(event) => setState(event.target.value)}>
+              {context.states.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>District
+            <select aria-label="Dashboard user district" value={district} onChange={(event) => setDistrict(event.target.value)}>
+              {districts.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>Constituency
+            <select aria-label="Dashboard user constituency" required={role === "mp"} value={constituencyId} onChange={(event) => setConstituencyId(event.target.value)}>
+              {role !== "mp" ? <option value="">All constituencies in district</option> : null}
+              {constituencies.map((mp) => <option value={mp.id} key={mp.id}>{mp.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <fieldset className="dashboard-permissions">
+          <legend>Permissions</legend>
+          {dashboardPermissionOptions.map((permission) => (
+            <label key={permission.id}>
+              <input
+                type="checkbox"
+                checked={permissions.includes(permission.id)}
+                onChange={(event) => togglePermission(permission.id, event.target.checked)}
+              />
+              <span><strong>{permission.label}</strong><small>{permission.detail}</small></span>
+            </label>
+          ))}
+        </fieldset>
+        {status.message ? <div className={`dashboard-user-status ${status.type}`} role="status">{status.message}</div> : null}
+        <button className="primary" disabled={status.type === "busy" || permissions.length === 0} type="submit">
+          <Users size={16} /> {status.type === "busy" ? "Creating user…" : "Create dashboard user"}
+        </button>
+      </form>
     </section>
   );
 }

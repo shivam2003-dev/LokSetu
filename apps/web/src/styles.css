@@ -9805,6 +9805,16 @@ button.problem-row.selected {
 }
 
 .settings-page { display: grid; gap: 16px; min-width: 0; }
+.dashboard-access-banner { display: flex; align-items: center; gap: 10px; margin: 12px 18px 0; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; padding: 10px 12px; color: #1e3a8a; }
+.dashboard-access-banner.restricted { border-color: #c4b5fd; background: #f5f3ff; color: #4c1d95; }
+.dashboard-access-banner > span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: #fff; }
+.dashboard-access-banner div { min-width: 0; flex: 1; }
+.dashboard-access-banner strong { display: block; color: var(--ink); font-size: 12px; }
+.dashboard-access-banner p { margin: 2px 0 0; font-size: 11px; font-weight: 700; }
+.dashboard-access-banner mark { border-radius: 999px; background: #fff; color: inherit; padding: 5px 8px; font-size: 10px; font-weight: 850; text-transform: capitalize; }
+.dashboard-access-banner small { color: var(--muted); font-size: 10px; font-weight: 750; }
+.restricted-control-strip .locked-scope { display: inline-flex; align-items: center; gap: 5px; color: #5b21b6; font-size: 11px; font-weight: 850; }
+.restricted-control-strip > strong, .restricted-control-strip > span:not(.search-box):not(.locked-scope) { white-space: nowrap; color: var(--ink-2); font-size: 11px; }
 .settings-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 0.95fr); gap: 22px; align-items: center; padding: 22px; }
 .settings-hero h3 { margin: 0; font-family: var(--font-display); font-size: 28px; font-weight: 850; }
 .settings-hero p { margin: 6px 0 0; color: var(--muted); line-height: 1.55; }
@@ -9817,6 +9827,25 @@ button.problem-row.selected {
 .settings-card input, .settings-card select { width: 100%; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; color: var(--ink); padding: 0 10px; font-size: 12.5px; font-weight: 700; }
 .settings-card label:has(input[type="checkbox"]), .settings-wide label:has(input[type="checkbox"]) { grid-template-columns: 16px minmax(0, 1fr); align-items: center; }
 .settings-card input[type="checkbox"], .settings-wide input[type="checkbox"] { width: 14px; height: 14px; accent-color: #1780ff; }
+.dashboard-user-admin { display: grid; grid-template-columns: minmax(240px, 0.6fr) minmax(0, 1.4fr); gap: 22px; padding: 20px; }
+.dashboard-user-admin-copy h3 { margin: 5px 0 8px; font-family: var(--font-display); font-size: 22px; }
+.dashboard-user-admin-copy p:last-child { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.dashboard-user-admin form { display: grid; gap: 14px; }
+.dashboard-user-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.dashboard-user-fields label { display: grid; gap: 6px; color: var(--ink-2); font-size: 11px; font-weight: 800; }
+.dashboard-user-fields input, .dashboard-user-fields select { width: 100%; min-width: 0; height: 39px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 10px; font-size: 12px; font-weight: 700; }
+.dashboard-permissions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.dashboard-permissions legend { padding: 0 5px; color: var(--ink); font-size: 11px; font-weight: 850; }
+.dashboard-permissions label { display: flex; align-items: flex-start; gap: 8px; border-radius: 8px; background: #f8fafc; padding: 9px; cursor: pointer; }
+.dashboard-permissions input { margin-top: 2px; accent-color: #1780ff; }
+.dashboard-permissions span { display: grid; gap: 2px; }
+.dashboard-permissions strong { color: var(--ink); font-size: 11px; }
+.dashboard-permissions small { color: var(--muted); font-size: 9.5px; line-height: 1.35; }
+.dashboard-user-admin form > button { justify-self: start; display: inline-flex; align-items: center; gap: 7px; }
+.dashboard-user-status { border-radius: 8px; padding: 9px 10px; font-size: 11px; font-weight: 750; }
+.dashboard-user-status.success { background: #ecfdf5; color: #047857; }
+.dashboard-user-status.error { background: #fef2f2; color: #b91c1c; }
+.dashboard-user-status.busy { background: #eff6ff; color: #1d4ed8; }
 .integration-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 12px; }
 .integration-status-grid article { border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; padding: 13px; display: grid; gap: 6px; }
 .integration-status-grid strong { color: var(--ink); font-size: 13px; }
@@ -9834,7 +9863,10 @@ button.problem-row.selected {
 .settings-audit-table mark { justify-self: start; border-radius: 999px; background: #eef2ff; color: #0a5fd0; padding: 5px 8px; font-size: 10px; font-weight: 850; }
 
 @media (max-width: 1100px) {
-  .settings-hero, .settings-two-col, .settings-audit-table article { grid-template-columns: minmax(0, 1fr); }
+  .settings-hero, .settings-two-col, .settings-audit-table article, .dashboard-user-admin { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-user-fields, .dashboard-permissions { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-access-banner { flex-wrap: wrap; }
+  .dashboard-access-banner small { width: 100%; padding-left: 40px; }
 }
 
 @media (max-width: 1280px) {
