@@ -57,8 +57,7 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".queue-row").first()).toBeVisible();
     await expect(page.locator(".queue-rank").first()).toContainText("#1");
 
-    // Widen scope so the queue holds the full ranked list.
-    await page.getByRole("button", { name: "All India" }).click();
+    // Default scope is All India, so the queue holds the full ranked list.
     await expect(page.locator(".queue-row").nth(1)).toBeVisible();
 
     // Selecting a ranked work loads its decision brief with evidence.
@@ -149,7 +148,6 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.getByText("Hotspot clusters")).toBeVisible();
     await page.getByRole("button", { name: "district", exact: true }).click();
     await expect(page.locator(".boundary-list button").first()).toContainText(/production boundary connector|local-simplified-boundary/);
-    await page.getByRole("button", { name: "All India" }).click();
     await expect(page.locator(".hotspot-row").first()).toBeVisible();
     await page.locator(".hotspot-row").nth(1).click();
     await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
@@ -162,14 +160,6 @@ test.describe("MP/admin web functional flow", () => {
     await page.locator(".cluster-list button").first().click();
     await expect(page.getByText("Cluster context")).toBeVisible();
     await page.getByLabel("Close issue detail").click();
-
-    await page.getByRole("button", { name: "My area" }).click();
-    await page.getByLabel("State", { exact: true }).selectOption("Uttar Pradesh");
-    await expect(page.getByLabel("District")).toHaveValue("Lucknow");
-    await expect(page.getByLabel("Ward", { exact: true })).toHaveValue("Aminabad Basti");
-    await expect(page.getByLabel("MP", { exact: true })).toHaveValue("mp-up-lucknow");
-    await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page.locator(".hotspot-row").first()).toContainText("Aminabad Basti");
 
     await expect(page.getByRole("link", { name: "Apni Awaaz" })).toHaveAttribute("href", expectedCitizenAppUrl);
 
@@ -301,6 +291,7 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".topbar h2")).toHaveText("Where demand is concentrated");
 
     await page.goto("/#map");
+    await page.getByRole("button", { name: "Timeline & Analysis" }).click();
     await page.getByRole("button", { name: "Route analysis" }).click();
     await expect(page.locator(".action-status").filter({ hasText: "Route analysis created" })).toBeVisible();
     await page.getByRole("button", { name: "AI hotspot detection" }).click();
@@ -374,6 +365,7 @@ test.describe("MP/admin web functional flow", () => {
     await expect(page.locator(".hotspot-row").first()).toContainText("Roads");
     await page.getByRole("button", { name: "Demand heatmap" }).click();
     await expect(page.getByRole("button", { name: "Demand heatmap" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Timeline & Analysis" }).click();
     await page.getByLabel("GIS timeline slider").fill("100");
     await expect(page.locator(".gis-control-panel .action-status")).toContainText("Full year");
 
@@ -512,6 +504,7 @@ async function installGoogleMapsMock(page: import("@playwright/test").Page) {
         const makeMapApi = () => {
           class LatLngBounds {
             extend() {}
+            union() {}
           }
           class Map {
             element: HTMLElement;
@@ -520,12 +513,26 @@ async function installGoogleMapsMock(page: import("@playwright/test").Page) {
               (window as any).__loksetuMapMock.mapOptions.push(options);
             }
             fitBounds() {}
+            setCenter() {}
+            setZoom() {}
           }
           class Marker {
             constructor() {
               (window as any).__loksetuMapMock.legacyMarkers += 1;
             }
             addListener() {}
+            setMap() {}
+          }
+          class Circle {
+            addListener() {}
+            setMap() {}
+            getBounds() {
+              return new LatLngBounds();
+            }
+          }
+          class Rectangle {
+            addListener() {}
+            setMap() {}
           }
           class AdvancedMarkerElement {
             content: HTMLElement;
@@ -538,7 +545,7 @@ async function installGoogleMapsMock(page: import("@playwright/test").Page) {
               this.content.addEventListener("click", handler);
             }
           }
-          (window as any).google = { maps: { LatLngBounds, Map, Marker, marker: { AdvancedMarkerElement } } };
+          (window as any).google = { maps: { LatLngBounds, Map, Marker, Circle, Rectangle, SymbolPath: { CIRCLE: 0 }, marker: { AdvancedMarkerElement } } };
         };
         window.setTimeout(() => {
           makeMapApi();

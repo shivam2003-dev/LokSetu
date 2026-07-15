@@ -2920,7 +2920,42 @@ meter::-moz-meter-bar {
 
 .gis-layer-list {
   display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 6px;
+  margin-top: 10px;
+}
+
+.gis-section-toggle {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gis-section-toggle h4 {
+  margin: 0;
+  flex: 1;
+}
+
+.gis-section-toggle span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.gis-section-toggle svg {
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.gis-section-toggle svg.open {
+  transform: rotate(180deg);
 }
 
 .gis-layer-list label {
@@ -9878,9 +9913,13 @@ button.problem-row.selected {
 .compare-bars b { color: var(--ink); font-family: var(--font-mono); font-size: 11px; text-align: right; }
 .compare-bars.compact i { height: 7px; opacity: 0.8; }
 .trend-mini { display: grid; gap: 8px; }
-.trend-mini svg { width: 100%; height: 70px; overflow: visible; border-bottom: 1px solid var(--line); }
-.trend-mini polyline { fill: none; stroke: #1780ff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.trend-mini text { fill: var(--muted); font-size: 10px; font-weight: 800; }
+.trend-mini svg { width: 100%; height: auto; overflow: visible; }
+.trend-mini polyline { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.trend-mini line.grid { stroke: var(--line); stroke-width: 1; }
+.trend-mini text.tick { fill: var(--muted); font-size: 8.5px; font-weight: 700; font-family: var(--font-mono); }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 10px; }
+.trend-legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 750; color: var(--ink); }
+.trend-legend i { width: 10px; height: 10px; border-radius: 3px; }
 .compare-heatmap { display: grid; grid-template-columns: minmax(110px, 1fr) repeat(6, minmax(54px, 0.6fr)); gap: 6px; align-items: stretch; }
 .compare-heatmap b, .compare-heatmap strong, .compare-heatmap i { border-radius: 7px; padding: 8px; font-size: 11px; }
 .compare-heatmap b { color: var(--muted); background: #f8fafc; text-align: center; }
