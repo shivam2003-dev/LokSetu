@@ -338,6 +338,10 @@ test.describe("MP/admin web functional flow", () => {
     await loginIfNeeded(page);
 
     await page.goto("/#map");
+    const issueTabs = page.getByRole("tablist", { name: "Issue type map tabs" });
+    await expect(issueTabs).toBeVisible();
+    await expect(issueTabs.getByRole("tab", { name: /Roads/ })).toBeVisible();
+    await expect(issueTabs.getByRole("tab", { name: /Health/ })).toBeVisible();
     await page.getByLabel("GIS issue filter").selectOption("Roads");
     await expect(page.locator(".hotspot-row").first()).toContainText("Roads");
     await page.getByRole("button", { name: "Demand heatmap" }).click();
@@ -375,6 +379,9 @@ test.describe("MP/admin web functional flow", () => {
     const fallbackMap = page.getByLabel("India-boundary live tile map");
     await expect(fallbackMap).toHaveAttribute("data-map-boundary", "india");
     await expect(fallbackMap.locator(".hotspot").first()).toBeVisible();
+    await expect(fallbackMap.locator(".hotspot").first()).toContainText(/[🛣️💧🏥🎓🧹⚡📶💼📍]/u);
+    const markerColors = await fallbackMap.locator(".hotspot").evaluateAll((markers) => [...new Set(markers.map((marker) => (marker as HTMLElement).style.getPropertyValue("--issue-color")))].filter(Boolean));
+    expect(markerColors.length).toBeGreaterThan(1);
   });
 
   test("maps key without Map ID uses legacy markers and no marker library", async ({ page }) => {
@@ -418,6 +425,7 @@ test.describe("MP/admin web functional flow", () => {
     await page.goto("/#explore");
     await expect(page.locator(".map-state")).toContainText("Google Maps live");
     await expect(page.locator(".google-hotspot-marker").first()).toBeVisible();
+    await expect(page.locator(".google-hotspot-marker").first()).toContainText(/[🛣️💧🏥🎓🧹⚡📶💼📍]/u);
     await page.locator(".cluster-list button").first().click();
     await expect(page.getByLabel("Selected issue drilldown")).toBeVisible();
     await expect(page.getByText("Cluster context")).toBeVisible();
