@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PptxGenJS from "pptxgenjs";
+import { getDistricts, getStates } from "india-location-kit";
 const apniAwaazLogo = "/images/ApniAwaaz.png";
 import { DemandSignalsPage } from "./DemandSignals";
 import { WebI18nProvider, useT, useWebI18n } from "./i18n.js";
@@ -365,7 +366,15 @@ type RagStatusResponse = {
 };
 
 type Hotspot = DashboardResponse["hotspots"][number];
-type MapHotspot = Hotspot & { projectId: string; confidence: number; batchPosition: number };
+type MapHotspot = Hotspot & {
+  projectId: string;
+  title: string;
+  state: string;
+  district: string;
+  constituency: string;
+  confidence: number;
+  batchPosition: number;
+};
 
 const gisLayers = [
   { label: "Roads", color: "#ef4444", active: true },
@@ -1944,13 +1953,18 @@ function IssueMap({
   const [showGisTools, setShowGisTools] = useState(false);
   const [showMapFilters, setShowMapFilters] = useState(false);
   const [mapSearch, setMapSearch] = useState("");
+  const [showMapSearchResults, setShowMapSearchResults] = useState(false);
   const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const allHotspots = useMemo(() => buildMapHotspots(dashboard).filter(isWithinIndiaBounds), [dashboard]);
+  const mapSearchMatches = useMemo(() => {
+    const search = mapSearch.trim().toLowerCase();
+    if (!search) return [];
+    return allHotspots.filter((hotspot) => mapHotspotMatchesSearch(hotspot, search)).slice(0, 6);
+  }, [allHotspots, mapSearch]);
   const hotspots = useMemo(() => allHotspots.filter((hotspot) => {
     const search = mapSearch.trim().toLowerCase();
-    const searchMatches = !search || [hotspot.ward, hotspot.category, hotspot.projectId]
-      .some((value) => value.toLowerCase().includes(search));
+    const searchMatches = !search || mapHotspotMatchesSearch(hotspot, search);
     const issueMatches = issueFilter === "All issue types" || normalizedIssueFilter(issueFilter) === normalizedIssueFilter(hotspot.category);
     const confidenceMatches =
       confidenceFilter === "All confidence levels"
@@ -1967,6 +1981,16 @@ function IssueMap({
     });
   }, [clusters.clusters, hotspots]);
   const selectedProject = dashboard.projects.find((project) => project.id === selectedProjectId) ?? dashboard.projects[0] ?? fallbackProject;
+
+  function activateMapSearchResult(hotspot: MapHotspot) {
+    selectProject(hotspot.projectId);
+    setMapSearch(hotspot.ward);
+    setIssueFilter("All issue types");
+    setConfidenceFilter("All confidence levels");
+    setTimelineValue(100);
+    setShowMapSearchResults(false);
+    setGisAction(`Showing ${hotspot.constituency} · ${hotspot.ward}, ${hotspot.district}, ${hotspot.state}.`);
+  }
 
   const googleMapRef = useRef<any>(null);
   const mapplsMapRef = useRef<any>(null);
@@ -2300,7 +2324,46 @@ function IssueMap({
             </button>
             <div className="reference-map-search">
               <button className="reference-map-home" onClick={exitMap} title="Back to overview" type="button"><Home size={18} /><span>LokSetu</span></button>
-              <label><Search size={18} /><input aria-label="Search constituency or issue" placeholder="Search constituency, ward or issue…" value={mapSearch} onChange={(event) => setMapSearch(event.currentTarget.value)} /></label>
+              <div className="reference-map-search-field">
+                <label><Search size={18} /><input
+                  aria-autocomplete="list"
+                  aria-controls="map-search-results"
+                  aria-expanded={showMapSearchResults && Boolean(mapSearch.trim())}
+                  aria-label="Search constituency, ward, district, state or issue"
+                  onChange={(event) => {
+                    setMapSearch(event.currentTarget.value);
+                    setShowMapSearchResults(true);
+                  }}
+                  onFocus={() => setShowMapSearchResults(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && mapSearchMatches[0]) {
+                      event.preventDefault();
+                      activateMapSearchResult(mapSearchMatches[0]);
+                    }
+                    if (event.key === "Escape") {
+                      setMapSearch("");
+                      setShowMapSearchResults(false);
+                    }
+                  }}
+                  placeholder="Search constituency, ward or issue…"
+                  role="combobox"
+                  value={mapSearch}
+                /></label>
+                {showMapSearchResults && mapSearch.trim() ? (
+                  <div className="reference-map-search-results" id="map-search-results" role="listbox">
+                    {mapSearchMatches.length ? mapSearchMatches.map((hotspot) => {
+                      const markerStyle = issueMapStyle(hotspot.category);
+                      return (
+                        <button key={hotspot.projectId} onMouseDown={(event) => event.preventDefault()} onClick={() => activateMapSearchResult(hotspot)} role="option" type="button">
+                          <span aria-hidden="true">{markerStyle.emoji}</span>
+                          <span><strong>{hotspot.constituency}</strong><small>{hotspot.ward} · {hotspot.district}, {hotspot.state}</small></span>
+                          <mark>{hotspot.category}</mark>
+                        </button>
+                      );
+                    }) : <p>No matching constituency, ward, district, state, or issue.</p>}
+                  </div>
+                ) : null}
+              </div>
               <button className={showMapFilters ? "active" : ""} aria-expanded={showMapFilters} onClick={() => setShowMapFilters((current) => !current)} type="button"><Target size={17} /> Filter</button>
             </div>
             <div className="reference-map-shortcuts" aria-label="Map shortcuts">
@@ -2768,7 +2831,7 @@ function boundaryOrder(level: BoundaryLevel) {
 
 function buildMapHotspots(dashboard: DashboardResponse): MapHotspot[] {
   const projects = dashboard.projects.length ? dashboard.projects : [fallbackProject];
-  return projects.slice(0, 8).flatMap((project, index) => {
+  return projects.flatMap((project, index) => {
     const location = resolveProjectLocation(project, index, dashboard.hotspots);
     return location ? [{
       ward: project.ward,
@@ -2777,10 +2840,19 @@ function buildMapHotspots(dashboard: DashboardResponse): MapHotspot[] {
       lat: location.lat,
       lng: location.lng,
       projectId: project.id,
+      title: project.title,
+      state: project.state,
+      district: project.district,
+      constituency: project.mpName,
       confidence: project.confidence,
-      batchPosition: Math.min(100, 28 + index * 9)
+      batchPosition: Math.min(100, 28 + index * 3)
     }] : [];
   });
+}
+
+function mapHotspotMatchesSearch(hotspot: MapHotspot, normalizedSearch: string) {
+  return [hotspot.constituency, hotspot.ward, hotspot.district, hotspot.state, hotspot.category, hotspot.title, hotspot.projectId]
+    .some((value) => value.toLowerCase().includes(normalizedSearch));
 }
 
 function normalizedIssueFilter(value: string) {
@@ -5278,53 +5350,20 @@ function buildCompareInsights(regions: CompareRegion[]) {
   ];
 }
 
-const indiaAdminDistricts: Record<string, string[]> = {
-  "Andhra Pradesh": ["Anantapur", "Guntur", "Krishna", "Visakhapatnam", "Vijayawada"],
-  "Arunachal Pradesh": ["East Siang", "Itanagar", "Tawang", "West Kameng"],
-  Assam: ["Dibrugarh", "Guwahati", "Jorhat", "Silchar"],
-  Bihar: ["Patna", "Gaya", "Muzaffarpur", "Bhagalpur", "Darbhanga", "Purnea", "Nalanda"],
-  Chhattisgarh: ["Raipur", "Bilaspur", "Durg", "Korba"],
-  Goa: ["North Goa", "South Goa"],
-  Gujarat: ["Ahmedabad", "Surat", "Vadodara", "Rajkot"],
-  Haryana: ["Gurugram", "Faridabad", "Hisar", "Karnal"],
-  "Himachal Pradesh": ["Shimla", "Kangra", "Mandi", "Solan"],
-  Jharkhand: ["Ranchi", "Dhanbad", "Jamshedpur", "Bokaro"],
-  Karnataka: ["Bengaluru Urban", "Mysuru", "Mangaluru", "Belagavi"],
-  Kerala: ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur"],
-  "Madhya Pradesh": ["Bhopal", "Indore", "Jabalpur", "Gwalior"],
-  Maharashtra: ["Mumbai", "Pune", "Nagpur", "Nashik Rural"],
-  Manipur: ["Imphal East", "Imphal West", "Thoubal"],
-  Meghalaya: ["East Khasi Hills", "West Garo Hills", "Ri Bhoi"],
-  Mizoram: ["Aizawl", "Lunglei", "Champhai"],
-  Nagaland: ["Kohima", "Dimapur", "Mokokchung"],
-  Odisha: ["Bhubaneswar", "Cuttack", "Puri", "Sambalpur"],
-  Punjab: ["Ludhiana", "Amritsar", "Patiala", "Jalandhar", "Bathinda", "Mohali"],
-  Rajasthan: ["Jaipur", "Jodhpur", "Udaipur", "Kota"],
-  Sikkim: ["Gangtok", "Namchi", "Gyalshing"],
-  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli"],
-  Telangana: ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar"],
-  Tripura: ["West Tripura", "Gomati", "Dhalai"],
-  "Uttar Pradesh": ["Lucknow", "Varanasi", "Kanpur Nagar", "Prayagraj", "Gorakhpur"],
-  Uttarakhand: ["Dehradun", "Haridwar", "Nainital", "Udham Singh Nagar"],
-  "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "North 24 Parganas"],
-  Delhi: ["Central Delhi", "East Delhi", "New Delhi", "South Delhi", "North Delhi"],
-  "Jammu and Kashmir": ["Srinagar", "Jammu", "Anantnag", "Baramulla"],
-  Ladakh: ["Leh", "Kargil"],
-  Puducherry: ["Puducherry", "Karaikal", "Mahe", "Yanam"],
-  Chandigarh: ["Chandigarh"],
-  "Andaman and Nicobar Islands": ["South Andaman", "North and Middle Andaman", "Nicobar"],
-  Lakshadweep: ["Lakshadweep"],
-  "Dadra and Nagar Haveli and Daman and Diu": ["Daman", "Diu", "Dadra and Nagar Haveli"]
-};
+const indiaAdminDistricts: Record<string, string[]> = Object.fromEntries(
+  getStates().map((state) => [state.name, getDistricts(state.code).map((district) => district.name).sort()])
+);
+
+function dashboardAdminDistricts(context: ContextResponse) {
+  const merged = Object.fromEntries(Object.entries(indiaAdminDistricts).map(([state, districts]) => [state, [...districts]]));
+  for (const [state, districts] of Object.entries(context.districtsByState)) {
+    merged[state] = [...new Set([...(merged[state] ?? []), ...districts])].sort();
+  }
+  return merged;
+}
 
 function SettingsPage({ clientConfig, ragStatus, demoData, context, session }: { clientConfig: ClientConfig; ragStatus: RagStatusResponse | null; demoData: DemoDataStatus; context: ContextResponse; session: SessionResponse }) {
-  const adminDistricts = useMemo(() => {
-    const merged = { ...indiaAdminDistricts };
-    for (const [state, districts] of Object.entries(context.districtsByState)) {
-      merged[state] = [...new Set([...(merged[state] ?? []), ...districts])].sort();
-    }
-    return merged;
-  }, [context]);
+  const adminDistricts = useMemo(() => dashboardAdminDistricts(context), [context]);
   const [settingsState, setSettingsState] = useState("Punjab");
   const [settingsDistrict, setSettingsDistrict] = useState("Ludhiana");
   const districtOptions = adminDistricts[settingsState] ?? [];
@@ -5513,12 +5552,14 @@ function defaultPermissionsForDashboardRole(role: SessionUser["role"]): Dashboar
 }
 
 function DashboardUserManagement({ context }: { context: ContextResponse }) {
+  const adminDistricts = useMemo(() => dashboardAdminDistricts(context), [context]);
+  const states = useMemo(() => Object.keys(adminDistricts).sort(), [adminDistricts]);
   const [role, setRole] = useState<SessionUser["role"]>("mp");
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [state, setState] = useState(context.states.includes("Delhi") ? "Delhi" : context.states[0] ?? "Delhi");
-  const districts = context.districtsByState[state] ?? [];
+  const [state, setState] = useState(states.includes("Delhi") ? "Delhi" : states[0] ?? "Delhi");
+  const districts = adminDistricts[state] ?? [];
   const [district, setDistrict] = useState(districts.includes("Central Delhi") ? "Central Delhi" : districts[0] ?? "");
   const constituencies = context.mps.filter((mp) => mp.state === state && mp.district === district);
   const [constituencyId, setConstituencyId] = useState(constituencies[0]?.id ?? "");
@@ -5596,7 +5637,7 @@ function DashboardUserManagement({ context }: { context: ContextResponse }) {
           </label>
           <label>State
             <select aria-label="Dashboard user state" value={state} onChange={(event) => setState(event.target.value)}>
-              {context.states.map((item) => <option key={item}>{item}</option>)}
+              {states.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
           <label>District

@@ -10659,14 +10659,63 @@ button.problem-row.selected {
   backdrop-filter: blur(16px);
 }
 
+.reference-map-search-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
 .reference-map-search label {
   display: flex;
-  flex: 1;
   align-items: center;
   gap: 9px;
   min-width: 0;
   color: #aeb7d4;
 }
+
+.reference-map-search-results {
+  position: absolute;
+  top: calc(100% + 16px);
+  right: -2px;
+  left: -2px;
+  z-index: 30;
+  display: grid;
+  max-height: min(380px, 55vh);
+  overflow-y: auto;
+  border: 1px solid rgba(96, 165, 250, 0.46);
+  border-radius: 14px;
+  background: rgba(7, 22, 49, 0.98);
+  padding: 6px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.48);
+}
+
+.reference-map-search-results button {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #f8fafc;
+  padding: 9px;
+  text-align: left;
+}
+
+.reference-map-search-results button:hover,
+.reference-map-search-results button:focus-visible {
+  background: rgba(37, 99, 235, 0.34);
+  outline: 1px solid rgba(96, 165, 250, 0.7);
+}
+
+.reference-map-search-results button > span:first-child { font-size: 20px; text-align: center; }
+.reference-map-search-results button > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
+.reference-map-search-results strong,
+.reference-map-search-results small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reference-map-search-results small { color: #aeb7d4; font-size: 10px; }
+.reference-map-search-results mark { border-radius: 999px; background: rgba(96, 165, 250, 0.18); color: #bfdbfe; padding: 4px 7px; font-size: 9px; font-weight: 800; }
+.reference-map-search-results p { margin: 0; color: #cbd5e1; padding: 12px; font-size: 11px; }
 
 .reference-map-search input {
   min-width: 0;
