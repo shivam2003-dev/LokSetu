@@ -853,6 +853,93 @@ const presentationDelhiDemoVariants = [
   "The MP office needs a presentation-ready evidence cluster for this locality."
 ];
 
+const mapDemoLocations = [
+  { state: "Delhi", district: "Central Delhi", city: "Delhi", lat: 28.6139, lng: 77.2090 },
+  { state: "Maharashtra", district: "Mumbai", city: "Mumbai", lat: 19.0760, lng: 72.8777 },
+  { state: "West Bengal", district: "Kolkata", city: "Kolkata", lat: 22.5726, lng: 88.3639 },
+  { state: "Tamil Nadu", district: "Chennai", city: "Chennai", lat: 13.0827, lng: 80.2707 },
+  { state: "Karnataka", district: "Bengaluru Urban", city: "Bengaluru", lat: 12.9716, lng: 77.5946 },
+  { state: "Telangana", district: "Hyderabad", city: "Hyderabad", lat: 17.3850, lng: 78.4867 },
+  { state: "Gujarat", district: "Ahmedabad", city: "Ahmedabad", lat: 23.0225, lng: 72.5714 },
+  { state: "Maharashtra", district: "Pune", city: "Pune", lat: 18.5204, lng: 73.8567 },
+  { state: "Rajasthan", district: "Jaipur", city: "Jaipur", lat: 26.9124, lng: 75.7873 },
+  { state: "Uttar Pradesh", district: "Lucknow", city: "Lucknow", lat: 26.8467, lng: 80.9462 },
+  { state: "Bihar", district: "Patna", city: "Patna", lat: 25.5941, lng: 85.1376 },
+  { state: "Madhya Pradesh", district: "Bhopal", city: "Bhopal", lat: 23.2599, lng: 77.4126 },
+  { state: "Odisha", district: "Khordha", city: "Bhubaneswar", lat: 20.2961, lng: 85.8245 },
+  { state: "Assam", district: "Kamrup Metropolitan", city: "Guwahati", lat: 26.1445, lng: 91.7362 },
+  { state: "Jammu and Kashmir", district: "Srinagar", city: "Srinagar", lat: 34.0837, lng: 74.7973 },
+  { state: "Chandigarh", district: "Chandigarh", city: "Chandigarh", lat: 30.7333, lng: 76.7794 },
+  { state: "Kerala", district: "Ernakulam", city: "Kochi", lat: 9.9312, lng: 76.2673 },
+  { state: "Jharkhand", district: "Ranchi", city: "Ranchi", lat: 23.3441, lng: 85.3096 },
+  { state: "Chhattisgarh", district: "Raipur", city: "Raipur", lat: 21.2514, lng: 81.6296 },
+  { state: "Uttarakhand", district: "Dehradun", city: "Dehradun", lat: 30.3165, lng: 78.0322 }
+] as const;
+
+const mapDemoCategories = [
+  { category: "Roads", issue: "Potholes and broken road edges are slowing buses and emergency vehicles." },
+  { category: "Water", issue: "Low water pressure and a leaking pipeline are disrupting daily supply." },
+  { category: "Health", issue: "Residents need a nearby clinic counter with evening doctor availability." },
+  { category: "Education", issue: "School classrooms, toilets, and the entrance path need urgent repairs." },
+  { category: "Sanitation", issue: "Garbage pickup and drain cleaning are overdue in the inner lanes." },
+  { category: "Power", issue: "Streetlights and local power infrastructure repeatedly fail after sunset." }
+] as const;
+
+const mapDemoEvidence = [
+  "Residents submitted a location-tagged complaint and requested a ward inspection.",
+  "The same hotspot was raised during a public meeting and by local volunteers.",
+  "Photos and follow-up reports confirm that the problem remains unresolved."
+];
+
+/**
+ * 120 distinct map problems (20 locations x 6 issue categories), each backed by
+ * three submissions so the ranked hotspot clears the default confidence gate.
+ * Coordinates are intentionally spread inside India and slightly offset by
+ * category so demo markers remain individually selectable.
+ */
+export const mapDemoSubmissions: Submission[] = mapDemoLocations.flatMap((location, locationIndex) =>
+  mapDemoCategories.flatMap((problem, categoryIndex) => {
+    const problemNumber = locationIndex * mapDemoCategories.length + categoryIndex + 1;
+    const ward = `${location.city} Demo Zone ${String(categoryIndex + 1).padStart(2, "0")}`;
+    const lat = location.lat + ((categoryIndex % 3) - 1) * 0.11 + ((locationIndex % 3) - 1) * 0.012;
+    const lng = location.lng + (Math.floor(categoryIndex / 3) - 0.5) * 0.16 + ((locationIndex % 2) - 0.5) * 0.016;
+    return mapDemoEvidence.map((evidence, evidenceIndex) => {
+      const serial = (problemNumber - 1) * mapDemoEvidence.length + evidenceIndex + 1;
+      const text = `${problem.issue} ${evidence}`;
+      return {
+        id: `demo-map-${String(serial).padStart(4, "0")}`,
+        userId: `demo-map-user-${String(serial).padStart(4, "0")}`,
+        username: `map-demo-${String(serial).padStart(4, "0")}`,
+        displayName: `India Voice ${800 + serial}`,
+        privacyMode: true,
+        state: location.state,
+        district: location.district,
+        mpId: `mp-demo-${location.city.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        channel: evidenceIndex === 0 ? "photo" : evidenceIndex === 1 ? "whatsapp" : "voice",
+        language: evidenceIndex === 0 ? "English" : "Hindi",
+        detectedLanguage: "English",
+        normalizedText: text,
+        category: problem.category,
+        ward,
+        urgency: 4 + ((problemNumber + evidenceIndex) % 2),
+        rating: 4 + ((locationIndex + evidenceIndex) % 2),
+        citizenScore: 76 + ((serial * 7) % 18),
+        submissionQualityScore: 78 + ((serial * 5) % 17),
+        lat,
+        lng,
+        locationLabel: `${ward}, ${location.district}, ${location.state}`,
+        mediaType: evidenceIndex === 0 ? "image" : evidenceIndex === 2 ? "audio" : "none",
+        text,
+        createdAt: hoursAgo(8 + (serial % 96)),
+        processedAt: hoursAgo(7 + (serial % 96)),
+        processingStatus: "processed",
+        rawIntakeId: `map-demo-${String(serial).padStart(8, "0")}`,
+        batchId: "demo-india-map-120"
+      } satisfies Submission;
+    });
+  })
+);
+
 export const presentationDemoSubmissions: Submission[] = presentationDemoAreas.flatMap((area, areaIndex) =>
   presentationDemoVariants.map((variant, variantIndex) => {
     const serial = areaIndex * presentationDemoVariants.length + variantIndex + 1;
@@ -917,4 +1004,9 @@ export const presentationDelhiDemoSubmissions: Submission[] = presentationDelhiD
   })
 );
 
-export const demoSubmissions: Submission[] = [...seedSubmissions, ...presentationDemoSubmissions, ...presentationDelhiDemoSubmissions];
+export const demoSubmissions: Submission[] = [
+  ...seedSubmissions,
+  ...presentationDemoSubmissions,
+  ...presentationDelhiDemoSubmissions,
+  ...mapDemoSubmissions
+];

@@ -1947,7 +1947,7 @@ function IssueMap({
   const [activeLayers, setActiveLayers] = useState<Record<string, boolean>>(() => Object.fromEntries(gisLayers.map((layer) => [layer.label, layer.active])));
   const [issueFilter, setIssueFilter] = useState("All issue types");
   const [confidenceFilter, setConfidenceFilter] = useState("High confidence");
-  const [timelineValue, setTimelineValue] = useState(72);
+  const [timelineValue, setTimelineValue] = useState(100);
   const [mapOverlay, setMapOverlay] = useState<"hotspots" | "clusters" | "heatmap">("hotspots");
   const [showLayerList, setShowLayerList] = useState(false);
   const [showGisTools, setShowGisTools] = useState(false);
